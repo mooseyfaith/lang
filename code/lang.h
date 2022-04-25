@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tk.h>
+#include "utf8_string.h"
 
 #define ast_node_type_list(macro, ...) \
     macro(none, __VA_ARGS__) \
@@ -14,6 +14,8 @@
     macro(name_reference, __VA_ARGS__) \
     macro(branch, __VA_ARGS__) \
     macro(loop, __VA_ARGS__) \
+    macro(branch_switch, __VA_ARGS__) \
+    macro(branch_switch_case, __VA_ARGS__) \
     macro(function_call, __VA_ARGS__) \
     macro(cast, __VA_ARGS__) \
     macro(field_reference, __VA_ARGS__) \
@@ -132,6 +134,21 @@ struct ast_loop
     ast_node node;
     ast_node *condition;
     ast_node *first_statement;
+};
+
+struct ast_branch_switch_case
+{
+    ast_node node;
+    ast_node *expression;
+    ast_node *first_statement;
+};
+
+struct ast_branch_switch
+{
+    ast_node node;
+    ast_node *expression;
+    ast_branch_switch_case *first_case;
+    ast_node               *first_default_case_statement;
 };
 
 struct ast_function_call
@@ -593,6 +610,40 @@ ast_node * parse_statements(lang_parser *parser)
                 
                 append(&tail_next, &loop->node);
             }
+            else if (token == s("switch"))
+            {
+                new_local_node(branch_switch);
+                branch_switch->expression = lang_call(parse_expression(parser));
+                lang_require(branch_switch->expression, parser->iterator, "expected expression after 'switch'");
+
+                lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch condition");
+                auto case_tail_next = (ast_node **) &branch_switch->first_case;
+
+                while (!try_consume(parser, s("}")))
+                {
+                    ast_node **first_statement = null;
+                    
+                    if (!branch_switch->first_default_case_statement && try_consume(parser, s("?")))
+                    {
+                        first_statement = &branch_switch->first_default_case_statement;
+                    }
+                    else
+                    {
+                        new_local_node(branch_switch_case);
+                        
+                        branch_switch_case->expression = lang_call(parse_expression(parser));
+                        
+                        first_statement = &branch_switch_case->first_statement;
+                        append(&case_tail_next, &branch_switch_case->node);
+                    }
+
+                    lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after case expression");
+                    *first_statement = lang_call(parse_statements(parser));
+                    lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after case statement block");
+                }
+                
+                append(&tail_next, &branch_switch->node);
+            }
             else if (token == s("def"))
             {
                 auto name = skip_name(&parser->iterator);
@@ -789,6 +840,29 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, loop->first_statement);
                 
             enqueue(queue, node, loop->condition);
+        } break;
+        
+        case ast_node_type_branch_switch:
+        {
+            local_node_type(branch_switch, node);
+            
+            if (branch_switch->first_case)
+                enqueue(queue, node, &branch_switch->first_case->node);
+                
+            if (branch_switch->first_default_case_statement)
+                enqueue(queue, node, branch_switch->first_default_case_statement);
+            
+            enqueue(queue, node, branch_switch->expression);
+        } break;
+        
+        case ast_node_type_branch_switch_case:
+        {
+            local_node_type(branch_switch_case, node);
+            
+            if (branch_switch_case->first_statement)
+                enqueue(queue, node, branch_switch_case->first_statement);
+            
+            enqueue(queue, node, branch_switch_case->expression);
         } break;
         
         case ast_node_type_function_call:

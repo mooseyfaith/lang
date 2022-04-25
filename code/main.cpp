@@ -1,10 +1,8 @@
 
 #include <stdio.h>
-#include <tk.h>
-#include <hash_string.h>
-#include <utf8_string.h>
-#include <lang.h>
-#include <lang_c.h>
+
+#include "hash_string.h"
+#include "lang_c.h"
 
 s32 main(s32 argument_count, cstring arguments[])
 {

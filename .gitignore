@@ -1,4 +1,5 @@
 *.exe
 *.pdb
 *.dll
-/build
+*.obj
+/*

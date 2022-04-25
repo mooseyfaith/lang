@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tk.h>
+#include "basic.h"
 
 bool try_skip(string *iterator, string pattern)
 {

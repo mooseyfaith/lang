@@ -1,4 +1,5 @@
 #pragma once
+
 #include "lang.h"
 
 struct lang_c_compile_settings
@@ -79,7 +80,7 @@ void print_scope_open(lang_c_buffer *buffer)
     print_newline(buffer);
 }
 
-void print_scope_close(lang_c_buffer *buffer, bool with_semicolon = false)
+void print_scope_close(lang_c_buffer *buffer, bool with_newline = true)
 {
     assert(buffer->indent);
     
@@ -90,10 +91,8 @@ void print_scope_close(lang_c_buffer *buffer, bool with_semicolon = false)
         
     print(buffer, "}");
     
-    if (with_semicolon)
-        print(buffer, ";");
-    
-    print_newline(buffer);
+    if (with_newline)
+        print_newline(buffer);
 }
 
 bool print_next(ast_node **out_node, ast_queue *queue)
@@ -326,6 +325,43 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 print_scope_close(buffer);
             } break;
             
+             case ast_node_type_branch_switch:
+            {
+                local_node_type(branch_switch, node);
+            
+                print_newline(buffer);
+                
+                print(buffer, "switch (");
+                print_expression(buffer, branch_switch->expression);
+                print(buffer, ")");
+                
+                print_scope_open(buffer);
+                
+                for (auto branch_case = branch_switch->first_case; branch_case; branch_case = (ast_branch_switch_case *) branch_case->node.next_sibling)
+                {
+                    print(buffer, "case ");
+                    print_expression(buffer, branch_case->expression);
+                    print(buffer, ":");
+                    
+                    print_scope_open(buffer);
+                    print_statements(buffer, branch_case->first_statement);
+                    print_scope_close(buffer, false);
+                    print_line(buffer, " break;");
+                    print_newline(buffer);
+                }
+                
+                if (branch_switch->first_default_case_statement)
+                {
+                    print(buffer, "default:");
+                    print_scope_open(buffer);
+                    print_statements(buffer, branch_switch->first_default_case_statement);
+                    print_scope_close(buffer);
+                }
+                    
+                print_scope_close(buffer);
+                print_newline(buffer);
+            } break;
+            
             // skip function
             case ast_node_type_function:
             case ast_node_type_compound_type:
@@ -542,7 +578,8 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
 
                 print_statements(&buffer, compound_type->first_statement);
     
-                print_scope_close(&buffer, true);
+                print_scope_close(&buffer, false);
+                print_line(&buffer, ";");
             }
         }
     }

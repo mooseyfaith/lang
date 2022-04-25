@@ -5,6 +5,24 @@ if x {
 }
 printf("fun %i", x);
 
+switch x
+{
+    ?
+    {
+        printf("default\n");
+    }
+    
+    41
+    {
+        printf("41!\n");
+    }
+    
+    12
+    {
+        printf("no way\n");
+    }
+}
+
 var platform platform_api;
 platform_init(platform ref);
 

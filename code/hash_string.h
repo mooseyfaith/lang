@@ -1,6 +1,6 @@
 #pragma once
 
-#include <tk.h>
+#include "basic.h"
 
 struct string_hash_table
 {

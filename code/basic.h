@@ -239,7 +239,6 @@ platform_fatal_error_location_va_declaration
     u32 byte_count = _scprintf(layout, file, line, function);
     byte_count += _vscprintf(format, va_arguments);
      
-    // TODO: remove malloc
     u8 _text[1024];
     string text = { carray_count(_text),  _text };
     
