@@ -101,31 +101,17 @@ bool print_next(ast_node **out_node, ast_queue *queue)
         return false;
 
     auto node = queue->entries[--queue->count].node;
-    //;
-    //memcpy(queue->entries, queue->entries + 1, queue->count * sizeof(queue->entries[0]));
     
-    #if 0
-    switch (node->type)
+    switch (node->node_type)
     {
-        cases_complete;
-        
-        case ast_node_type_variable:
+        case ast_node_type_file:
         {
-        } break;
-        
-        case ast_node_type_assignment:
-        {
-        } break;
-        
-        case ast_node_type_number:
-        {
-        } break;
-        
-        case ast_node_type_variable_reference:
-        {
+            local_node_type(file, node);
+            
+            if (file->first_statement)
+                enqueue(queue, file->first_statement);
         } break;
     }
-    #endif
     
     *out_node = node;
     
@@ -441,7 +427,7 @@ string write(string *memory, cstring format, ...)
     return result;
 }
 
-void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
+void compile(lang_parser *parser, lang_c_compile_settings settings = {})
 {
     auto file = fopen("test.cpp","w");
 
@@ -476,8 +462,8 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
         {
             u32 bit_count = (8 << i);
             
-            lang_c_base_type_names[lang_c_base_type_u8 + i] = write(&name_buffer, "%.*ss%i", fs(buffer.settings.prefix), bit_count);
-            lang_c_base_type_names[lang_c_base_type_s8 + i] = write(&name_buffer, "%.*su%i", fs(buffer.settings.prefix), bit_count);
+            lang_c_base_type_names[lang_c_base_type_u8 + i] = write(&name_buffer, "%.*su%i", fs(buffer.settings.prefix), bit_count);
+            lang_c_base_type_names[lang_c_base_type_s8 + i] = write(&name_buffer, "%.*ss%i", fs(buffer.settings.prefix), bit_count);
             
             print_line(&buffer, "typedef unsigned __int%i %.*su%i;", bit_count, fs(buffer.settings.prefix), bit_count);
             print_line(&buffer, "typedef   signed __int%i %.*ss%i;", bit_count, fs(buffer.settings.prefix), bit_count);
@@ -490,8 +476,8 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
         lang_c_base_type_names[lang_c_base_type_f64] = write(&name_buffer, "%.*sf64", fs(buffer.settings.prefix));
         
         print_newline(&buffer);
-        print_line(&buffer, "typedef %.*ss64 %.*sssize;", fs(buffer.settings.prefix), fs(buffer.settings.prefix));
         print_line(&buffer, "typedef %.*su64 %.*susize;", fs(buffer.settings.prefix), fs(buffer.settings.prefix));
+        print_line(&buffer, "typedef %.*ss64 %.*sssize;", fs(buffer.settings.prefix), fs(buffer.settings.prefix));
         
         print_newline(&buffer);
         print_line(&buffer, "typedef float  %.*sf32;", fs(buffer.settings.prefix));
@@ -502,12 +488,14 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
         print_line(&buffer, "typedef char * %.*scstring;", fs(buffer.settings.prefix));
     }
     
+    auto root = &parser->first_file->node;
+    
     // forward declare all structs
     {
         print_newline(&buffer);
         
         ast_queue queue = {};
-        enqueue(&queue, first_statement);
+        enqueue(&queue, root);
         
         ast_node *node;
         while (print_next(&node, &queue))
@@ -527,7 +515,7 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
         print_newline(&buffer);
         
         ast_queue queue = {};
-        enqueue(&queue, first_statement);
+        enqueue(&queue, root);
         
         ast_node *node;
         while (print_next(&node, &queue))
@@ -536,7 +524,6 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
             {
                 local_node_type(function, node);
                 
-                print_newline(&buffer);
                 print(&buffer, "void %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
@@ -562,7 +549,7 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
     // declare all structs
     {
         ast_queue queue = {};
-        enqueue(&queue, first_statement);
+        enqueue(&queue, root);
         
         ast_node *node;
         while (print_next(&node, &queue))
@@ -587,7 +574,7 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
     // declare all functions
     {
         ast_queue queue = {};
-        enqueue(&queue, first_statement);
+        enqueue(&queue, root);
         
         ast_node *node;
         while (print_next(&node, &queue))
@@ -630,7 +617,10 @@ void compile(ast_node *first_statement, lang_c_compile_settings settings = {})
 
     print_scope_open(&buffer);
 
-    print_statements(&buffer, first_statement);
+    for (auto file = parser->first_file; file; file = (ast_file *) file->node.next_sibling)
+    {
+        print_statements(&buffer, file->first_statement);
+    }
     
     print_scope_close(&buffer);
     

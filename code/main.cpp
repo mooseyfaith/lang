@@ -22,88 +22,80 @@ s32 main(s32 argument_count, cstring arguments[])
         return -1;
     }
     
-#if 1
-    auto file = fopen(arguments[1], "r");
-
-    string source_name = { strlen(arguments[1]), (u8 *) arguments[1] };
-    string source;
+    lang_parser parser;
+    begin(&parser);
     
-    fseek(file, 0, SEEK_END);
-    source.count = ftell(file);
-    rewind(file);
-
-    source.base = (u8 *) malloc(source.count);
-    fread((char *) source.base, 1, source.count, file);
-
-    fclose(file);
-
-#else
-    string source_name = s("internal");
-    string source = s(R"CODE(
-
-var win32_instance HINSTANCE = GetModuleHandle(NULL) cast(HINSTANCE);
-var window_class_name cstring = "My Window Class";
-
-var window_class WNDCLASSA;
-
-window_class.hInstance     = win32_instance;
-window_class.lpfnWndProc   = DefWindowProc;
-window_class.hbrBackground = COLOR_BACKGROUND cast(HBRUSH);
-window_class.lpszClassName = window_class_name;
-window_class.style         = CS_OWNDC;
-window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
-RegisterClass(window_class ref);
-
-var window_handle HWND = CreateWindow(window_class_name, "test", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, 0, 0, win32_instance, 0);
-var device_context HDC = GetDC(window_handle);
-ShowWindow(window_handle, SW_SHOW);
-
-while true
-{
-}
-
-var x = 12;
-if x {
-    x = 41;
-}
-printf("fun %i", x);
-)CODE");
-
-#endif
-    
-    auto first_statement = parse(source, source_name);
-    
-#if 0
-    if (first_statement)
+    for (u32 i = 1; i < argument_count; i++)
     {
-        ast_queue queue = {};
-        enqueue(&queue, first_statement);
-        
-        ast_node *node;
-        while (next(&node, &queue))
+        auto argument = arguments[i];
+        if (GetFileAttributesA(argument) & FILE_ATTRIBUTE_DIRECTORY)
         {
-            printf("%.*s 0x%p\n", fs(ast_node_type_names[node->node_type]), node);
+            WIN32_FIND_DATAA find_data;
+            
+            char pattern[1024];
+            sprintf_s(pattern, carray_count(pattern), "%s\\*", argument);
+            
+            auto handle = FindFirstFileA(pattern, &find_data);
+            if (handle != INVALID_HANDLE_VALUE)
+            {
+                do
+                {
+                    if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+                        continue;
+                
+                    // HACK:
+                    cstring path = new char[1024];
+                    sprintf_s(path, 1024, "%s\\%s", argument, find_data.cFileName);
+                    
+                    auto file = fopen(path, "r");
+    
+                    string source_name = { strlen(path), (u8 *) path };
+                    string source;
+                    
+                    fseek(file, 0, SEEK_END);
+                    source.count = ftell(file);
+                    rewind(file);
+                
+                    source.base = (u8 *) malloc(source.count);
+                    fread((char *) source.base, 1, source.count, file);
+                
+                    fclose(file);
+                
+                    if (!parse(&parser, source, source_name))
+                        return -1;        
+                }
+                while (FindNextFileA(handle, &find_data));
+        
+                FindClose(handle);
+            }
+        }
+        else
+        {
+            auto path = argument;
+            auto file = fopen(path, "r");
+    
+            string source_name = { strlen(path), (u8 *) path };
+            string source;
+            
+            fseek(file, 0, SEEK_END);
+            source.count = ftell(file);
+            rewind(file);
+        
+            source.base = (u8 *) malloc(source.count);
+            fread((char *) source.base, 1, source.count, file);
+        
+            fclose(file);
+        
+            if (!parse(&parser, source, source_name))
+                return -1;        
         }
     }
-#endif
+    
+    resolve(&parser);
     
     lang_c_compile_settings settings = {};
     //settings.prefix = s("tk_");
-    compile(first_statement, settings);
-    
-    string a = s("foo");
-    string b = s("bar");
-    
-    auto r = get(&table, a);
-    r = get(&table, b);
-    
-    for (u32 i = 0; i < table.count; i++)
-    {
-        if (table.keys[i].count)
-        {
-            printf("%i '%.*s'\n", i, fs(table.keys[i]));
-        }
-    }
+    compile(&parser, settings);
 
     return 0;
 }

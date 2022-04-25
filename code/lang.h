@@ -4,6 +4,11 @@
 
 #define ast_node_type_list(macro, ...) \
     macro(none, __VA_ARGS__) \
+    macro(import, __VA_ARGS__) \
+    macro(module, __VA_ARGS__) \
+    macro(module_reference, __VA_ARGS__) \
+    macro(file, __VA_ARGS__) \
+    macro(file_reference, __VA_ARGS__) \
     macro(variable, __VA_ARGS__) \
     macro(function, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
@@ -52,6 +57,43 @@ struct ast_type
 {
     string name;
     u32 indirection_count;
+};
+
+struct ast_module;
+
+struct ast_import
+{
+    ast_node node;
+    ast_module *module;
+    string name;
+};
+
+struct ast_module_reference
+{
+    ast_node node;
+    ast_module *module;
+};
+
+struct ast_file
+{
+    ast_node node;
+    ast_module *module;
+    ast_node   *first_statement;
+    ast_module_reference *first_module_dependency;
+    string path;
+};
+
+struct ast_file_reference
+{
+    ast_node node;
+    ast_file *file;
+};
+
+struct ast_module
+{
+    ast_node node;
+    ast_file_reference *first_file;
+    string name;
 };
 
 struct ast_variable
@@ -206,6 +248,14 @@ struct lang_parser
     string iterator;
     
     bool error;
+    
+    ast_module *first_module;
+    ast_module **module_tail_next;
+    
+    ast_file   *first_file;
+    ast_file   **file_tail_next;
+    
+    ast_file   *current_file;
 };
 
 bool try_consume(lang_parser *parser, string pattern)
@@ -696,6 +746,107 @@ ast_node * parse_statements(lang_parser *parser)
                     lang_require(false, parser->iterator, "expected function declaration ('func') or structure declaration ('struct') after definition name");
                 }
             }
+            else if (token == s("module"))
+            {
+                lang_require(!parser->current_file->module, parser->iterator, "file allready assigned to a module");
+                auto name = skip_name(&parser->iterator);
+                
+                ast_module *module = null;
+                for (auto it = parser->first_module; it; it = (ast_module *) it->node.next_sibling)
+                {
+                    if (it->name == name)
+                    {
+                        module = it;
+                        break;
+                    }
+                }
+                
+                if (!module)
+                {
+                    module = new_node(module);
+                    module->name = name;
+                    *parser->module_tail_next = module;
+                    parser->module_tail_next = &(ast_module *) module->node.next_sibling;
+                }
+                
+                auto file_tail_next = (ast_node **) &module->first_file;
+                bool found = false;
+                for (auto it = module->first_file; it; it = (ast_file_reference *) it->node.next_sibling)
+                {
+                    if (it->file == parser->current_file)
+                    {
+                        found = true;
+                        break;
+                    }
+                    
+                    file_tail_next = &it->node.next_sibling;
+                }
+                
+                if (!found)
+                {
+                    new_local_node(file_reference);
+                    file_reference->file = parser->current_file;
+                    *file_tail_next = &file_reference->node;
+                }
+                
+                lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
+            }
+            else if (token == s("import"))
+            {
+                auto name = skip_name(&parser->iterator);
+                lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
+                
+                auto file = parser->current_file;
+                
+                ast_module_reference *module_reference = null;
+                auto dependency_tail_next = &file->first_module_dependency;
+                
+                for (auto it = file->first_module_dependency; it; it = (ast_module_reference *) it->node.next_sibling)
+                {
+                    if (it->module->name == name)
+                    {
+                        module_reference = it;
+                        break;
+                    }
+                    
+                    dependency_tail_next = &(ast_module_reference *) it->node.next_sibling;
+                }
+                
+                if (!module_reference)
+                {
+                    ast_module *module = null;
+                    for (auto it = parser->first_module; it; it = (ast_module *) it->node.next_sibling)
+                    {
+                        if (it->name == name)
+                        {
+                            module_reference = new_node(module_reference);
+                            module_reference->module = it;
+                            *dependency_tail_next = module_reference;
+                            break;
+                        }
+                    }
+                    
+                    if (!module_reference)
+                    {
+                        new_local_node(module);
+                        module->name = name;
+                        *parser->module_tail_next = module;
+                        parser->module_tail_next = &(ast_module *) module->node.next_sibling;
+                    
+                        module_reference = new_node(module_reference);
+                        module_reference->module = module;
+                        *dependency_tail_next = module_reference;
+                    }
+                }
+                
+            #if 0
+                new_local_node(import);
+                import->module = module_reference->module;
+                import->name = import->module->name;
+                
+                append(&tail_next, &import->node);
+            #endif
+            }
             else
             {
                 // revert parse
@@ -783,6 +934,14 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_name_reference:
         case ast_node_type_variable:
         {
+        } break;
+        
+        case ast_node_type_file:
+        {
+            local_node_type(file, node);
+            
+            if (file->first_statement)
+                enqueue(queue, node, file->first_statement);
         } break;
         
         case ast_node_type_not:
@@ -954,24 +1113,43 @@ struct ast_list_entry
     ast_node *node;
 };
 
-ast_node * parse(string source, string source_name = s("(internal)"))
+void begin(lang_parser *parser)
 {
-    lang_parser parser = {};
-    parser.source_name = source_name;
-    parser.source = source;
-    parser.iterator = parser.source;
-    
-    skip_white(&parser.iterator);
-    
-    auto first_statement = parse_statements(&parser);
+    *parser = {};
+    parser->module_tail_next = &parser->first_module;
+    parser->file_tail_next   = &parser->first_file;
+}
 
+bool parse(lang_parser *parser, string source, string source_name = s("(internal)"))
+{
+    new_local_node(file);
+    file->path = source_name;
+
+    parser->source_name = source_name;
+    parser->source = source;
+    parser->iterator = parser->source;
+    parser->current_file = file;
+    
+    *parser->file_tail_next = file;
+    parser->file_tail_next = (ast_file **) &file->node.next_sibling;
+    
+    skip_white(&parser->iterator);
+    file->first_statement = parse_statements(parser);
+    
+    return !parser->error;
+}
+
+void resolve(lang_parser *parser)
+{
+    auto root = &parser->first_file->node;
+    
 #if 1
     // print ast
     {
         ast_queue queue = {};
         
-        if (first_statement)
-            enqueue(&queue, first_statement);
+        if (root)
+            enqueue(&queue, root);
         
         ast_queue_entry entry;
         while (next(&entry, &queue))
@@ -989,8 +1167,8 @@ ast_node * parse(string source, string source_name = s("(internal)"))
         
         auto tail_next = &variable_list;
         
-        if (first_statement)
-            enqueue(&queue, first_statement);
+        if (root)
+            enqueue(&queue, root);
         
         ast_queue_entry entry;
         while (next(&entry, &queue))
@@ -1021,8 +1199,8 @@ ast_node * parse(string source, string source_name = s("(internal)"))
         assert(scope_stack_count < carray_count(scope_stack));
         scope_stack[scope_stack_count++] = null;
         
-        if (first_statement)
-            enqueue(&queue, first_statement);
+        if (root)
+            enqueue(&queue, root);
             
         ast_queue_entry entry;
         while (next(&entry, &queue))
@@ -1073,6 +1251,4 @@ ast_node * parse(string source, string source_name = s("(internal)"))
             }
         }
     }
-    
-    return first_statement;
 }
