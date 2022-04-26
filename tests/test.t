@@ -42,9 +42,6 @@ switch x
     }
 }
 
-var platform platform_api;
-platform_init(platform ref);
-
 var window platform_api_window;
 platform_window(platform ref, window ref, "test");
 

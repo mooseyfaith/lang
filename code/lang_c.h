@@ -14,12 +14,17 @@ struct lang_c_buffer
     FILE *file;
     u32 indent;
     bool previous_was_newline;
+    bool previous_was_blank_line;
+    bool previous_was_scope_open;
+    bool previous_was_scope_close;
+    bool pending_newline;
 };
 
 void print_raw_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
 {
     vfprintf(buffer->file, format, va_arguments);
-    buffer->previous_was_newline = false;
+    buffer->previous_was_newline    = false;
+    buffer->previous_was_blank_line = false;
 }
 
 void print_raw(lang_c_buffer *buffer, cstring format, ...)
@@ -32,13 +37,29 @@ void print_raw(lang_c_buffer *buffer, cstring format, ...)
     va_end(va_arguments);
 }
 
+// TODO: make sure newlines are not part of format in regular print
+void print_newline(lang_c_buffer *buffer)
+{
+    print_raw(buffer, "\n");
+    buffer->previous_was_blank_line = buffer->previous_was_newline;
+    buffer->previous_was_newline = true;
+    buffer->pending_newline = false;
+}
+
 void print_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
 {
+    if (buffer->pending_newline)
+        print_newline(buffer);
+
     if (buffer->previous_was_newline && buffer->indent)
         print_raw(buffer, "%*c", buffer->indent * 4 - 1, ' ');
 
     vfprintf(buffer->file, format, va_arguments);
-    buffer->previous_was_newline = false;
+    
+    buffer->previous_was_newline    = false;
+    buffer->previous_was_blank_line = false;
+    buffer->previous_was_scope_open = false;
+    buffer->previous_was_scope_close = false;
 }
 
 void print(lang_c_buffer *buffer, cstring format, ...)
@@ -49,13 +70,6 @@ void print(lang_c_buffer *buffer, cstring format, ...)
     print_va(buffer, format, va_arguments);
     
     va_end(va_arguments);
-}
-
-// TODO: make sure newlines are not part of format in regular print
-void print_newline(lang_c_buffer *buffer)
-{
-    print_raw(buffer, "\n");
-    buffer->previous_was_newline = true;
 }
 
 void print_line(lang_c_buffer *buffer, cstring format, ...)
@@ -78,6 +92,25 @@ void print_scope_open(lang_c_buffer *buffer)
     print(buffer, "{");
     buffer->indent++;
     print_newline(buffer);
+    
+    buffer->previous_was_scope_open = true;
+}
+
+void maybe_print_newline(lang_c_buffer *buffer)
+{
+    if (!buffer->previous_was_newline)
+        print_newline(buffer);
+}
+
+void maybe_print_blank_line(lang_c_buffer *buffer)
+{
+    if (!buffer->previous_was_scope_open && !buffer->previous_was_blank_line)
+        print_newline(buffer);
+}
+
+void pending_newline(lang_c_buffer *buffer)
+{
+    buffer->pending_newline = true;
 }
 
 void print_scope_close(lang_c_buffer *buffer, bool with_newline = true)
@@ -86,13 +119,16 @@ void print_scope_close(lang_c_buffer *buffer, bool with_newline = true)
     
     --buffer->indent;
     
-    if (!buffer->previous_was_newline)
-        print_newline(buffer);
+    maybe_print_newline(buffer);
+    
+    buffer->pending_newline = false;
         
     print(buffer, "}");
     
     if (with_newline)
         print_newline(buffer);
+        
+    buffer->previous_was_scope_close = true;
 }
 
 bool print_next(ast_node **out_node, ast_queue *queue)
@@ -261,18 +297,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
             {
                 local_node_type(comment, node);
                 
-                print_line(buffer, "/*");
-                
                 auto lines = comment->text;
                 while (lines.count)
                 {
                     auto line = skip_until_set(&lines, s("\n\r"));
                     try_skip(&lines, s("\n\r"));
+                    skip_set(&lines, s(" \t"));
                     
-                    print_line(buffer, "%.*s", fs(line));
+                    print_line(buffer, "// %.*s", fs(line));
                 }
-                
-                print_line(buffer, "*/");
             } break;
         
             case ast_node_type_variable:
@@ -297,7 +330,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
             {
                 local_node_type(branch, node);
             
-                print_newline(buffer);
+                maybe_print_blank_line(buffer);
                 
                 print(buffer, "if (");
                 print_expression(buffer, branch->condition);
@@ -318,14 +351,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     print_scope_close(buffer);
                 }
                 
-                print_newline(buffer);
+                pending_newline(buffer);
             } break;
             
             case ast_node_type_loop:
             {
                 local_node_type(loop, node);
             
-                print_newline(buffer);
+                maybe_print_blank_line(buffer);
+                
                 print(buffer, "while (");
                 print_expression(buffer, loop->condition);
                 print(buffer, ")");
@@ -336,13 +370,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     print_statements(buffer, loop->first_statement);
                     
                 print_scope_close(buffer);
+                
+                pending_newline(buffer);
             } break;
             
             case ast_node_type_branch_switch:
             {
                 local_node_type(branch_switch, node);
             
-                print_newline(buffer);
+                maybe_print_blank_line(buffer);
                 
                 print(buffer, "switch (");
                 print_expression(buffer, branch_switch->expression);
@@ -360,7 +396,9 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     print_statements(buffer, branch_case->first_statement);
                     print_scope_close(buffer, false);
                     print_line(buffer, " break;");
-                    print_newline(buffer);
+                    
+                    if (branch_switch->first_default_case_statement || branch_case->node.next_sibling)
+                        print_newline(buffer);
                 }
                 
                 if (branch_switch->first_default_case_statement)
@@ -372,14 +410,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 }
                     
                 print_scope_close(buffer);
-                print_newline(buffer);
+                
+                pending_newline(buffer);
             } break;
             
             case ast_node_type_function_return:
             {
                 local_node_type(function_return, node);
                 
-                print_newline(buffer);
+                maybe_print_blank_line(buffer);
                 
                 if (function_return->first_expression)
                 {
@@ -553,7 +592,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     // forward declare all structs
     {
-        print_newline(&buffer);
+        maybe_print_blank_line(&buffer);
         
         ast_queue queue = {};
         enqueue(&queue, root);
@@ -583,7 +622,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // forward declare all functions
     // TODO: add default values
     {
-        print_newline(&buffer);
+        maybe_print_blank_line(&buffer);
         
         ast_queue queue = {};
         enqueue(&queue, root);
@@ -638,8 +677,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // declare all enums
     // right now we declare them as const values, instead of C enums for maximum expressivenes
     {
-        print_newline(&buffer);
-        
         ast_queue queue = {};
         enqueue(&queue, root);
         
@@ -650,7 +687,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(enumeration, node);
                 
-                print_newline(&buffer);
+                maybe_print_blank_line(&buffer);
                 print(&buffer, "typedef ");
                 print_type(&buffer, enumeration->type);
                 print_line(&buffer, " %.*s;", fs(enumeration->name));
@@ -664,9 +701,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next_sibling)
                 {
-                    print(&buffer, "const ");
-                    print_type(&buffer, enumeration->type);
-                    print(&buffer, " %.*s_%.*s = ", fs(enumeration->name), fs(item->name));
+                    print(&buffer, "const %.*s %.*s_%.*s = ", fs(enumeration->name), fs(enumeration->name), fs(item->name));
                     
                     if (item->expression)
                     {
@@ -706,7 +741,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(compound_type, node);
                 
-                print_newline(&buffer);
+                maybe_print_blank_line(&buffer);
                 print_line(&buffer, "struct %.*s", fs(compound_type->name));
                 
                 print_scope_open(&buffer);
@@ -723,7 +758,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 if (function->first_output && function->first_output->next_sibling)
                 {
                     // TODO: add unique result identifier
-                    print_newline(&buffer);
+                    maybe_print_blank_line(&buffer);
                     print_line(&buffer, "struct %.*s_result", fs(function->name));
                     
                     print_scope_open(&buffer);
@@ -749,7 +784,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(function, node);
                 
-                print_newline(&buffer);
+                maybe_print_blank_line(&buffer);
                 
                 if (function->first_output)
                 {
@@ -797,13 +832,16 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         }
     }
 
-    print_newline(&buffer);
+    maybe_print_blank_line(&buffer);
     print_line(&buffer, "void main(%.*s argument_count, %.*s arguments[])", fs(lang_c_base_type_names[lang_c_base_type_s32]), fs(lang_c_base_type_names[lang_c_base_type_cstring]));
 
     print_scope_open(&buffer);
 
     for (auto file = parser->first_file; file; file = (ast_file *) file->node.next_sibling)
     {
+        maybe_print_blank_line(&buffer);
+        print_line(&buffer, "// file: %.*s", fs(file->path));
+        print_newline(&buffer);
         print_statements(&buffer, file->first_statement);
     }
     

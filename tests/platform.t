@@ -1,5 +1,9 @@
 module platform;
 
+// on program start
+var platform platform_api;
+platform_init(platform ref);
+
 def platform_api struct
 {
     var win32_instance HINSTANCE;
