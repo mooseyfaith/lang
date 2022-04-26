@@ -6,13 +6,13 @@ platform_init(platform ref);
 
 def platform_api struct
 {
-    var win32_instance HINSTANCE;
+    var win32_instance    HINSTANCE;
     var window_class_name cstring;
 }
 
 def platform_api_window struct
 {
-    var handle HWND;
+    var handle         HWND;
     var device_context HDC;
 }
 
@@ -68,12 +68,10 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
 def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param LPARAM) (result LRESULT)
 {
     switch msg
+    case WM_DESTROY
     {
-        WM_DESTROY
-        {
-            PostQuitMessage(0);
-            return 0;
-        }
+        PostQuitMessage(0);
+        return 0;
     }
     
     return DefWindowProc(window, msg, w_param, l_param);

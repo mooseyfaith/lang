@@ -756,31 +756,30 @@ ast_node * parse_statements(lang_parser *parser)
                 branch_switch->expression = lang_require_call(parse_expression(parser));
                 lang_require(branch_switch->expression, parser->iterator, "expected expression after 'switch'");
 
-                lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch condition");
+                //lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch condition");
                 auto case_tail_next = (ast_node **) &branch_switch->first_case;
 
-                while (!try_consume(parser, s("}")))
+                while (try_consume_keyword(parser, s("case")))
                 {
-                    ast_node **first_statement = null;
+                    new_local_node(branch_switch_case);
+                    branch_switch_case->expression = lang_require_call(parse_expression(parser));
+                    lang_require(branch_switch_case->expression, parser->iterator, "expected expression after 'case'");
                     
-                    if (!branch_switch->first_default_case_statement && try_consume(parser, s("?")))
-                    {
-                        first_statement = &branch_switch->first_default_case_statement;
-                    }
-                    else
-                    {
-                        new_local_node(branch_switch_case);
-                        
-                        branch_switch_case->expression = lang_require_call(parse_expression(parser));
-                        
-                        first_statement = &branch_switch_case->first_statement;
-                        append(&case_tail_next, &branch_switch_case->node);
-                    }
+                    append(&case_tail_next, &branch_switch_case->node);
 
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after case expression");
-                    *first_statement = lang_require_call(parse_statements(parser));
-                    lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after case statement block");
+                    branch_switch_case->first_statement = lang_require_call(parse_statements(parser));
+                    lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after case statements");
                 }
+                
+                if (try_consume_keyword(parser, s("else")))
+                {
+                    lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch else");
+                    branch_switch->first_default_case_statement = lang_require_call(parse_statements(parser));
+                    lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after switch else statements");
+                }
+                
+                lang_require(branch_switch->first_case || branch_switch->first_default_case_statement, parser->iterator, "expected 'case' or 'else' after switch expression");
                 
                 append(&tail_next, &branch_switch->node);
             }

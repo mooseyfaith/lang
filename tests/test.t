@@ -25,21 +25,17 @@ if x {
 printf("fun %i\n", x);
 
 switch x
+case 41
 {
-    ?
-    {
-        printf("default\n");
-    }
-    
-    41
-    {
-        printf("41!\n");
-    }
-    
-    12
-    {
-        printf("no way\n");
-    }
+    printf("41!\n");
+}
+case 12
+{
+    printf("no way\n");
+}
+else
+{
+    printf("default\n");
 }
 
 var window platform_api_window;
