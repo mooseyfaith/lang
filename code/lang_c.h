@@ -185,15 +185,13 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
         {
             local_node_type(field_reference, node);
             
-            print(buffer, "(");
-            
             print_expression(buffer, field_reference->expression);
             
             auto type = get_expression_type(field_reference->expression);
             if (type.indirection_count)
-                print(buffer, ")->");
+                print(buffer, "->");
             else
-                print(buffer, ").");
+                print(buffer, ".");
             
             print(buffer, "%.*s", fs(field_reference->field_name));
         } break;
@@ -224,6 +222,17 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print(buffer, "!");
             print_expression(buffer, not->expression);
         } break;
+        
+        case ast_node_type_is:
+        {
+            local_node_type(is, node);
+            
+            print(buffer, "(");
+            print_expression(buffer, is->left);
+            print(buffer, " == ");
+            print_expression(buffer, is->right);
+            print(buffer, ")");
+        } break;
     }
 }
 
@@ -248,6 +257,24 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
     {
         switch (node->node_type)
         {
+            case ast_node_type_comment:
+            {
+                local_node_type(comment, node);
+                
+                print_line(buffer, "/*");
+                
+                auto lines = comment->text;
+                while (lines.count)
+                {
+                    auto line = skip_until_set(&lines, s("\n\r"));
+                    try_skip(&lines, s("\n\r"));
+                    
+                    print_line(buffer, "%.*s", fs(line));
+                }
+                
+                print_line(buffer, "*/");
+            } break;
+        
             case ast_node_type_variable:
             {
                 local_node_type(variable, node);
@@ -311,7 +338,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 print_scope_close(buffer);
             } break;
             
-             case ast_node_type_branch_switch:
+            case ast_node_type_branch_switch:
             {
                 local_node_type(branch_switch, node);
             
@@ -346,6 +373,39 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     
                 print_scope_close(buffer);
                 print_newline(buffer);
+            } break;
+            
+            case ast_node_type_function_return:
+            {
+                local_node_type(function_return, node);
+                
+                print_newline(buffer);
+                
+                if (function_return->first_expression)
+                {
+                    // TODO: specify result type depending on the current function
+                    if (function_return->first_expression->next_sibling)
+                        print(buffer, "return { ");
+                    else
+                        print(buffer, "return ");
+                }
+                else
+                {
+                    print(buffer, "return");
+                }
+                
+                for (auto expression = function_return->first_expression; expression; expression = expression->next_sibling)
+                {
+                    print_expression(buffer, expression);
+                    
+                    if (expression->next_sibling)
+                        print(buffer, ", ");
+                }
+                
+                if (function_return->first_expression && function_return->first_expression->next_sibling)
+                    print(buffer, " }");
+                
+                print(buffer, ";");
             } break;
             
             // skip global declarations
@@ -507,6 +567,16 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 print_line(&buffer, "struct %.*s;", fs(compound_type->name));
             }
+            else if (node->node_type == ast_node_type_function)
+            {
+                local_node_type(function, node);
+                
+                if (function->first_output && function->first_output->next_sibling)
+                {
+                    // TODO: add unique result identifier
+                    print_line(&buffer, "struct %.*s_result;", fs(function->name));
+                }
+            }
         }
     }
 
@@ -525,10 +595,28 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(function, node);
                 
-                print(&buffer, "void %.*s(", fs(function->name));
+                if (function->first_output)
+                {
+                    if (function->first_output->next_sibling)
+                    {
+                        // TODO: add unique result identifier
+                        print(&buffer, "%.*s_result", fs(function->name));
+                    }
+                    else
+                    {
+                        local_node_type(variable, function->first_output);
+                        print_type(&buffer, variable->type);
+                    }
+                }
+                else
+                {
+                    print(&buffer, "void");
+                }
+                
+                print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_argument; argument; argument = argument->next_sibling)
+                for (auto argument = function->first_input; argument; argument = argument->next_sibling)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {
@@ -628,6 +716,24 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print_scope_close(&buffer, false);
                 print_line(&buffer, ";");
             }
+            else if (node->node_type == ast_node_type_function)
+            {
+                local_node_type(function, node);
+                
+                if (function->first_output && function->first_output->next_sibling)
+                {
+                    // TODO: add unique result identifier
+                    print_newline(&buffer);
+                    print_line(&buffer, "struct %.*s_result", fs(function->name));
+                    
+                    print_scope_open(&buffer);
+
+                    print_statements(&buffer, function->first_output);
+    
+                    print_scope_close(&buffer, false);
+                print_line(&buffer, ";");
+                }
+            }
         }
     }
 
@@ -644,10 +750,29 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 local_node_type(function, node);
                 
                 print_newline(&buffer);
-                print(&buffer, "void %.*s(", fs(function->name));
+                
+                if (function->first_output)
+                {
+                    if (function->first_output->next_sibling)
+                    {
+                        // TODO: add unique result identifier
+                        print(&buffer, "%.*s_result", fs(function->name));
+                    }
+                    else
+                    {
+                        local_node_type(variable, function->first_output);
+                        print_type(&buffer, variable->type);
+                    }
+                }
+                else
+                {
+                    print(&buffer, "void");
+                }
+                
+                print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_argument; argument; argument = argument->next_sibling)
+                for (auto argument = function->first_input; argument; argument = argument->next_sibling)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {

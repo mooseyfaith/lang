@@ -4,6 +4,7 @@
 
 #define ast_node_type_list(macro, ...) \
     macro(none, __VA_ARGS__) \
+    macro(comment, __VA_ARGS__) \
     macro(module, __VA_ARGS__) \
     macro(module_reference, __VA_ARGS__) \
     macro(file, __VA_ARGS__) \
@@ -22,12 +23,15 @@
     macro(loop, __VA_ARGS__) \
     macro(branch_switch, __VA_ARGS__) \
     macro(branch_switch_case, __VA_ARGS__) \
+    macro(function_return, __VA_ARGS__) \
     macro(function_call, __VA_ARGS__) \
     macro(cast, __VA_ARGS__) \
     macro(field_reference, __VA_ARGS__) \
     macro(take_reference, __VA_ARGS__) \
     macro(prefix_operator, __VA_ARGS__) \
     macro(not, __VA_ARGS__) \
+    macro(binary_operator, __VA_ARGS__) \
+    macro(is, __VA_ARGS__) \
     
     
 #define menum(entry, prefix) \
@@ -58,6 +62,12 @@ struct ast_type
 {
     string name;
     u32 indirection_count;
+};
+
+struct ast_comment
+{
+    ast_node node;
+    string text;
 };
 
 struct ast_module;
@@ -117,8 +127,9 @@ struct ast_function
     ast_node node;
     ast_type type;
     string name;
-    ast_node *first_argument;
-    ast_node *first_result_value;
+    // list of variables, each possibly followed by an assignment
+    ast_node *first_input;
+    ast_node *first_output;
     ast_node *first_statement;
 };
 
@@ -202,6 +213,12 @@ struct ast_branch_switch
     ast_node               *first_default_case_statement;
 };
 
+struct ast_function_return
+{
+    ast_node node;
+    ast_node *first_expression;
+};
+
 struct ast_function_call
 {
     ast_node node;
@@ -229,6 +246,14 @@ struct ast_prefix_operator
 };
 
 typedef ast_prefix_operator ast_not;
+
+struct ast_binary_operator
+{
+    ast_node node;
+    ast_node *left, *right;
+};
+
+typedef ast_binary_operator ast_is;
 
 #define new_node(node_type) ( (ast_ ## node_type *) init((ast_node *) new ast_ ## node_type, sizeof(ast_ ## node_type), ast_node_type_ ## node_type) )
 #define new_local_node(node_type) ast_ ## node_type *node_type = new_node(node_type)
@@ -455,7 +480,11 @@ ast_type parse_type(lang_parser *parser)
     return result;
 }
 
-ast_node * parse_expression(lang_parser *parser)
+#define parse_expression_declaration ast_node * parse_expression(lang_parser *parser)
+
+parse_expression_declaration;
+
+ast_node * parse_base_expression(lang_parser *parser)
 {
     ast_node *parent = null;
     ast_node **parent_expression = &parent;
@@ -578,6 +607,29 @@ ast_node * parse_expression(lang_parser *parser)
     return parent;
 }
 
+parse_expression_declaration
+{
+    auto left = lang_require_call(parse_base_expression(parser));
+    
+    while (true)
+    {
+        if (try_consume_keyword(parser, s("is")))
+        {
+            new_local_node(is);
+            is->left = left;
+            is->right = lang_require_call(parse_base_expression(parser));
+            lang_require(is->right, parser->iterator, "expected expression after 'is' (equal opeator)");
+            
+            left = &is->node;
+            continue;
+        }
+        
+        break;
+    }
+    
+    return left;
+}
+
 // parses '=' right
 ast_assignment * parse_assignment(lang_parser *parser)
 {
@@ -621,6 +673,25 @@ ast_node * parse_declaration(ast_node ***tail_next, lang_parser *parser)
     return &variable->node;
 }
 
+// assumes '(' was allready parsed
+ast_node * parse_arguments(ast_node **first_argument, lang_parser *parser)
+{
+    assert(*first_argument == null);
+
+    bool is_first_argument = true;
+    while (!try_consume(parser, s(")")))
+    {
+        lang_require(is_first_argument || try_consume(parser, s(";")), parser->iterator, "expected ';' or ')' after function argument");
+        
+        lang_require_call(parse_declaration(&first_argument, parser));
+        
+        is_first_argument = false;
+    }
+    
+    // HACK: because all parse function return a pointer
+    return null;
+}
+
 ast_node * parse_statements(lang_parser *parser)
 {
     ast_node *first_statement = null;
@@ -628,6 +699,16 @@ ast_node * parse_statements(lang_parser *parser)
     
     while (parser->iterator.count)
     {
+        if (try_consume(parser, s("//")))
+        {
+            new_local_node(comment);
+            comment->text = skip_until_set(&parser->iterator, s("\n\r"), true);
+            skip_white(&parser->iterator);
+            
+            append(&tail_next, &comment->node);
+            continue;
+        }
+    
         auto backup = parser->iterator;
 
         auto token = skip_name(&parser->iterator);
@@ -703,6 +784,24 @@ ast_node * parse_statements(lang_parser *parser)
                 
                 append(&tail_next, &branch_switch->node);
             }
+            else if (token == s("return"))
+            {
+                new_local_node(function_return);
+                
+                auto expression_tail_next = &function_return->first_expression;
+                
+                bool is_first = true;
+                while (!try_consume(parser, s(";")))
+                {
+                    lang_require(is_first || try_consume(parser, s(",")), parser->iterator, "expected ',' or ';' after return expression");
+                    is_first = false;
+                    
+                    auto expression = lang_require_call(parse_expression(parser));
+                    append(&expression_tail_next, expression);
+                }
+                
+                append(&tail_next, &function_return->node);
+            }
             else if (token == s("def"))
             {
                 auto name = skip_name(&parser->iterator);
@@ -714,19 +813,10 @@ ast_node * parse_statements(lang_parser *parser)
                     new_local_node(function);
                     function->name = name;
                     
-                    auto arugments_tail_next = &function->first_argument;
+                    parse_arguments(&function->first_input, parser);
                     
-                    {
-                        bool is_first_argument = true;
-                        while (!try_consume(parser, s(")")))
-                        {
-                            lang_require(is_first_argument || try_consume(parser, s(";")), parser->iterator, "expected ';' or ')' after function argument");
-                            
-                            lang_require_call(parse_declaration(&arugments_tail_next, parser));
-                            
-                            is_first_argument = false;
-                        }
-                    }
+                    if (try_consume(parser, s("(")))
+                        parse_arguments(&function->first_output, parser);
                     
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after function declaration");
                     function->first_statement = lang_require_call(parse_statements(parser));
@@ -961,6 +1051,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
     {
         cases_complete;
         
+        case ast_node_type_comment:
         case ast_node_type_number:
         case ast_node_type_string:
         case ast_node_type_variable_reference:
@@ -982,6 +1073,17 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             local_node_type(not, node);
             
             enqueue(queue, node, not->expression);
+        } break;
+        
+        // case ast_node_type_binary_operator:
+        case ast_node_type_is:
+        {
+            // HACK: set type to base type, so we can avoid assert
+            scope_push(node->node_type, ast_node_type_binary_operator);
+            local_node_type(binary_operator, node);
+            
+            enqueue(queue, node, binary_operator->right);
+            enqueue(queue, node, binary_operator->left);
         } break;
         
         case ast_node_type_assignment:
@@ -1014,9 +1116,12 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             
             if (function->first_statement)
                 enqueue(queue, node, function->first_statement);
-                
-            if (function->first_argument)
-                enqueue(queue, node, function->first_argument);
+            
+            if (function->first_output)
+                enqueue(queue, node, function->first_output);
+            
+            if (function->first_input)
+                enqueue(queue, node, function->first_input);
         } break;
         
         case ast_node_type_compound_type:
@@ -1071,6 +1176,14 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, branch_switch_case->first_statement);
             
             enqueue(queue, node, branch_switch_case->expression);
+        } break;
+        
+        case ast_node_type_function_return:
+        {
+            local_node_type(function_return, node);
+            
+            if (function_return->first_expression)
+                enqueue(queue, node, function_return->first_expression);
         } break;
         
         case ast_node_type_function_call:

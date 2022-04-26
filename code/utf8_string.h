@@ -28,30 +28,55 @@ void skip(string *iterator, string pattern)
     assert(ok);
 }
 
+bool contains(string set, u8 code)
+{
+    for (usize i = 0; i < set.count; i++)
+    {
+        if (code == set.base[i])
+            return true;
+    }        
+    
+    return false;
+}
+
 void skip_set(string *iterator, string set)
 {
     usize count = 0;    
     while (count < iterator->count)
     {
         u8 head = iterator->base[count];
-        bool found = false;       
-
-        for (usize i = 0; i < set.count; i++)
-        {
-            if (head == set.base[i])
-            {
-                found = true;
-                break;
-            }
-        }        
-
-        if (!found)
+        
+        if (!contains(set, head))
             break;
 
         count++;
     }
     
     advance(iterator, count);
+}
+
+string skip_until_set(string *iterator, string set, bool do_skip_set = false)
+{
+    usize count = 0;    
+    while (count < iterator->count)
+    {
+        u8 head = iterator->base[count];
+        
+        if (contains(set, head))
+        {
+            string result = skip(iterator, count);
+            
+            if (do_skip_set)
+                skip_set(iterator, set);
+                
+            return result;
+        }
+
+        count++;
+    }
+    
+    // return everything
+    return skip(iterator, count);
 }
 
 void skip_white(string *iterator)

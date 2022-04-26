@@ -50,5 +50,15 @@ platform_window(platform ref, window ref, "test");
 
 while true
 {
-    platform_handle_messages(platform ref);
+    if not platform_handle_messages(platform ref) 
+    {
+        break;
+    }
+}
+
+printf("we are done here!");
+
+def swap func(a s32; b s32) (old_b s32; old_a s32)
+{
+    return b, a;
 }

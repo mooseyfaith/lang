@@ -128,7 +128,7 @@ platform_fatal_error_location_declaration;
 #define require(condition, ...) require_location(condition, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
 
 #define unreachable_codepath  assert(false, "unreachable codepath")
-#define cases_complete        default: unreachable_codepath
+#define cases_complete        default: assert(false, "unhandled case");
 
 #define require_result(expression, result, format) { \
     auto value = (expression); \
