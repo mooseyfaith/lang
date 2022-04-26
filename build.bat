@@ -1,12 +1,18 @@
 @echo off
 
+set name=
+if "%name%"=="" (
+    rem find directory name and use it as exe name
+    for %%I in (.) do set name=%%~nxI
+)
+
 set source=%cd%\code\main.cpp
 set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
 
 if not exist build mkdir build
 pushd build
 
-cl %source% %options% /link /INCREMENTAL:NO
+cl /Fe%name% %source% %options% /link /INCREMENTAL:NO
 
 popd
 

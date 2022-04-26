@@ -4,12 +4,13 @@
 
 #define ast_node_type_list(macro, ...) \
     macro(none, __VA_ARGS__) \
-    macro(import, __VA_ARGS__) \
     macro(module, __VA_ARGS__) \
     macro(module_reference, __VA_ARGS__) \
     macro(file, __VA_ARGS__) \
     macro(file_reference, __VA_ARGS__) \
     macro(variable, __VA_ARGS__) \
+    macro(enumeration, __VA_ARGS__) \
+    macro(enumeration_item, __VA_ARGS__) \
     macro(function, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
     macro(assignment, __VA_ARGS__) \
@@ -61,13 +62,6 @@ struct ast_type
 
 struct ast_module;
 
-struct ast_import
-{
-    ast_node node;
-    ast_module *module;
-    string name;
-};
-
 struct ast_module_reference
 {
     ast_node node;
@@ -101,6 +95,21 @@ struct ast_variable
     ast_node node;
     ast_type type;
     string name;
+};
+
+struct ast_enumeration_item
+{
+    ast_node node;
+    ast_node *expression;
+    string name;
+};
+
+struct ast_enumeration
+{
+    ast_node node;
+    ast_type type;
+    string name;
+    ast_enumeration_item *first_item;
 };
 
 struct ast_function
@@ -356,7 +365,7 @@ void parse_message(lang_parser *parser, string token, cstring format, ...)
 #define lang_abort_return_value(return_value) if (parser->error) return return_value
 #define lang_abort() lang_abort_return_value(null);
 
-#define lang_call(call) call; lang_abort()
+#define lang_require_call(call) call; lang_abort()
 
 ast_number * parse_number(lang_parser *parser)
 {
@@ -469,10 +478,10 @@ ast_node * parse_expression(lang_parser *parser)
         break;
     }
 
-    auto expression = lang_call(&parse_number(parser)->node);
+    auto expression = lang_require_call(&parse_number(parser)->node);
     if (!expression)
     {
-        expression = lang_call(&parse_string_literal(parser)->node);
+        expression = lang_require_call(&parse_string_literal(parser)->node);
     }
     
     if (!expression)
@@ -495,7 +504,7 @@ ast_node * parse_expression(lang_parser *parser)
                 {
                     lang_require(is_first || try_consume(parser, s(",")), parser->iterator, "expected expression after ','");
                     
-                    auto argument = lang_call(parse_expression(parser));
+                    auto argument = lang_require_call(parse_expression(parser));
                     lang_require(argument, parser->iterator, "expected expression or ')' in function call");
                 
                     append(&argument_tail_next, argument);
@@ -536,7 +545,7 @@ ast_node * parse_expression(lang_parser *parser)
             if (keyword == s("cast"))
             {
                 lang_require(try_consume(parser, s("(")), parser->iterator, "expected '(' after 'cast'");
-                auto type = lang_call(parse_type(parser));
+                auto type = lang_require_call(parse_type(parser));
                 lang_require(type.name.count, parser->iterator, "expected type expression for cast");
                 lang_require(try_consume(parser, s(")")), parser->iterator, "expected ')' at the end of cast");
                 
@@ -575,7 +584,7 @@ ast_assignment * parse_assignment(lang_parser *parser)
     if (!try_consume(parser, s("=")))
         return null;
         
-    auto right = lang_call(parse_expression(parser));
+    auto right = lang_require_call(parse_expression(parser));
     lang_require(right, parser->iterator, "expected expression after '=' in assignment");
     
     new_local_node(assignment);
@@ -592,14 +601,14 @@ ast_node * parse_declaration(ast_node ***tail_next, lang_parser *parser)
     
     new_local_node(variable);
     variable->name = name;
-    variable->type = lang_call(parse_type(parser));
+    variable->type = lang_require_call(parse_type(parser));
     
     if (!variable->type.name.count)
         variable->type.name = { s("s32") };
     
     append(tail_next, &variable->node);
     
-    auto assignment = lang_call(parse_assignment(parser));
+    auto assignment = lang_require_call(parse_assignment(parser));
     if (assignment)
     {
         new_local_node(variable_reference);
@@ -626,23 +635,23 @@ ast_node * parse_statements(lang_parser *parser)
         {
             if (token == s("var"))
             {
-                lang_call(parse_declaration(&tail_next, parser));
+                lang_require_call(parse_declaration(&tail_next, parser));
                 lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
             }
             else if (token == s("if"))
             {
                 new_local_node(branch);
-                branch->condition = lang_call(parse_expression(parser));
+                branch->condition = lang_require_call(parse_expression(parser));
                 lang_require(branch->condition, parser->iterator, "expected condition expression after 'if'");
                 
                 lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after branch condition");
-                branch->first_true_statement = lang_call(parse_statements(parser));
+                branch->first_true_statement = lang_require_call(parse_statements(parser));
                 lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after if branch statements");
                 
                 if (try_consume(parser, s("else")))
                 {
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after 'else'");
-                    branch->first_false_statement = lang_call(parse_statements(parser));
+                    branch->first_false_statement = lang_require_call(parse_statements(parser));
                     lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after else branch statements");
                 }
                 
@@ -651,11 +660,11 @@ ast_node * parse_statements(lang_parser *parser)
             else if (token == s("while"))
             {
                 new_local_node(loop);
-                loop->condition = lang_call(parse_expression(parser));
+                loop->condition = lang_require_call(parse_expression(parser));
                 lang_require(loop->condition, parser->iterator, "expected condition expression after 'while'");
                 
                 lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after loop condition");
-                loop->first_statement = lang_call(parse_statements(parser));
+                loop->first_statement = lang_require_call(parse_statements(parser));
                 lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after loop statements");
                 
                 append(&tail_next, &loop->node);
@@ -663,7 +672,7 @@ ast_node * parse_statements(lang_parser *parser)
             else if (token == s("switch"))
             {
                 new_local_node(branch_switch);
-                branch_switch->expression = lang_call(parse_expression(parser));
+                branch_switch->expression = lang_require_call(parse_expression(parser));
                 lang_require(branch_switch->expression, parser->iterator, "expected expression after 'switch'");
 
                 lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch condition");
@@ -681,14 +690,14 @@ ast_node * parse_statements(lang_parser *parser)
                     {
                         new_local_node(branch_switch_case);
                         
-                        branch_switch_case->expression = lang_call(parse_expression(parser));
+                        branch_switch_case->expression = lang_require_call(parse_expression(parser));
                         
                         first_statement = &branch_switch_case->first_statement;
                         append(&case_tail_next, &branch_switch_case->node);
                     }
 
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after case expression");
-                    *first_statement = lang_call(parse_statements(parser));
+                    *first_statement = lang_require_call(parse_statements(parser));
                     lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after case statement block");
                 }
                 
@@ -713,14 +722,14 @@ ast_node * parse_statements(lang_parser *parser)
                         {
                             lang_require(is_first_argument || try_consume(parser, s(";")), parser->iterator, "expected ';' or ')' after function argument");
                             
-                            lang_call(parse_declaration(&arugments_tail_next, parser));
+                            lang_require_call(parse_declaration(&arugments_tail_next, parser));
                             
                             is_first_argument = false;
                         }
                     }
                     
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after function declaration");
-                    function->first_statement = lang_call(parse_statements(parser));
+                    function->first_statement = lang_require_call(parse_statements(parser));
                     lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after function declaration");
                     
                     append(&tail_next, &function->node);
@@ -731,7 +740,7 @@ ast_node * parse_statements(lang_parser *parser)
                     compound_type->name = name;
                     
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after structure declaration");
-                    compound_type->first_statement = lang_call(parse_statements(parser));
+                    compound_type->first_statement = lang_require_call(parse_statements(parser));
                     lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after structure declaration");
                     
                     for (auto statement = compound_type->first_statement; statement; statement = statement->next_sibling)
@@ -741,9 +750,41 @@ ast_node * parse_statements(lang_parser *parser)
                     
                     append(&tail_next, &compound_type->node);
                 }
+                else if (try_consume_keyword(parser, s("enum")))
+                {
+                    new_local_node(enumeration);
+                    enumeration->name = name;
+                    
+                    enumeration->type = parse_type(parser);
+                    if (!enumeration->type.name.count)
+                        enumeration->type = { s("u32") };
+                        
+                    lang_require(enumeration->type.indirection_count == 0, enumeration->type.name, "enumeration can only be of integer number types");
+                    
+                    auto item_tail_next = &(ast_node *) enumeration->first_item;
+                    
+                    lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after enumeration declaration");
+                    
+                    while (!try_consume(parser, s("}")))
+                    {
+                        new_local_node(enumeration_item);
+                        enumeration_item->name = skip_name(&parser->iterator);
+                        
+                        if (try_consume(parser, s("=")))
+                        {
+                            enumeration_item->expression = lang_require_call(parse_expression(parser));
+                        }
+                        
+                        lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of enumeration item");
+                        
+                        append(&item_tail_next, &enumeration_item->node);
+                    }
+                    
+                    append(&tail_next, &enumeration->node);
+                }
                 else
                 {
-                    lang_require(false, parser->iterator, "expected function declaration ('func') or structure declaration ('struct') after definition name");
+                    lang_require(false, parser->iterator, "expected function declaration ('func'), structure declaration ('struct') or enumeration declaration ('enum') after definition name");
                 }
             }
             else if (token == s("module"))
@@ -838,24 +879,16 @@ ast_node * parse_statements(lang_parser *parser)
                         *dependency_tail_next = module_reference;
                     }
                 }
-                
-            #if 0
-                new_local_node(import);
-                import->module = module_reference->module;
-                import->name = import->module->name;
-                
-                append(&tail_next, &import->node);
-            #endif
             }
             else
             {
                 // revert parse
                 parser->iterator = backup;
 
-                auto expression = lang_call(parse_expression(parser));
+                auto expression = lang_require_call(parse_expression(parser));
                 if (expression)
                 {
-                    auto assignment = lang_call(parse_assignment(parser));
+                    auto assignment = lang_require_call(parse_assignment(parser));
                     if (assignment)
                     {
                         assignment->left = expression;
@@ -957,6 +990,22 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             
             enqueue(queue, node, assignment->right);
             enqueue(queue, node, assignment->left);
+        } break;
+        
+        case ast_node_type_enumeration:
+        {
+            local_node_type(enumeration, node);
+            
+            if (enumeration->first_item)
+                enqueue(queue, node, &enumeration->first_item->node);
+        } break;
+        
+        case ast_node_type_enumeration_item:
+        {
+            local_node_type(enumeration_item, node);
+            
+            if (enumeration_item->expression)
+                enqueue(queue, node, enumeration_item->expression);
         } break;
         
         case ast_node_type_function:

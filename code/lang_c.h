@@ -348,7 +348,8 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 print_newline(buffer);
             } break;
             
-            // skip function
+            // skip global declarations
+            case ast_node_type_enumeration:
             case ast_node_type_function:
             case ast_node_type_compound_type:
             break;
@@ -542,6 +543,65 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 }
                 
                 print_line(&buffer, ");", fs(function->name));
+            }
+        }
+    }
+    
+    // declare all enums
+    // right now we declare them as const values, instead of C enums for maximum expressivenes
+    {
+        print_newline(&buffer);
+        
+        ast_queue queue = {};
+        enqueue(&queue, root);
+        
+        ast_node *node;
+        while (print_next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_enumeration)
+            {
+                local_node_type(enumeration, node);
+                
+                print_newline(&buffer);
+                print(&buffer, "typedef ");
+                print_type(&buffer, enumeration->type);
+                print_line(&buffer, " %.*s;", fs(enumeration->name));
+                
+                //print_scope_open(&buffer);
+                
+                bool is_not_first = false;
+                
+                ast_enumeration_item *last_item_with_expression = null;
+                u32 value = 0;
+                
+                for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next_sibling)
+                {
+                    print(&buffer, "const ");
+                    print_type(&buffer, enumeration->type);
+                    print(&buffer, " %.*s_%.*s = ", fs(enumeration->name), fs(item->name));
+                    
+                    if (item->expression)
+                    {
+                        print_expression(&buffer, item->expression);
+                        last_item_with_expression = item;
+                        value = 0;
+                    }
+                    else if (last_item_with_expression)
+                    {
+                        print(&buffer, "%.*s_%.*s + %i", fs(enumeration->name), fs(last_item_with_expression->name), value);
+                    }
+                    else
+                    {
+                        print(&buffer, "%i", value);
+                    }
+                    
+                    value++;
+                    
+                    print_line(&buffer, ";");
+                }
+                
+                //print_scope_close(&buffer, false);
+                //print_line(&buffer, ";");
             }
         }
     }

@@ -1,10 +1,28 @@
 import platform;
 
+def day enum
+{
+    monday;
+    tuesday;
+    wednesday;
+    thursday;
+    friday;
+    saturday;
+    sunday;
+}
+
+def state enum u32
+{
+    one;
+    two = 8;
+    tree;
+}
+
 var x = 12;
 if x {
     x = 41;
 }
-printf("fun %i", x);
+printf("fun %i\n", x);
 
 switch x
 {
