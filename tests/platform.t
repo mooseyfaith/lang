@@ -18,6 +18,8 @@ def platform_api_window struct
 
 def platform_init func(platform platform_api ref)
 {
+    print("foo");
+
     platform.win32_instance = GetModuleHandle(NULL) cast(HINSTANCE);
     platform.window_class_name = "My Window Class";
     
@@ -28,23 +30,21 @@ def platform_init func(platform platform_api ref)
     window_class.lpszClassName = platform.window_class_name;
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
-    if not RegisterClass(window_class ref)
+    platform_require(RegisterClass(window_class ref));
+    
+    def print func(text cstring)
     {
-        printf("GetLastError() = 0x%x\n", GetLastError());
-        return;
+        printf(text);
     }
 }
 
 def platform_window func(platform platform_api ref; window platform_api_window ref; title cstring)
 {
     window.handle = CreateWindow(platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, 0, 0, platform.win32_instance, 0);
-    if not window.handle
-    {
-        printf("GetLastError() = 0x%x\n", GetLastError());
-        return;
-    }
+    platform_require(window.handle is_not INVALID_HANDLE_VALUE);
 
     window.device_context = GetDC(window.handle);
+    platform_require(window.device_context);
     ShowWindow(window.handle, SW_SHOW);
 }
 
@@ -75,4 +75,15 @@ def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param
     }
     
     return DefWindowProc(window, msg, w_param, l_param);
+}
+
+def platform_require func(condition bool; location code_location = get_call_location)
+{
+    if not condition
+    {
+        printf("Requirement Failed:\n");
+        printf("\t%s,%s(%i,%i)\n\n", location.file, location.function, location.line, location.column);
+        printf("\tGetLastError() = 0x%x\n", GetLastError());
+        exit(0);
+    }
 }

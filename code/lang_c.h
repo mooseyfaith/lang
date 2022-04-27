@@ -136,7 +136,7 @@ bool print_next(ast_node **out_node, ast_queue *queue)
     if (!queue->count)
         return false;
 
-    auto node = queue->entries[--queue->count].node;
+    auto node = *queue->entries[--queue->count].node_field;
     
     switch (node->node_type)
     {
@@ -145,7 +145,7 @@ bool print_next(ast_node **out_node, ast_queue *queue)
             local_node_type(file, node);
             
             if (file->first_statement)
-                enqueue(queue, file->first_statement);
+                enqueue(queue, &file->first_statement);
         } break;
     }
     
@@ -186,11 +186,29 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print(buffer, "\"%.*s\"", fs(string->text));
         } break;
         
-        case ast_node_type_variable_reference:
+        /*
+        case ast_node_type_node_reference:
         {
-            local_node_type(variable_reference, node);
-            print(buffer, "%.*s", fs(variable_reference->variable->name));
+            local_node_type(node_reference, node);
+            
+            switch (node_reference->reference->node_type)
+            {
+                cases_complete;
+                
+                case ast_node_type_variable:
+                {
+                    local_node_type(variable, node_reference->reference);
+                    print(buffer, "%.*s", fs(variable->name));
+                } break;
+                
+                case ast_node_type_function:
+                {
+                    local_node_type(function, node_reference->reference);
+                    print(buffer, "%.*s", fs(function->name));
+                } break;
+            }
         } break;
+        */
         
         case ast_node_type_name_reference:
         {
@@ -269,6 +287,17 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print_expression(buffer, is->right);
             print(buffer, ")");
         } break;
+        
+        case ast_node_type_is_not:
+        {
+            local_node_type(is_not, node);
+            
+            print(buffer, "(");
+            print_expression(buffer, is_not->left);
+            print(buffer, " != ");
+            print_expression(buffer, is_not->right);
+            print(buffer, ")");
+        } break;
     }
 }
 
@@ -286,7 +315,7 @@ void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
 void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
 {
     ast_queue queue = {};
-    enqueue(&queue, first_statement);
+    enqueue(&queue, &first_statement);
     
     ast_node *node;
     while (print_next(&node, &queue))
@@ -585,7 +614,13 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         
         print_newline(&buffer);
         print_line(&buffer, "#define %.*snull 0", fs(buffer.settings.prefix));
+        
+        print_newline(&buffer);
         print_line(&buffer, "typedef char * %.*scstring;", fs(buffer.settings.prefix));
+        
+        // HACK: compiler should resolve this call internally an generate proper expressions
+        print_newline(&buffer);
+        print_line(&buffer, "#define get_call_location code_location{ __FILE__, \"\", __FUNCTION__, __LINE__, 0 }");
     }
     
     auto root = &parser->first_file->node;
@@ -595,10 +630,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         maybe_print_blank_line(&buffer);
         
         ast_queue queue = {};
-        enqueue(&queue, root);
+        enqueue(&queue, &root);
         
         ast_node *node;
-        while (print_next(&node, &queue))
+        while (next(&node, &queue))
         {
             if (node->node_type == ast_node_type_compound_type)
             {
@@ -625,10 +660,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         maybe_print_blank_line(&buffer);
         
         ast_queue queue = {};
-        enqueue(&queue, root);
+        enqueue(&queue, &root);
         
         ast_node *node;
-        while (print_next(&node, &queue))
+        while (next(&node, &queue))
         {
             if (node->node_type == ast_node_type_function)
             {
@@ -678,10 +713,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // right now we declare them as const values, instead of C enums for maximum expressivenes
     {
         ast_queue queue = {};
-        enqueue(&queue, root);
+        enqueue(&queue, &root);
         
         ast_node *node;
-        while (print_next(&node, &queue))
+        while (next(&node, &queue))
         {
             if (node->node_type == ast_node_type_enumeration)
             {
@@ -732,10 +767,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // declare all structs
     {
         ast_queue queue = {};
-        enqueue(&queue, root);
+        enqueue(&queue, &root);
         
         ast_node *node;
-        while (print_next(&node, &queue))
+        while (next(&node, &queue))
         {
             if (node->node_type == ast_node_type_compound_type)
             {
@@ -775,10 +810,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // declare all functions
     {
         ast_queue queue = {};
-        enqueue(&queue, root);
+        enqueue(&queue, &root);
         
         ast_node *node;
-        while (print_next(&node, &queue))
+        while (next(&node, &queue))
         {
             if (node->node_type == ast_node_type_function)
             {

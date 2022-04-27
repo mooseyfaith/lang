@@ -1,9 +1,10 @@
 #pragma once
 
 #include "utf8_string.h"
+#include "hash_table.h"
 
 #define ast_node_type_list(macro, ...) \
-    macro(none, __VA_ARGS__) \
+    macro(node, __VA_ARGS__) \
     macro(comment, __VA_ARGS__) \
     macro(module, __VA_ARGS__) \
     macro(module_reference, __VA_ARGS__) \
@@ -17,7 +18,6 @@
     macro(assignment, __VA_ARGS__) \
     macro(number, __VA_ARGS__) \
     macro(string, __VA_ARGS__) \
-    macro(variable_reference, __VA_ARGS__) \
     macro(name_reference, __VA_ARGS__) \
     macro(branch, __VA_ARGS__) \
     macro(loop, __VA_ARGS__) \
@@ -32,6 +32,7 @@
     macro(not, __VA_ARGS__) \
     macro(binary_operator, __VA_ARGS__) \
     macro(is, __VA_ARGS__) \
+    macro(is_not, __VA_ARGS__) \
     
     
 #define menum(entry, prefix) \
@@ -141,18 +142,12 @@ struct ast_compound_type
     ast_node *first_statement;
 };
 
-struct ast_variable_reference
+struct ast_name_reference
 {
     ast_node node;
-    
-    union
-    {
-        string       name;
-        ast_variable *variable;
-    };
+    string   name;
+    ast_node *reference;
 };
-
-typedef ast_variable_reference ast_name_reference;
 
 struct ast_field_reference
 {
@@ -254,6 +249,14 @@ struct ast_binary_operator
 };
 
 typedef ast_binary_operator ast_is;
+typedef ast_binary_operator ast_is_not;
+
+#define menum_ast_type_byte_count(entry, ...) \
+    sizeof(ast_ ## entry),
+
+u32 ast_node_type_byte_counts[] = {
+    ast_node_type_list(menum_ast_type_byte_count)
+};
 
 #define new_node(node_type) ( (ast_ ## node_type *) init((ast_node *) new ast_ ## node_type, sizeof(ast_ ## node_type), ast_node_type_ ## node_type) )
 #define new_local_node(node_type) ast_ ## node_type *node_type = new_node(node_type)
@@ -623,6 +626,16 @@ parse_expression_declaration
             left = &is->node;
             continue;
         }
+        else if (try_consume_keyword(parser, s("is_not")))
+        {
+            new_local_node(is_not);
+            is_not->left = left;
+            is_not->right = lang_require_call(parse_base_expression(parser));
+            lang_require(is_not->right, parser->iterator, "expected expression after 'is_not' (equal opeator)");
+            
+            left = &is_not->node;
+            continue;
+        }
         
         break;
     }
@@ -663,10 +676,11 @@ ast_node * parse_declaration(ast_node ***tail_next, lang_parser *parser)
     auto assignment = lang_require_call(parse_assignment(parser));
     if (assignment)
     {
-        new_local_node(variable_reference);
-        variable_reference->variable = variable;
+        new_local_node(name_reference);
+        name_reference->name      = name;
+        name_reference->reference = &variable->node;
         
-        assignment->left = &variable_reference->node;
+        assignment->left = &name_reference->node;
         append(tail_next, &assignment->node);
     }
     
@@ -1002,7 +1016,7 @@ ast_node * parse_statements(lang_parser *parser)
 struct ast_queue_entry
 {
     ast_node *scope;
-    ast_node *node;
+    ast_node **node_field; // pointer to where the node is stored, so we can also replace it in the parent
 };
 
 struct ast_queue
@@ -1011,27 +1025,27 @@ struct ast_queue
     u32 count;
 };
 
-void enqueue(ast_queue *queue, ast_node *scope, ast_node *node)
+void enqueue(ast_queue *queue, ast_node *scope, ast_node **node)
 {
-    assert(node);
+    assert(node && *node);
     
     usize count = 0;
-    for (auto it = node; it; it = it->next_sibling)
+    for (auto it = *node; it; it = it->next_sibling)
         count++;
 
     assert(queue->count + count <= carray_count(queue->entries));
     queue->count += count;
     
     count = 0;
-    for (auto it = node; it; it = it->next_sibling)
+    for (auto it = node; *it; it = &(*it)->next_sibling)
     {
-        queue->entries[queue->count - 1 - count].scope = scope;
-        queue->entries[queue->count - 1 - count].node  = it;
+        queue->entries[queue->count - 1 - count].scope       = scope;
+        queue->entries[queue->count - 1 - count].node_field  = it;
         count++;
     }
 }
 
-void enqueue(ast_queue *queue, ast_node *node)
+void enqueue(ast_queue *queue, ast_node **node)
 {
     enqueue(queue, null, node);
 }
@@ -1043,7 +1057,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
 
     auto entry = queue->entries[--queue->count];
     auto scope = entry.scope;
-    auto node  = entry.node;
+    auto node  = *entry.node_field;
     //memcpy(queue->entries, queue->entries + 1, queue->count * sizeof(queue->entries[0]));
     
     switch (node->node_type)
@@ -1053,7 +1067,6 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_comment:
         case ast_node_type_number:
         case ast_node_type_string:
-        case ast_node_type_variable_reference:
         case ast_node_type_name_reference:
         case ast_node_type_variable:
         {
@@ -1064,33 +1077,34 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             local_node_type(file, node);
             
             if (file->first_statement)
-                enqueue(queue, node, file->first_statement);
+                enqueue(queue, node, &file->first_statement);
         } break;
         
         case ast_node_type_not:
         {
             local_node_type(not, node);
             
-            enqueue(queue, node, not->expression);
+            enqueue(queue, node, &not->expression);
         } break;
         
         // case ast_node_type_binary_operator:
         case ast_node_type_is:
+        case ast_node_type_is_not:
         {
             // HACK: set type to base type, so we can avoid assert
             scope_push(node->node_type, ast_node_type_binary_operator);
             local_node_type(binary_operator, node);
             
-            enqueue(queue, node, binary_operator->right);
-            enqueue(queue, node, binary_operator->left);
+            enqueue(queue, node, &binary_operator->right);
+            enqueue(queue, node, &binary_operator->left);
         } break;
         
         case ast_node_type_assignment:
         {
             local_node_type(assignment, node);
             
-            enqueue(queue, node, assignment->right);
-            enqueue(queue, node, assignment->left);
+            enqueue(queue, node, &assignment->right);
+            enqueue(queue, node, &assignment->left);
         } break;
         
         case ast_node_type_enumeration:
@@ -1098,7 +1112,274 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             local_node_type(enumeration, node);
             
             if (enumeration->first_item)
-                enqueue(queue, node, &enumeration->first_item->node);
+                enqueue(queue, node, &(ast_node *) enumeration->first_item);
+        } break;
+        
+        case ast_node_type_enumeration_item:
+        {
+            local_node_type(enumeration_item, node);
+            
+            if (enumeration_item->expression)
+                enqueue(queue, node, &enumeration_item->expression);
+        } break;
+        
+        case ast_node_type_function:
+        {
+            local_node_type(function, node);
+            
+            if (function->first_statement)
+                enqueue(queue, node, &function->first_statement);
+            
+            if (function->first_output)
+                enqueue(queue, node, &function->first_output);
+            
+            if (function->first_input)
+                enqueue(queue, node, &function->first_input);
+        } break;
+        
+        case ast_node_type_compound_type:
+        {
+            local_node_type(compound_type, node);
+            
+            if (compound_type->first_statement)
+                enqueue(queue, node, &compound_type->first_statement);
+        } break;
+        
+        case ast_node_type_branch:
+        {
+            local_node_type(branch, node);
+                        
+            if (branch->first_false_statement)
+                enqueue(queue, node, &branch->first_false_statement);
+                
+            if (branch->first_true_statement)
+                enqueue(queue, node, &branch->first_true_statement);
+                
+            enqueue(queue, node, &branch->condition);
+        } break;
+        
+        case ast_node_type_loop:
+        {
+            local_node_type(loop, node);
+            
+            if (loop->first_statement)
+                enqueue(queue, node, &loop->first_statement);
+                
+            enqueue(queue, node, &loop->condition);
+        } break;
+        
+        case ast_node_type_branch_switch:
+        {
+            local_node_type(branch_switch, node);
+            
+            if (branch_switch->first_case)
+                enqueue(queue, node, &(ast_node *) branch_switch->first_case);
+                
+            if (branch_switch->first_default_case_statement)
+                enqueue(queue, node, &branch_switch->first_default_case_statement);
+            
+            enqueue(queue, node, &branch_switch->expression);
+        } break;
+        
+        case ast_node_type_branch_switch_case:
+        {
+            local_node_type(branch_switch_case, node);
+            
+            if (branch_switch_case->first_statement)
+                enqueue(queue, node, &branch_switch_case->first_statement);
+            
+            enqueue(queue, node, &branch_switch_case->expression);
+        } break;
+        
+        case ast_node_type_function_return:
+        {
+            local_node_type(function_return, node);
+            
+            if (function_return->first_expression)
+                enqueue(queue, node, &function_return->first_expression);
+        } break;
+        
+        case ast_node_type_function_call:
+        {
+            local_node_type(function_call, node);
+            
+            if (function_call->first_argument)
+                enqueue(queue, node, &function_call->first_argument);
+                
+            enqueue(queue, node, &function_call->expression);
+        } break;
+        
+        case ast_node_type_cast:
+        {
+            local_node_type(cast, node);
+            
+            enqueue(queue, node, &cast->expression);
+        } break;
+        
+        case ast_node_type_take_reference:
+        {
+            local_node_type(take_reference, node);
+            
+            enqueue(queue, node, &take_reference->expression);
+        } break;
+        
+        case ast_node_type_field_reference:
+        {
+            local_node_type(field_reference, node);
+            
+            enqueue(queue, node, &field_reference->expression);
+        } break;
+    }
+    
+    *out_entry = entry;
+    
+    return true;
+}
+
+bool next(ast_node **out_node, ast_queue *queue)
+{
+    ast_queue_entry out_entry = {};
+    bool ok = next(&out_entry, queue);
+    
+    if (ok)
+        *out_node = *out_entry.node_field;
+    
+    return ok;
+}
+
+ast_node * clone(lang_parser *parser, ast_node *root)
+{
+    ast_node *keys[1024] = {};
+    ast_node *clones[carray_count(keys)];
+    
+    hash_table_pointers table = {};
+    table.count = carray_count(keys);
+    table.keys = (u8 **) keys;
+
+    // clone all nodes and hash node to clone
+    {
+        ast_queue queue = {};
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            u32 byte_count = ast_node_type_byte_counts[node->node_type];
+            
+            u8 *new_node = new u8[byte_count];
+            memcpy(new_node, node, byte_count);
+            
+            u32 slot = get_or_add(&table, (u8 *) node).slot;
+            assert(slot != -1);
+            clones[slot] = (ast_node *)new_node;
+        }
+    }
+    
+    auto cloned_root = (ast_node *) get(&table, (u8 *) root);
+    
+    // replace all cloned nodes
+    {
+        ast_queue queue = {};
+        enqueue(&queue, &cloned_root);
+        
+        ast_queue_entry entry;
+        while (next(&entry, &queue))
+        {
+            auto node_field = entry.node_field;
+            
+            auto cloned_node = (ast_node *) try_get(&table, (u8 *) *node_field);
+            
+            if (cloned_node)
+                *node_field = cloned_node;
+        }
+    }
+    
+    return cloned_root;
+}
+
+#if 0
+ast_node * clone_recursive(ast_node *node)
+{
+    ast_node *result = null;
+
+    switch (node->node_type)
+    {
+        cases_complete;
+        
+        case ast_node_type_comment:
+        case ast_node_type_number:
+        case ast_node_type_string:
+        case ast_node_type_name_reference:
+        case ast_node_type_variable:
+        {
+        } break;
+        
+        case ast_node_type_file:
+        {
+            local_node_type(file, node);
+            
+            auto cloned_node = new ast_file;
+            *cloned_node = *file;
+            
+            if (file->first_statement)
+                cloned_node->first_statement = clone_recursive(file->first_statement);
+            
+            result = &cloned_node->node;
+        } break;
+        
+        case ast_node_type_not:
+        {
+            local_node_type(not, node);
+            
+            auto cloned_node = new ast_not;
+            *cloned_node = *not;
+            
+            cloned_node->expression = clone_recursive(not->expression);
+            
+            result = &cloned_node->node;
+        } break;
+        
+        // case ast_node_type_binary_operator:
+        case ast_node_type_is:
+        case ast_node_type_is_not:
+        {
+            auto cloned_node = new ast_binary_operator;
+            *cloned_node = *(ast_binary_operator *) node;
+            
+            // HACK: set type to base type, so we can avoid assert
+            scope_push(node->node_type, ast_node_type_binary_operator);
+            local_node_type(binary_operator, node);
+            
+            cloned_node->right = clone_recursive(binary_operator->right);
+            cloned_node->left  = clone_recursive(binary_operator->left);
+            
+            result = &cloned_node->node;
+        } break;
+        
+        case ast_node_type_assignment:
+        {
+            local_node_type(assignment, node);
+            
+            auto cloned_node = new ast_assignment;
+            *cloned_node = *assignment;
+            
+            cloned_node->right = clone_recursive(assignment->right);
+            cloned_node->left  = clone_recursive(assignment->left);
+            
+            result = &cloned_node->node;
+        } break;
+        
+        case ast_node_type_enumeration:
+        {
+            local_node_type(enumeration, node);
+            
+            auto cloned_node = new ast_enumeration;
+            *cloned_node = *enumeration;
+            
+            if (enumeration->first_item)
+                cloned_node->first_item = (ast_enumeration_item *) clone_recursive(&enumeration->first_item->node);
+                
+            result = &cloned_node->node;
         } break;
         
         case ast_node_type_enumeration_item:
@@ -1216,20 +1497,12 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             enqueue(queue, node, field_reference->expression);
         } break;
     }
-    
-    *out_entry = entry;
-    
-    return true;
-}
 
-bool next(ast_node **out_node, ast_queue *queue)
-{
-    ast_queue_entry out_entry;
-    bool ok = next(&out_entry, queue);
-    *out_node = out_entry.node;
+    cloned_node->next_sibling = clone_recursive(node->next_sibling);
     
-    return ok;
+    return cloned_node;
 }
+#endif
 
 ast_type get_expression_type(ast_node *node)
 {
@@ -1237,7 +1510,25 @@ ast_type get_expression_type(ast_node *node)
     {
         cases_complete;
         
+        // TEMP
+        case ast_node_type_field_reference:
+        {
+            return {};
+        } break;
+        
+        case ast_node_type_take_reference:
+        {
+            local_node_type(take_reference, node);
+            
+            auto type = get_expression_type(take_reference->expression);
+            type.indirection_count++;
+            
+            return type;
+        } break;
+        
         case ast_node_type_not:
+        case ast_node_type_is:
+        case ast_node_type_is_not:
         {
             return { s("bool") };
         } break;
@@ -1252,15 +1543,38 @@ ast_type get_expression_type(ast_node *node)
             return { s("cstring") };
         } break;
         
-        case ast_node_type_variable_reference:
-        {
-            local_node_type(variable_reference, node);
-            return variable_reference->variable->type;
-        } break;
-        
         case ast_node_type_name_reference:
         {
-            assert(0, "name reference was not resolved");
+            local_node_type(name_reference, node);
+            
+            assert(name_reference->reference, "name reference '%.*s' was not resolved", fs(name_reference->name));
+            
+            switch (name_reference->reference->node_type)
+            {
+                cases_complete;
+                
+                case ast_node_type_variable:
+                {
+                    local_node_type(variable, name_reference->reference);
+                    return variable->type;
+                } break;
+            }
+        } break;
+        
+        case ast_node_type_function_call:
+        {
+            local_node_type(function_call, node);
+            
+            local_node_type(name_reference, function_call->expression);
+            
+            if (!name_reference->reference)
+                return {};
+            
+            local_node_type(function, name_reference->reference);
+            
+            assert(function->first_output && !function->first_output->next_sibling);
+            
+            return get_expression_type(function->first_output);
         } break;
     }
     
@@ -1273,13 +1587,6 @@ struct ast_list_entry
     ast_node *scope;
     ast_node *node;
 };
-
-void begin(lang_parser *parser)
-{
-    *parser = {};
-    parser->module_tail_next = &parser->first_module;
-    parser->file_tail_next   = &parser->first_file;
-}
 
 bool parse(lang_parser *parser, string source, string source_name = s("(internal)"))
 {
@@ -1300,6 +1607,97 @@ bool parse(lang_parser *parser, string source, string source_name = s("(internal
     return !parser->error;
 }
 
+void begin(lang_parser *parser)
+{
+    *parser = {};
+    parser->module_tail_next = &parser->first_module;
+    parser->file_tail_next   = &parser->first_file;
+    
+    string source = s(R"CODE(
+module lang;
+    
+def code_location struct
+{
+    var module   cstring;
+    var file     cstring;
+    var function cstring;
+    var line     u32;
+    var column   u32;
+}
+)CODE");
+
+    lang_require_return_value(parse(parser, source, s("lang_internal")), , source, "internal compiler error");
+}
+
+struct lang_resolver
+{
+    ast_list_entry *variable_list;
+    ast_list_entry *function_list;
+    
+    ast_node *scope_stack[64];
+    u32 scope_stack_count;
+};
+
+ast_node * find_node(lang_resolver *resolver, string name)
+{
+    for (u32 i = 0; i < resolver->scope_stack_count; i++)
+    {
+        auto scope = resolver->scope_stack[resolver->scope_stack_count - 1 - i];
+    
+        for (auto it = resolver->variable_list; it; it = it->next)
+        {
+            local_node_type(variable, it->node);
+            
+            if ((it->scope == scope) && (variable->name == name))
+                return &variable->node;
+        }
+        
+        for (auto it = resolver->function_list; it; it = it->next)
+        {
+            local_node_type(function, it->node);
+            
+            if ((it->scope == scope) && (function->name == name))
+                return &function->node;
+        }
+    }
+    
+    if (resolver->scope_stack_count >= 2)
+    {
+        local_node_type(file, resolver->scope_stack[1]);
+        
+        for (auto module_it = file->first_module_dependency; module_it; module_it = (ast_module_reference *) module_it->node.next_sibling)
+        {
+            auto module = module_it->module;
+            
+            for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next_sibling)
+            {
+                if (file == file_it->file)
+                    continue;
+            
+                auto scope = &file_it->file->node;
+                
+                for (auto it = resolver->variable_list; it; it = it->next)
+                {
+                    local_node_type(variable, it->node);
+                    
+                    if ((it->scope == scope) && (variable->name == name))
+                        return &variable->node;
+                }
+                
+                for (auto it = resolver->function_list; it; it = it->next)
+                {
+                    local_node_type(function, it->node);
+                    
+                    if ((it->scope == scope) && (function->name == name))
+                        return &function->node;
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
 void resolve(lang_parser *parser)
 {
     auto root = &parser->first_file->node;
@@ -1310,71 +1708,81 @@ void resolve(lang_parser *parser)
         ast_queue queue = {};
         
         if (root)
-            enqueue(&queue, root);
+            enqueue(&queue, &root);
         
-        ast_queue_entry entry;
-        while (next(&entry, &queue))
+        ast_node *node;
+        while (next(&node, &queue))
         {
-            printf("%.*s 0x%p\n", fs(ast_node_type_names[entry.node->node_type]), entry.node);
+            printf("%.*s 0x%p\n", fs(ast_node_type_names[node->node_type]), node);
         }
     }
 #endif
     
-    ast_list_entry *variable_list = null;
+    lang_resolver resolver = {};
     
-    // collect variable declarations
+    // collect declarations
     {
         ast_queue queue = {};
         
-        auto tail_next = &variable_list;
+        auto variable_tail_next = &resolver.variable_list;
+        auto function_tail_next = &resolver.function_list;
         
         if (root)
-            enqueue(&queue, root);
+            enqueue(&queue, &root);
         
         ast_queue_entry entry;
         while (next(&entry, &queue))
         {
-            auto node = entry.node;
+            auto node = *entry.node_field;
             
-            if (node->node_type == ast_node_type_variable)
+            switch (node->node_type)
             {
-                auto new_entry = new ast_list_entry;
-                *new_entry = {};
-                new_entry->node  = node;
-                new_entry->scope = entry.scope;
+                case ast_node_type_variable:
+                {
+                    auto new_entry = new ast_list_entry;
+                    *new_entry = {};
+                    new_entry->node  = node;
+                    new_entry->scope = entry.scope;
+                    
+                    *variable_tail_next = new_entry;
+                    variable_tail_next = &new_entry->next;
+                } break;
                 
-                *tail_next = new_entry;
-                tail_next = &new_entry->next;
-                
-                printf("var %.*s\n", fs(((ast_variable *) node)->name));
+                case ast_node_type_function:
+                {
+                    auto new_entry = new ast_list_entry;
+                    *new_entry = {};
+                    new_entry->node  = node;
+                    new_entry->scope = entry.scope;
+                    
+                    *function_tail_next = new_entry;
+                    function_tail_next = &new_entry->next;
+                } break;
             }
         }
     }
     
+    // resolve name references
     {
         ast_queue queue = {};
         
-        ast_node *scope_stack[64];
-        u32 scope_stack_count = 0;
-        
-        assert(scope_stack_count < carray_count(scope_stack));
-        scope_stack[scope_stack_count++] = null;
+        resolver.scope_stack_count = 0;
         
         if (root)
-            enqueue(&queue, root);
+            enqueue(&queue, &root);
             
         ast_queue_entry entry;
         while (next(&entry, &queue))
         {
-            auto node = entry.node;
+            auto node = *entry.node_field;
             
             {
                 bool found = false;
-                for (u32 i = 0; i < scope_stack_count; i++)
+                for (u32 i = 0; i < resolver.scope_stack_count; i++)
                 {
-                    if (scope_stack[i] == entry.scope)
+                    if (resolver.scope_stack[i] == entry.scope)
                     {
-                        scope_stack_count = i + 1;
+                        resolver.scope_stack_count = i + 1;
                         found = true;
                         break;
                     }
@@ -1382,33 +1790,118 @@ void resolve(lang_parser *parser)
                 
                 if (!found)
                 {
-                    assert(scope_stack_count < carray_count(scope_stack));
-                    scope_stack[scope_stack_count++] = entry.scope;
+                    assert(resolver.scope_stack_count < carray_count(resolver.scope_stack));
+                    resolver.scope_stack[resolver.scope_stack_count++] = entry.scope;
                 }
             }
             
-            if (node->node_type == ast_node_type_name_reference)
+            switch (node->node_type)
             {
-                local_node_type(name_reference, node);
-            
-                for (u32 i = 0; i < scope_stack_count; i++)
+                case ast_node_type_name_reference:
                 {
-                    auto scope = scope_stack[scope_stack_count - 1 - i];
+                    local_node_type(name_reference, node);
                 
-                    for (auto it = variable_list; it; it = it->next)
+                    if (!name_reference->reference)
+                        name_reference->reference = find_node(&resolver, name_reference->name);
+                } break;
+            }
+        }
+    }
+    
+    // check function calls
+    {
+        ast_queue queue = {};
+        
+        if (root)
+            enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            
+            switch (node->node_type)
+            {
+                case ast_node_type_function_call:
+                {
+                    local_node_type(function_call, node);
+                    
+                    if (function_call->expression->node_type == ast_node_type_name_reference)
                     {
-                        local_node_type(variable, it->node);
+                        local_node_type(name_reference, function_call->expression);
                         
-                        if ((it->scope == scope) && (variable->name == name_reference->name))
+                        if (!name_reference->reference)
                         {
-                            name_reference->node.node_type =  ast_node_type_variable_reference;
-                            name_reference->variable = variable;
+                            printf("unresolved function name '%.*s'\n", fs(name_reference->name));
+                        }
+                        else
+                        {
+                            local_node_type(function, name_reference->reference);
                             
-                            i = scope_stack_count; // break from outer loop
-                            break;
+                            auto input = function->first_input;
+                            
+                            auto argument_tail_next = &function_call->first_argument;
+                            auto argument = *argument_tail_next;
+                            
+                            while (argument && input)
+                            {
+                                auto argument_type = get_expression_type(argument);
+                                
+                                local_node_type(variable, input);
+                                auto input_type = variable->type;
+                                
+                                if (argument_type.name.count && input->next_sibling && input->next_sibling->node_type == ast_node_type_assignment)
+                                {
+                                    local_node_type(assignment, input->next_sibling);
+                                    
+                                    // skip assignment
+                                    input = input->next_sibling;
+                                    
+                                    // default argument skipped on type missmatch
+                                    if ((argument_type.name != input_type.name) || (argument_type.indirection_count != input_type.indirection_count))
+                                    {
+                                        local_node_type(assignment, input->next_sibling);
+                                        
+                                        auto default_expression = clone(parser, assignment->right);
+                                        
+                                        // add new argument with default value
+                                        default_expression->next_sibling = argument;
+                                        *argument_tail_next = default_expression;
+                                        argument_tail_next = &default_expression->next_sibling;
+                                        // argument stays the same
+                                    
+                                        input = input->next_sibling;
+                                        continue;
+                                    }
+                                }
+                                
+                                argument_tail_next = &argument->next_sibling;
+                                argument = *argument_tail_next;
+                                input = input->next_sibling;
+                            }
+                            
+                            lang_require_return_value(!argument, , function->name, "too many arguments too function '%.*s'", fs(function->name));
+                            
+                            while (input)
+                            {
+                                local_node_type(variable, input);
+                                lang_require_return_value(input->next_sibling && (input->next_sibling->node_type == ast_node_type_assignment), , function->name, "expected argument '%.*' in function '%.*s'", fs(variable->name), fs(function->name));
+                                
+                                local_node_type(assignment, input->next_sibling);
+                                        
+                                auto default_expression = clone(parser, assignment->right);
+                                
+                                *argument_tail_next = default_expression;
+                                argument_tail_next = &default_expression->next_sibling;
+                                // argument stays the same
+                                
+                                // skip assignment
+                                input = input->next_sibling;
+                                
+                                input = input->next_sibling;
+                            }
                         }
                     }
-                }
+                } break;
             }
         }
     }
