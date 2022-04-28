@@ -39,7 +39,7 @@ bool contains(string set, u8 code)
     return false;
 }
 
-void skip_set(string *iterator, string set)
+bool try_skip_set(string *iterator, string set)
 {
     usize count = 0;    
     while (count < iterator->count)
@@ -53,9 +53,18 @@ void skip_set(string *iterator, string set)
     }
     
     advance(iterator, count);
+    
+    return (count > 0);
 }
 
-string skip_until_set(string *iterator, string set, bool do_skip_set = false)
+void skip_set(string *iterator, string set)
+{
+    bool ok = try_skip_set(iterator, set);
+    assert(ok);
+}
+
+
+bool try_skip_until_set(string *result, string *iterator, string set, bool do_skip_set = false)
 {
     usize count = 0;    
     while (count < iterator->count)
@@ -64,24 +73,32 @@ string skip_until_set(string *iterator, string set, bool do_skip_set = false)
         
         if (contains(set, head))
         {
-            string result = skip(iterator, count);
+            *result = skip(iterator, count);
             
             if (do_skip_set)
                 skip_set(iterator, set);
                 
-            return result;
+            return true;
         }
 
         count++;
     }
     
-    // return everything
-    return skip(iterator, count);
+    return false;
+}
+
+string skip_until_set(string *iterator, string set, bool do_skip_set = false)
+{
+    string result;
+    bool ok = try_skip_until_set(&result, iterator, set, do_skip_set);
+    assert(ok);
+    
+    return result;
 }
 
 void skip_white(string *iterator)
 {
-    skip_set(iterator, s(" \t\n\r"));
+    try_skip_set(iterator, s(" \t\n\r"));
 }
 
 bool is_digit(u8 code)
@@ -113,4 +130,13 @@ string skip_name(string *iterator)
     skip_white(iterator);
     
     return result;
+}
+
+bool starts_with(string text, string prefix)
+{
+    if (text.count < prefix.count)
+        return false;
+    
+    text.count = prefix.count;
+    return (text == prefix);
 }

@@ -33,6 +33,7 @@
     macro(binary_operator, __VA_ARGS__) \
     macro(is, __VA_ARGS__) \
     macro(is_not, __VA_ARGS__) \
+    macro(bit_or, __VA_ARGS__) \
     
     
 #define menum(entry, prefix) \
@@ -54,7 +55,7 @@ string ast_node_type_names[] = {
 
 struct ast_node
 {
-    ast_node *next_sibling;
+    ast_node *next;
     ast_node_type node_type;
 };
 
@@ -86,6 +87,7 @@ struct ast_file
     ast_node   *first_statement;
     ast_module_reference *first_module_dependency;
     string path;
+    string text;
 };
 
 struct ast_file_reference
@@ -250,6 +252,7 @@ struct ast_binary_operator
 
 typedef ast_binary_operator ast_is;
 typedef ast_binary_operator ast_is_not;
+typedef ast_binary_operator ast_bit_or;
 
 #define menum_ast_type_byte_count(entry, ...) \
     sizeof(ast_ ## entry),
@@ -272,7 +275,7 @@ ast_node * init(ast_node *node, u32 byte_count, ast_node_type node_type)
 void append(ast_node ***tail_next, ast_node *node)
 {
     **tail_next = node;
-    *tail_next  = &node->next_sibling;
+    *tail_next  = &node->next;
 }
 
 #define local_node_type(type, node) ast_ ## type *type = (ast_ ## type *) (node); assert((node)->node_type == ast_node_type_ ## type)
@@ -328,7 +331,18 @@ bool try_consume_keyword(lang_parser *parser, string keyword)
 
 void parse_message_va(lang_parser *parser, string token, cstring format, va_list va_arguments)
 {
-    string left = parser->source;
+    ast_file *file = null;
+    for (auto it = parser->first_file; it; it = (ast_file *) it->node.next)
+    {
+        if ((it->text.base <= token.base) && (token.base + token.count <= it->text.base + it->text.count))
+        {
+            file = it;
+            break;
+        }
+    }
+    assert(file);
+
+    string left = file->text;
     
     u32 line_count = 0;
     u32 column_count = 0;
@@ -362,10 +376,10 @@ void parse_message_va(lang_parser *parser, string token, cstring format, va_list
     
     line.count = left.base - line.base;
     
-    printf("\n%.*s(%i,%i):  ", fs(parser->source_name), line_count + 1, column_count + 1);
+    printf("\n%.*s(%i,%i):  ", fs(file->path), line_count + 1, column_count + 1);
     vprintf(format, va_arguments);
-    printf("\n%.*s(%i,%i):  %.*s\n", fs(parser->source_name), line_count + 1, column_count + 1, fs(line));
-    printf("%.*s(%i,%i):  %*c\n", fs(parser->source_name), line_count + 1, column_count + 1, column_count, '^');
+    printf("\n%.*s(%i,%i):  %.*s\n", fs(file->path), line_count + 1, column_count + 1, fs(line));
+    printf("%.*s(%i,%i):  %*c\n", fs(file->path), line_count + 1, column_count + 1, column_count, '^');
 }
 
 void parse_message(lang_parser *parser, string token, cstring format, ...)
@@ -636,6 +650,16 @@ parse_expression_declaration
             left = &is_not->node;
             continue;
         }
+        else if (try_consume_keyword(parser, s("bit_or")))
+        {
+            new_local_node(bit_or);
+            bit_or->left = left;
+            bit_or->right = lang_require_call(parse_base_expression(parser));
+            lang_require(bit_or->right, parser->iterator, "expected expression after 'bit_or'");
+            
+            left = &bit_or->node;
+            continue;
+        }
         
         break;
     }
@@ -846,9 +870,9 @@ ast_node * parse_statements(lang_parser *parser)
                     compound_type->first_statement = lang_require_call(parse_statements(parser));
                     lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after structure declaration");
                     
-                    for (auto statement = compound_type->first_statement; statement; statement = statement->next_sibling)
+                    for (auto statement = compound_type->first_statement; statement; statement = statement->next)
                     {
-                        lang_require((statement->node_type == ast_node_type_variable) || (statement->node_type == ast_node_type_assignment), parser->iterator, "unexpected %.*s statement in structure declaration", fs(ast_node_type_names[statement->node_type]));
+                        lang_require((statement->node_type == ast_node_type_variable) || (statement->node_type == ast_node_type_assignment) || (statement->node_type == ast_node_type_comment), parser->iterator, "unexpected %.*s statement in structure declaration", fs(ast_node_type_names[statement->node_type]));
                     }
                     
                     append(&tail_next, &compound_type->node);
@@ -896,7 +920,7 @@ ast_node * parse_statements(lang_parser *parser)
                 auto name = skip_name(&parser->iterator);
                 
                 ast_module *module = null;
-                for (auto it = parser->first_module; it; it = (ast_module *) it->node.next_sibling)
+                for (auto it = parser->first_module; it; it = (ast_module *) it->node.next)
                 {
                     if (it->name == name)
                     {
@@ -910,12 +934,12 @@ ast_node * parse_statements(lang_parser *parser)
                     module = new_node(module);
                     module->name = name;
                     *parser->module_tail_next = module;
-                    parser->module_tail_next = &(ast_module *) module->node.next_sibling;
+                    parser->module_tail_next = &(ast_module *) module->node.next;
                 }
                 
                 auto file_tail_next = (ast_node **) &module->first_file;
                 bool found = false;
-                for (auto it = module->first_file; it; it = (ast_file_reference *) it->node.next_sibling)
+                for (auto it = module->first_file; it; it = (ast_file_reference *) it->node.next)
                 {
                     if (it->file == parser->current_file)
                     {
@@ -923,7 +947,7 @@ ast_node * parse_statements(lang_parser *parser)
                         break;
                     }
                     
-                    file_tail_next = &it->node.next_sibling;
+                    file_tail_next = &it->node.next;
                 }
                 
                 if (!found)
@@ -945,7 +969,7 @@ ast_node * parse_statements(lang_parser *parser)
                 ast_module_reference *module_reference = null;
                 auto dependency_tail_next = &file->first_module_dependency;
                 
-                for (auto it = file->first_module_dependency; it; it = (ast_module_reference *) it->node.next_sibling)
+                for (auto it = file->first_module_dependency; it; it = (ast_module_reference *) it->node.next)
                 {
                     if (it->module->name == name)
                     {
@@ -953,13 +977,13 @@ ast_node * parse_statements(lang_parser *parser)
                         break;
                     }
                     
-                    dependency_tail_next = &(ast_module_reference *) it->node.next_sibling;
+                    dependency_tail_next = &(ast_module_reference *) it->node.next;
                 }
                 
                 if (!module_reference)
                 {
                     ast_module *module = null;
-                    for (auto it = parser->first_module; it; it = (ast_module *) it->node.next_sibling)
+                    for (auto it = parser->first_module; it; it = (ast_module *) it->node.next)
                     {
                         if (it->name == name)
                         {
@@ -975,7 +999,7 @@ ast_node * parse_statements(lang_parser *parser)
                         new_local_node(module);
                         module->name = name;
                         *parser->module_tail_next = module;
-                        parser->module_tail_next = &(ast_module *) module->node.next_sibling;
+                        parser->module_tail_next = &(ast_module *) module->node.next;
                     
                         module_reference = new_node(module_reference);
                         module_reference->module = module;
@@ -1030,14 +1054,14 @@ void enqueue(ast_queue *queue, ast_node *scope, ast_node **node)
     assert(node && *node);
     
     usize count = 0;
-    for (auto it = *node; it; it = it->next_sibling)
+    for (auto it = *node; it; it = it->next)
         count++;
 
     assert(queue->count + count <= carray_count(queue->entries));
     queue->count += count;
     
     count = 0;
-    for (auto it = node; *it; it = &(*it)->next_sibling)
+    for (auto it = node; *it; it = &(*it)->next)
     {
         queue->entries[queue->count - 1 - count].scope       = scope;
         queue->entries[queue->count - 1 - count].node_field  = it;
@@ -1090,6 +1114,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         // case ast_node_type_binary_operator:
         case ast_node_type_is:
         case ast_node_type_is_not:
+        case ast_node_type_bit_or:
         {
             // HACK: set type to base type, so we can avoid assert
             scope_push(node->node_type, ast_node_type_binary_operator);
@@ -1498,13 +1523,13 @@ ast_node * clone_recursive(ast_node *node)
         } break;
     }
 
-    cloned_node->next_sibling = clone_recursive(node->next_sibling);
+    cloned_node->next = clone_recursive(node->next);
     
     return cloned_node;
 }
 #endif
 
-ast_type get_expression_type(ast_node *node)
+ast_type get_expression_type(lang_parser *parser, ast_node *node)
 {
     switch (node->node_type)
     {
@@ -1520,7 +1545,7 @@ ast_type get_expression_type(ast_node *node)
         {
             local_node_type(take_reference, node);
             
-            auto type = get_expression_type(take_reference->expression);
+            auto type = get_expression_type(parser, take_reference->expression);
             type.indirection_count++;
             
             return type;
@@ -1547,7 +1572,7 @@ ast_type get_expression_type(ast_node *node)
         {
             local_node_type(name_reference, node);
             
-            assert(name_reference->reference, "name reference '%.*s' was not resolved", fs(name_reference->name));
+            lang_require_return_value(name_reference->reference, {}, name_reference->name, "name reference '%.*s' was not resolved", fs(name_reference->name));
             
             switch (name_reference->reference->node_type)
             {
@@ -1572,9 +1597,9 @@ ast_type get_expression_type(ast_node *node)
             
             local_node_type(function, name_reference->reference);
             
-            assert(function->first_output && !function->first_output->next_sibling);
+            assert(function->first_output && !function->first_output->next);
             
-            return get_expression_type(function->first_output);
+            return get_expression_type(parser, function->first_output);
         } break;
     }
     
@@ -1592,6 +1617,7 @@ bool parse(lang_parser *parser, string source, string source_name = s("(internal
 {
     new_local_node(file);
     file->path = source_name;
+    file->text = source;
 
     parser->source_name = source_name;
     parser->source = source;
@@ -1599,7 +1625,7 @@ bool parse(lang_parser *parser, string source, string source_name = s("(internal
     parser->current_file = file;
     
     *parser->file_tail_next = file;
-    parser->file_tail_next = (ast_file **) &file->node.next_sibling;
+    parser->file_tail_next = (ast_file **) &file->node.next;
     
     skip_white(&parser->iterator);
     file->first_statement = parse_statements(parser);
@@ -1665,11 +1691,11 @@ ast_node * find_node(lang_resolver *resolver, string name)
     {
         local_node_type(file, resolver->scope_stack[1]);
         
-        for (auto module_it = file->first_module_dependency; module_it; module_it = (ast_module_reference *) module_it->node.next_sibling)
+        for (auto module_it = file->first_module_dependency; module_it; module_it = (ast_module_reference *) module_it->node.next)
         {
             auto module = module_it->module;
             
-            for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next_sibling)
+            for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next)
             {
                 if (file == file_it->file)
                     continue;
@@ -1844,39 +1870,39 @@ void resolve(lang_parser *parser)
                             
                             while (argument && input)
                             {
-                                auto argument_type = get_expression_type(argument);
+                                auto argument_type = get_expression_type(parser, argument);
                                 
                                 local_node_type(variable, input);
                                 auto input_type = variable->type;
                                 
-                                if (argument_type.name.count && input->next_sibling && input->next_sibling->node_type == ast_node_type_assignment)
+                                if (argument_type.name.count && input->next && input->next->node_type == ast_node_type_assignment)
                                 {
-                                    local_node_type(assignment, input->next_sibling);
+                                    local_node_type(assignment, input->next);
                                     
                                     // skip assignment
-                                    input = input->next_sibling;
+                                    input = input->next;
                                     
                                     // default argument skipped on type missmatch
                                     if ((argument_type.name != input_type.name) || (argument_type.indirection_count != input_type.indirection_count))
                                     {
-                                        local_node_type(assignment, input->next_sibling);
+                                        local_node_type(assignment, input->next);
                                         
                                         auto default_expression = clone(parser, assignment->right);
                                         
                                         // add new argument with default value
-                                        default_expression->next_sibling = argument;
+                                        default_expression->next = argument;
                                         *argument_tail_next = default_expression;
-                                        argument_tail_next = &default_expression->next_sibling;
+                                        argument_tail_next = &default_expression->next;
                                         // argument stays the same
                                     
-                                        input = input->next_sibling;
+                                        input = input->next;
                                         continue;
                                     }
                                 }
                                 
-                                argument_tail_next = &argument->next_sibling;
+                                argument_tail_next = &argument->next;
                                 argument = *argument_tail_next;
-                                input = input->next_sibling;
+                                input = input->next;
                             }
                             
                             lang_require_return_value(!argument, , function->name, "too many arguments too function '%.*s'", fs(function->name));
@@ -1884,20 +1910,20 @@ void resolve(lang_parser *parser)
                             while (input)
                             {
                                 local_node_type(variable, input);
-                                lang_require_return_value(input->next_sibling && (input->next_sibling->node_type == ast_node_type_assignment), , function->name, "expected argument '%.*' in function '%.*s'", fs(variable->name), fs(function->name));
+                                lang_require_return_value(input->next && (input->next->node_type == ast_node_type_assignment), , function->name, "expected argument '%.*' in function '%.*s'", fs(variable->name), fs(function->name));
                                 
-                                local_node_type(assignment, input->next_sibling);
+                                local_node_type(assignment, input->next);
                                         
                                 auto default_expression = clone(parser, assignment->right);
                                 
                                 *argument_tail_next = default_expression;
-                                argument_tail_next = &default_expression->next_sibling;
+                                argument_tail_next = &default_expression->next;
                                 // argument stays the same
                                 
                                 // skip assignment
-                                input = input->next_sibling;
+                                input = input->next;
                                 
-                                input = input->next_sibling;
+                                input = input->next;
                             }
                         }
                     }

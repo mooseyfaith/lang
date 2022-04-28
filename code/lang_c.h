@@ -10,6 +10,7 @@ struct lang_c_compile_settings
 
 struct lang_c_buffer
 {
+    lang_parser *parser;
     lang_c_compile_settings settings;
     FILE *file;
     u32 indent;
@@ -224,7 +225,7 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print(buffer, "(");
             
             bool is_not_first = false;
-            for (auto argument = function_call->first_argument; argument; argument = argument->next_sibling)
+            for (auto argument = function_call->first_argument; argument; argument = argument->next)
             {
                 if (is_not_first)
                     print(buffer, ", ");
@@ -241,7 +242,7 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             
             print_expression(buffer, field_reference->expression);
             
-            auto type = get_expression_type(field_reference->expression);
+            auto type = get_expression_type(buffer->parser, field_reference->expression);
             if (type.indirection_count)
                 print(buffer, "->");
             else
@@ -296,6 +297,17 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print_expression(buffer, is_not->left);
             print(buffer, " != ");
             print_expression(buffer, is_not->right);
+            print(buffer, ")");
+        } break;
+        
+        case ast_node_type_bit_or:
+        {
+            local_node_type(bit_or, node);
+            
+            print(buffer, "(");
+            print_expression(buffer, bit_or->left);
+            print(buffer, " | ");
+            print_expression(buffer, bit_or->right);
             print(buffer, ")");
         } break;
     }
@@ -415,7 +427,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 
                 print_scope_open(buffer);
                 
-                for (auto branch_case = branch_switch->first_case; branch_case; branch_case = (ast_branch_switch_case *) branch_case->node.next_sibling)
+                for (auto branch_case = branch_switch->first_case; branch_case; branch_case = (ast_branch_switch_case *) branch_case->node.next)
                 {
                     print(buffer, "case ");
                     print_expression(buffer, branch_case->expression);
@@ -426,7 +438,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     print_scope_close(buffer, false);
                     print_line(buffer, " break;");
                     
-                    if (branch_switch->first_default_case_statement || branch_case->node.next_sibling)
+                    if (branch_switch->first_default_case_statement || branch_case->node.next)
                         print_newline(buffer);
                 }
                 
@@ -452,7 +464,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 if (function_return->first_expression)
                 {
                     // TODO: specify result type depending on the current function
-                    if (function_return->first_expression->next_sibling)
+                    if (function_return->first_expression->next)
                         print(buffer, "return { ");
                     else
                         print(buffer, "return ");
@@ -462,15 +474,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                     print(buffer, "return");
                 }
                 
-                for (auto expression = function_return->first_expression; expression; expression = expression->next_sibling)
+                for (auto expression = function_return->first_expression; expression; expression = expression->next)
                 {
                     print_expression(buffer, expression);
                     
-                    if (expression->next_sibling)
+                    if (expression->next)
                         print(buffer, ", ");
                 }
                 
-                if (function_return->first_expression && function_return->first_expression->next_sibling)
+                if (function_return->first_expression && function_return->first_expression->next)
                     print(buffer, " }");
                 
                 print(buffer, ";");
@@ -563,6 +575,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     lang_c_buffer buffer = {};
     buffer.file = file;
     buffer.settings = settings;
+    buffer.parser = parser;
 
     if (!buffer.settings.use_default_types)
     {
@@ -620,7 +633,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         
         // HACK: compiler should resolve this call internally an generate proper expressions
         print_newline(&buffer);
-        print_line(&buffer, "#define get_call_location code_location{ __FILE__, \"\", __FUNCTION__, __LINE__, 0 }");
+        print_line(&buffer, "#define get_call_location code_location{ \"\", __FILE__, __FUNCTION__, __LINE__, 0 }");
     }
     
     auto root = &parser->first_file->node;
@@ -645,7 +658,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(function, node);
                 
-                if (function->first_output && function->first_output->next_sibling)
+                if (function->first_output && function->first_output->next)
                 {
                     // TODO: add unique result identifier
                     print_line(&buffer, "struct %.*s_result;", fs(function->name));
@@ -671,7 +684,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 if (function->first_output)
                 {
-                    if (function->first_output->next_sibling)
+                    if (function->first_output->next)
                     {
                         // TODO: add unique result identifier
                         print(&buffer, "%.*s_result", fs(function->name));
@@ -690,7 +703,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_input; argument; argument = argument->next_sibling)
+                for (auto argument = function->first_input; argument; argument = argument->next)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {
@@ -734,7 +747,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 ast_enumeration_item *last_item_with_expression = null;
                 u32 value = 0;
                 
-                for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next_sibling)
+                for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next)
                 {
                     print(&buffer, "const %.*s %.*s_%.*s = ", fs(enumeration->name), fs(enumeration->name), fs(item->name));
                     
@@ -790,7 +803,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(function, node);
                 
-                if (function->first_output && function->first_output->next_sibling)
+                if (function->first_output && function->first_output->next)
                 {
                     // TODO: add unique result identifier
                     maybe_print_blank_line(&buffer);
@@ -823,7 +836,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 if (function->first_output)
                 {
-                    if (function->first_output->next_sibling)
+                    if (function->first_output->next)
                     {
                         // TODO: add unique result identifier
                         print(&buffer, "%.*s_result", fs(function->name));
@@ -842,7 +855,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_input; argument; argument = argument->next_sibling)
+                for (auto argument = function->first_input; argument; argument = argument->next)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {
@@ -872,7 +885,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
 
     print_scope_open(&buffer);
 
-    for (auto file = parser->first_file; file; file = (ast_file *) file->node.next_sibling)
+    for (auto file = parser->first_file; file; file = (ast_file *) file->node.next)
     {
         maybe_print_blank_line(&buffer);
         print_line(&buffer, "// file: %.*s", fs(file->path));

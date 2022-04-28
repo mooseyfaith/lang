@@ -18,8 +18,6 @@ def platform_api_window struct
 
 def platform_init func(platform platform_api ref)
 {
-    print("foo");
-
     platform.win32_instance = GetModuleHandle(NULL) cast(HINSTANCE);
     platform.window_class_name = "My Window Class";
     
@@ -31,11 +29,6 @@ def platform_init func(platform platform_api ref)
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
     platform_require(RegisterClass(window_class ref));
-    
-    def print func(text cstring)
-    {
-        printf(text);
-    }
 }
 
 def platform_window func(platform platform_api ref; window platform_api_window ref; title cstring)
@@ -81,8 +74,7 @@ def platform_require func(condition bool; location code_location = get_call_loca
 {
     if not condition
     {
-        printf("Requirement Failed:\n");
-        printf("\t%s,%s(%i,%i)\n\n", location.file, location.function, location.line, location.column);
+        printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
         printf("\tGetLastError() = 0x%x\n", GetLastError());
         exit(0);
     }
