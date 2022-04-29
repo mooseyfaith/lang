@@ -4,24 +4,6 @@
 #include "hash_string.h"
 #include "utf8_string.h"
 
-string read_entire_file(cstring path)
-{
-    auto file = fopen(path, "r");
-
-    string source;
-    
-    fseek(file, 0, SEEK_END);
-    source.count = ftell(file);
-    rewind(file);
-
-    source.base = (u8 *) malloc(source.count);
-    fread((char *) source.base, 1, source.count, file);
-
-    fclose(file);
-    
-    return source;
-}
-
 struct parsed_type
 {
     string name;
@@ -51,33 +33,35 @@ parsed_type skip_type(string *iterator)
     parsed_type result = {};
     
     try_skip_keyword(iterator, s("const"));
+    try_skip_keyword(iterator, s("CONST")); // since windows is DUMB!!! #define CONST const
     
     try_skip_keyword(iterator, s("struct"));
     
     result.name = skip_name(iterator);
     
-    string name = *iterator;
+    //string name = *iterator;
     while (true)
     {
         if (try_skip(iterator, s("*")))
         {
             result.indirection_count++;
         }
-        else
+        else if (try_skip_keyword(iterator, s("const")) || try_skip_keyword(iterator, s("CONST"))) // since windows is DUMB!!! #define CONST const
         {
-            auto test_name = skip_name(iterator);
-            if (!test_name.count)
-                break;
-            
-            name = test_name;
+        }
+        else 
+        {
+            break;
         }
         
         skip_white(iterator);
     }
     
     // last name is identifier not part of type
-    iterator->count += (usize) (iterator->base - name.base);
-    iterator->base = name.base;
+    //iterator->count += (usize) (iterator->base - name.base);
+    //iterator->base = name.base;
+    
+    //result.name.count = (usize) (iterator->base - result.name.base);
     
     return result;
 }
@@ -112,6 +96,7 @@ s32 main(s32 argument_count, cstring arguments[])
     
     cstring file_paths[] =
     {
+        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/wingdi.h",
         "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/gl/GL.h",
         "gl/glext.h",
         "gl/wglext.h",
@@ -123,8 +108,18 @@ s32 main(s32 argument_count, cstring arguments[])
     
     for (u32 i = 0; i < carray_count(file_paths); i++)
     {
-        auto source = read_entire_file(file_paths[i]);
+        string source;
+        if (!platform_allocate_and_read_entire_file(&source, file_paths[i]))
+            printf("couldn't open file %s\n", file_paths[i]);
         
+        //source = s("GLAPI void APIENTRY glUniformSubroutinesuiv (GLenum shadertype, GLsizei count, const GLuint *indices);");
+        //source = s("WINGDIAPI BOOL  WINAPI wglCopyContext(HGLRC, HGLRC, UINT);");
+        source = s(R"CODE(
+WINGDIAPI int   WINAPI wglSetLayerPaletteEntries(HDC, int, int, int,
+        CONST COLORREF*);
+WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
+            COLORREF*);)CODE");
+
         auto it = source;
         skip_white(&it);
         
@@ -132,13 +127,17 @@ s32 main(s32 argument_count, cstring arguments[])
         
         while (it.count)
         {
-            string line;
-            if (!try_skip_until_set(&line, &it, s("\n\r")))
-                break;
-                
             skip_white(&it);
             
-            if (try_skip(&line, s("#define")))
+            string line = it;
+            
+            {
+                string ignored;
+                if (!try_skip_until_set(&ignored, &it, s("\n\r"), true))
+                    it = {};
+            }
+            
+            if (try_skip_keyword(&line, s("#define")))
             {
                 skip_white(&line);
                 
@@ -147,18 +146,45 @@ s32 main(s32 argument_count, cstring arguments[])
                 if (!starts_with(name, s("GL_")) && !starts_with(name, s("WGL_")))
                     continue;
                 
-                fprintf(output, "def %.*s = %.*s;\n", fs(name), fs(line));
+                string value;
+                try_skip_until_set(&value, &line, s(";"), true);
+                it = line;
+                
+                fprintf(output, "def %.*s = %.*s;\n", fs(name), fs(value));
+                continue;
+            }
+            else if (try_skip_keyword(&line, s("typedef")))
+            {
+                auto return_type = skip_type(&line);
+                auto name = skip_name(&line);
+                
+                // probably parsed function pointer type
+                if (!name.count)
+                    continue;
+                
+                string ignored;
+                try_skip_until_set(&ignored, &line, s(";"), true);
+                it = line;
+                
+                fprintf(output, "def %.*s = type ", fs(name));
+                print_type(output, return_type);
+                fprintf(output, ";\n");
+                continue;
             }
             
-            bool define_function = try_skip_keyword(&line, s("WINGDIAPI"));
+            bool define_function = !try_skip_keyword(&line, s("GLAPI"));
             
-            if (!define_function && !try_skip(&line, s("GLAPI")))
-                continue;
+            try_skip_keyword(&line, s("WINGDIAPI"));
+            
+            //if (!define_function && !))
+                //continue;
                 
-            skip_white(&line);
+            //skip_white(&line);
             
             auto return_type = skip_type(&line);
+            
             try_skip_keyword(&line, s("APIENTRY"));
+            try_skip_keyword(&line, s("WINAPI"));
             
             auto name = skip_name(&line);
             
@@ -172,19 +198,25 @@ s32 main(s32 argument_count, cstring arguments[])
             else
                 fprintf(output, "\ndef %.*s_signature func(", fs(name));
             
-            bool is_first = true;
+            u32 argument_count = 0;
             while (true)
             {
+                auto backup = it;
+            
                 auto type = skip_type(&line);
                 auto name = skip_name(&line);
                 
-                if (!is_first)
+                if (argument_count)
                     fprintf(output, "; ");
                     
-                fprintf(output, "%.*s ", fs(name));
+                if (name.count)
+                    fprintf(output, "%.*s ", fs(name));
+                else
+                    fprintf(output, "argument%i ", argument_count);
+                    
                 print_type(output, type);
                 
-                is_first = false;
+                argument_count++;
                 
                 if (!try_skip(&line, s(",")))
                     break;
@@ -194,6 +226,9 @@ s32 main(s32 argument_count, cstring arguments[])
             
             skip(&line, s(")"));
             skip_white(&line);
+            skip(&line, s(";"));
+            
+            it = line;
             
             fprintf(output, ")");
             
@@ -205,7 +240,9 @@ s32 main(s32 argument_count, cstring arguments[])
             }
             
             if (define_function)
-                fprintf(output, " extern_binding_dll(\"opengl32.dll\");\n");
+            {
+                fprintf(output, " extern_binding_lib(\"opengl32.lib\");\n");
+            }
             else
             {
                 fprintf(output, ";\n");

@@ -278,3 +278,122 @@ platform_fatal_error_location_declaration
     
     return do_break;
 }
+
+struct platform_file_info
+{
+    bool ok;
+    u64 byte_count;
+    u64 write_timestamp;
+};
+
+platform_file_info platform_get_file_info(cstring file_path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA data;
+    BOOL ok = GetFileAttributesExA(file_path, GetFileExInfoStandard, &data);
+    
+    if (!ok)
+        return {};
+    
+    u64 byte_count = (((u64) data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+    
+    u64 write_timestamp = (((u64) data.ftLastWriteTime.dwHighDateTime) << 32) | (u64) data.ftLastWriteTime.dwLowDateTime;
+    
+    platform_file_info result;
+    result.ok = true;
+    result.byte_count = byte_count;
+    result.write_timestamp = write_timestamp;
+    
+    return result;
+}
+
+bool platform_read_entire_file(u8_array memory, cstring file_path)
+{
+    auto file_info = platform_get_file_info(file_path);
+    assert(file_info.ok && (file_info.byte_count == memory.count));
+
+    HANDLE file_handle = CreateFileA(file_path, GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+    
+    // might be written to
+    if (file_handle == INVALID_HANDLE_VALUE)
+        return false;
+    
+    // we can only read in ~4gb chunks
+    while (memory.count)
+    {
+        DWORD byte_count;
+        
+        // has higher bits set
+        if (memory.count >> 32) 
+            byte_count = 0xFFFFFFFF;
+        else
+            byte_count = memory.count;
+        
+        DWORD read_byte_count;
+        auto ok = ReadFile(file_handle, memory.base, byte_count, &read_byte_count, null);
+        assert(ok && (byte_count == read_byte_count));
+        
+        memory.base  += byte_count;
+        memory.count -= byte_count;
+    }
+    
+    CloseHandle(file_handle);
+    
+    return true;
+}
+
+void platform_write_entire_file(cstring file_path, u8_array memory)
+{
+    HANDLE file_handle = CreateFileA(file_path, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    assert(file_handle != INVALID_HANDLE_VALUE);
+    
+    while (memory.count)
+    {
+        DWORD byte_count;
+        // has higher bits set
+        if (memory.count >> 32) 
+            byte_count = 0xFFFFFFFF;
+        else
+            byte_count = memory.count;
+        
+        DWORD write_byte_count;
+        auto ok = WriteFile(file_handle, memory.base, byte_count, &write_byte_count, null);
+        assert(ok && (byte_count == write_byte_count));
+        
+        memory.base  += byte_count;
+        memory.count -= byte_count;
+    }
+    
+    CloseHandle(file_handle);
+}
+
+u8_array platform_allocate_bytes(usize byte_count)
+{
+    usize page_alignment_mask = 4095;
+    
+    u8_array memory;
+    memory.count = (byte_count + page_alignment_mask) & ~page_alignment_mask;
+    memory.base  = (u8 *) VirtualAlloc(null, memory.count, MEM_COMMIT, PAGE_READWRITE);
+    require(memory.base, "out of memory"); // this will never trigger on x64
+    
+    return memory;
+}
+
+void platform_free_bytes(u8 *base)
+{
+    require( VirtualFree((void *) base, 0, MEM_RELEASE) );
+}
+
+bool platform_allocate_and_read_entire_file(u8_array *out_data, cstring file_path)
+{
+    auto file_info = platform_get_file_info(file_path);
+    if (!file_info.ok)
+        return false;
+    
+    u8_array data = platform_allocate_bytes(file_info.byte_count);
+    data.count = file_info.byte_count; // since allocate will allocate more if it can (allocates multiple pages)
+    platform_read_entire_file(data, file_path);
+    
+    *out_data = data;
+    
+    return true;
+}
