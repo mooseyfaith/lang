@@ -131,7 +131,9 @@ platform_fatal_error_location_declaration;
 #define require(condition, ...) require_location(condition, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__)
 
 #define unreachable_codepath  assert(false, "unreachable codepath")
-#define cases_complete        default: assert(false, "unhandled case");
+
+#define cases_complete_message(format, ...) default: assert(false, "unhandled case: " format, __VA_ARGS__);
+#define cases_complete                      default: assert(false, "unhandled case");
 
 #define require_result(expression, result, format) { \
     auto value = (expression); \
@@ -347,7 +349,7 @@ bool platform_read_entire_file(u8_array memory, cstring file_path)
 void platform_write_entire_file(cstring file_path, u8_array memory)
 {
     HANDLE file_handle = CreateFileA(file_path, GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
-    assert(file_handle != INVALID_HANDLE_VALUE);
+    assert(file_handle != INVALID_HANDLE_VALUE, "GetLastError() = 0x%x", GetLastError());
     
     while (memory.count)
     {
@@ -383,7 +385,10 @@ u8_array platform_allocate_bytes(usize byte_count)
 
 void platform_free_bytes(u8 *base)
 {
-    require( VirtualFree((void *) base, 0, MEM_RELEASE) );
+    if (base)
+    {
+        require( VirtualFree((void *) base, 0, MEM_RELEASE) );
+    }
 }
 
 bool platform_allocate_and_read_entire_file(u8_array *out_data, cstring file_path)

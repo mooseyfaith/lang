@@ -55,6 +55,8 @@ parsed_type skip_type(string *iterator)
         { s("float"),  s("f32") },
         { s("double"), s("f64") },
         
+        { s("unsigned long"),      s("u32") },
+        
         { s("unsigned char"),      s("u8") },
         { s("unsigned short"),     s("u16") },
         { s("unsigned int"),       s("u32") },
@@ -65,7 +67,21 @@ parsed_type skip_type(string *iterator)
         { s("signed short"),     s("s16") },
         { s("signed int"),       s("s32") },
         { s("signed long long"), s("s64") },
-        //{ s("size_t"),           s("ssize") },
+        
+        // thank you khronos, that was completely useful gg
+        { s("khronos_uint8_t"),  s("u8") },
+        { s("khronos_uint16_t"), s("u16") },
+        { s("khronos_uint32_t"), s("u32") },
+        { s("khronos_uint64_t"), s("u64") },
+        //{ s("khronos_size_t"),  s("usize") },
+        
+        { s("khronos_int8_t"),  s("s8") },
+        { s("khronos_int16_t"), s("s16") },
+        { s("khronos_int32_t"), s("s32") },
+        { s("khronos_int64_t"), s("s64") },
+        { s("khronos_ssize_t"), s("ssize") },
+        
+        { s("__GLsync"), s("u8") },
     };
     
     for (u32 i = 0; i < carray_count(c_to_lang_types); i++)
@@ -75,6 +91,13 @@ parsed_type skip_type(string *iterator)
             result.name = c_to_lang_types[i][1];
             break;
         }
+    }
+    
+    // thank you khronos, that was completely useful gg
+    if (result.name == s("khronos_intptr_t"))
+    {
+        result.name = s("s32");
+        result.indirection_count = 1;
     }
     
     //string name = *iterator;
@@ -95,7 +118,7 @@ parsed_type skip_type(string *iterator)
         skip_white(iterator);
     }
     
-    if (result.name == s("void"))
+    if ((result.name == s("void")) || (result.name == s("VOID")))
     {
         if (result.indirection_count)
             result.name = s("u8");
@@ -113,6 +136,58 @@ void print_type(FILE *output, parsed_type type)
     
     for (u32 i = 0; i < type.indirection_count; i++)
         fprintf(output, " ref");
+}
+
+void parse_and_print_function_arguments(FILE *output, string *iterator, string name, parsed_type return_type, bool define_function)
+{
+    skip(iterator, s("(")); skip_white(iterator);
+    
+    if (define_function)
+        fprintf(output, "\r\ndef %.*s func(", fs(name));
+    else
+        fprintf(output, "\r\ndef %.*s_signature func(", fs(name));
+    
+    u32 argument_count = 0;
+    while (true)
+    {
+        auto type = skip_type(iterator);
+        
+        // function line foo(void), because C can ._.
+        if (!type.name.count)
+            break;
+        
+        auto name = skip_name(iterator);
+        
+        if (argument_count)
+            fprintf(output, "; ");
+            
+        if (name.count)
+            fprintf(output, "%.*s ", fs(name));
+        else
+            fprintf(output, "argument%i ", argument_count);
+            
+        print_type(output, type);
+        
+        argument_count++;
+        
+        if (!try_skip(iterator, s(",")))
+            break;
+            
+        skip_white(iterator);
+    }
+    
+    skip(iterator, s(")"));
+    skip_white(iterator);
+    skip(iterator, s(";"));
+    
+    fprintf(output, ")");
+    
+    if (return_type.name.count)
+    {
+        fprintf(output, " (result ");
+        print_type(output, return_type);
+        fprintf(output, ")");
+    }
 }
 
 s32 main(s32 argument_count, cstring arguments[])
@@ -135,7 +210,71 @@ s32 main(s32 argument_count, cstring arguments[])
     
     auto output = fopen("tests/gl_win32.t", "w");
     
-    fprintf(output, "module gl;\n");
+    fprintf(output, "module gl;\r\n");
+    
+    // some GL types
+    fprintf(output, R"CODE(
+// types are manually added, since these are a mess to generate from the headers
+def GLenum type u32;
+
+def GLsizei    type ssize;
+def GLsizeiptr type ssize;
+def GLintptr   type s32 ref;
+
+def GLvoid     type u8; // since its only useful as a pointer
+def GLboolean  type u8;
+def GLchar     type u8;
+def GLbitfield type u32;
+
+def GLubyte  type u8;
+def GLushort type u16;
+def GLuint   type u32;
+def GLuint64 type u64;
+
+def GLbyte  type s8;
+def GLshort type s16;
+def GLint   type s32;
+def GLint64 type s64;
+
+def GLfloat  type f32;
+def GLdouble type f64;
+
+def GLclampf type f32;
+def GLclampd type f64;
+
+def GLhalf  type s16;
+def GLfixed type s32;
+
+def GLuint64EXT type u64;
+def GLint64EXT  type s64;
+
+def GLhalfNV         type u16;
+def GLvdpauSurfaceNV type GLintptr;
+
+def GLhandleARB   type u32;
+def GLcharARB     type u8;
+def GLsizeiptrARB type ssize;
+def GLintptrARB   type s32 ref;
+
+def GLeglImageOES type u8 ref;
+
+def GLeglClientBufferEXT type u8 ref;
+
+// structs that are passed by pointer only
+def GLsync      type u8;
+
+def _cl_context type u8;
+def _cl_event   type u8;
+
+def HPBUFFERARB          type u8;
+def HPBUFFEREXT          type u8;
+def HGPUNV               type u8;
+def PGPU_DEVICE          type u8;
+def HVIDEOOUTPUTDEVICENV type u8;
+def HVIDEOINPUTDEVICENV  type u8;
+def HPVIDEODEV  type u8;
+    
+)CODE");
     
     for (u32 i = 0; i < carray_count(file_paths); i++)
     {
@@ -155,7 +294,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
         auto it = source;
         skip_white(&it);
         
-        fprintf(output, "\n// file: %s\n\n", file_paths[i]);
+        fprintf(output, "\r\n// file: %s\r\n\r\n", file_paths[i]);
         
         while (it.count)
         {
@@ -165,11 +304,11 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             
             {
                 string ignored;
-                if (!try_skip_until_set(&ignored, &it, s("\n\r"), true))
+                if (!try_skip_until_set(&ignored, &it, s("\r\n"), true))
                     it = {};
             }
             
-            if (try_skip_keyword(&line, s("#define")))
+            if (try_skip(&line, s("#")) && try_skip_keyword(&line, s("define")))
             {
                 skip_white(&line);
                 
@@ -179,32 +318,71 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     continue;
                 
                 string value;
-                try_skip_until_set(&value, &line, s(";"), true);
+                try_skip_until_set(&value, &line, s("u\r\n"), true); // u is number prefix, we don't care about
                 it = line;
                 
-                fprintf(output, "def %.*s = %.*s;\n", fs(name), fs(value));
+                fprintf(output, "def %.*s = %.*s;\r\n", fs(name), fs(value));
                 continue;
             }
-            else if (try_skip_keyword(&line, s("typedef")))
+        #if 0
+            else if (try_skip_keyword(&line, s("struct")))
             {
-                auto return_type = skip_type(&line);
                 auto name = skip_name(&line);
-                
-                // probably parsed function pointer type
-                if (!starts_with(name, s("GL")))
+                if (!try_skip(&line, s(";")))
                     continue;
                 
-                string ignored;
-                try_skip_until_set(&ignored, &line, s(";"), true);
+                // forward declared structs will only be passed by pointer, so treat them as u8
+                fprintf(output, "def %.*s type u8;\r\n", fs(name));
                 it = line;
+            }
+        #endif
+            else if (try_skip_keyword(&line, s("typedef")))
+            {
+                auto type = skip_type(&line);
                 
-                fprintf(output, "def %.*s = type ", fs(name));
-                if (return_type.name.count)
-                    print_type(output, return_type);
-                else
-                    fprintf(output, "u8"); // replacing void
+                if (try_skip(&line, s("(")))
+                {
+                    // is gl function signature, we generate them ourselfs
+                    if (!try_skip_keyword(&line, s("APIENTRY")) || !try_skip(&line, s("*")))
+                        continue;
                     
-                fprintf(output, ";\n");
+                    skip_white(&line);
+                    
+                    // is callback signature, we care about, like GLDEBUGPROC
+                    auto name = skip_name(&line);
+                    
+                    if (!starts_with(name, s("GL")))
+                        continue;
+                    
+                    skip(&line, s(")"));
+                    
+                    parse_and_print_function_arguments(output, &line, name, type, true);
+                    fprintf(output, ";\r\n");
+                    
+                    it = line;
+                }
+                else
+                {
+                #if 0
+                    auto name = skip_name(&line);
+                    
+                    // probably parsed function pointer type
+                    if (!starts_with(name, s("GL")))
+                        continue;
+                    
+                    string ignored;
+                    try_skip_until_set(&ignored, &line, s(";"), true);
+                    it = line;
+                    
+                    fprintf(output, "def %.*s type ", fs(name));
+                    if (type.name.count)
+                        print_type(output, type);
+                    else
+                        fprintf(output, "u8"); // replacing void
+                        
+                    fprintf(output, ";\r\n");
+                #endif
+                }
                 continue;
             }
             
@@ -226,69 +404,20 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             
             if (!starts_with(name, s("gl")) && !starts_with(name, s("wgl")))
                 continue;
-            
-            skip(&line, s("(")); skip_white(&line);
+                
+            parse_and_print_function_arguments(output, &line, name, return_type, define_function);
             
             if (define_function)
-                fprintf(output, "\ndef %.*s func(", fs(name));
-            else
-                fprintf(output, "\ndef %.*s_signature func(", fs(name));
-            
-            u32 argument_count = 0;
-            while (true)
             {
-                auto backup = it;
-            
-                auto type = skip_type(&line);
-                
-                // function line foo(void), because C can ._.
-                if (!type.name.count)
-                    break;
-                
-                auto name = skip_name(&line);
-                
-                if (argument_count)
-                    fprintf(output, "; ");
-                    
-                if (name.count)
-                    fprintf(output, "%.*s ", fs(name));
-                else
-                    fprintf(output, "argument%i ", argument_count);
-                    
-                print_type(output, type);
-                
-                argument_count++;
-                
-                if (!try_skip(&line, s(",")))
-                    break;
-                    
-                skip_white(&line);
+                fprintf(output, " extern_binding(\"opengl32\", true);\r\n");
             }
-            
-            skip(&line, s(")"));
-            skip_white(&line);
-            skip(&line, s(";"));
-            
+            else
+            {
+                fprintf(output, ";\r\n");
+                fprintf(output, "var global %.*s %.*s_signature;\r\n", fs(name), fs(name));
+            }
+    
             it = line;
-            
-            fprintf(output, ")");
-            
-            if (return_type.name.count)
-            {
-                fprintf(output, " (result ");
-                print_type(output, return_type);
-                fprintf(output, ")");
-            }
-            
-            if (define_function)
-            {
-                fprintf(output, " extern_binding_lib(\"opengl32.lib\");\n");
-            }
-            else
-            {
-                fprintf(output, ";\n");
-                fprintf(output, "var %.*s %.*s_signature;\n", fs(name), fs(name));
-            }
         }
     }
     

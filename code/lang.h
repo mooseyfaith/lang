@@ -13,8 +13,10 @@
     macro(variable, __VA_ARGS__) \
     macro(enumeration, __VA_ARGS__) \
     macro(enumeration_item, __VA_ARGS__) \
-    macro(external_binding_lib, __VA_ARGS__) \
+    macro(external_binding, __VA_ARGS__) \
     macro(function, __VA_ARGS__) \
+    macro(constant, __VA_ARGS__) \
+    macro(type_alias, __VA_ARGS__) \
     macro(function_type, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
     macro(assignment, __VA_ARGS__) \
@@ -110,6 +112,7 @@ struct ast_variable
     ast_node node;
     ast_type type;
     string name;
+    bool is_global;
 };
 
 struct ast_enumeration_item
@@ -127,10 +130,25 @@ struct ast_enumeration
     ast_enumeration_item *first_item;
 };
 
-struct ast_external_binding_lib
+struct ast_external_binding
 {
     ast_node node;
     string library_name;
+    bool is_dll;
+};
+
+struct ast_constant
+{
+    ast_node node;
+    string   name;
+    ast_node *expression;
+};
+
+struct ast_type_alias
+{
+    ast_node node;
+    string name;
+    ast_type type;
 };
 
 struct ast_function_type
@@ -182,9 +200,12 @@ struct ast_number
 {
     ast_node node;
     
+    bool is_signed;
+    
     union
     {
         u64 u64_value;
+        s64 s64_value;
     };
 };
 
@@ -426,17 +447,42 @@ void parse_message(lang_parser *parser, string token, cstring format, ...)
 
 ast_number * parse_number(lang_parser *parser)
 {
+    bool is_signed = try_skip(&parser->iterator, s("-"));
+    if (!is_signed)
+        try_skip(&parser->iterator, s("+")); // ignore + sign
+
+    bool is_hex = try_skip(&parser->iterator, s("0x"));
+    
+    u64 base = 10;
+    
+    if (is_hex)
+        base = 16;
+
     usize count = 0;
     u64 value = 0;
     while (count < parser->iterator.count)
     {
         u8 head = parser->iterator.base[count];
-        if (!is_digit(head))
-            break;
+        u8 digit = head - '0';
+        
+        if (digit > 9)
+        {
+            if (!is_hex)
+                break;
+                
+            u8 digit = head - 'a';
+            if (digit >= 6)
+                digit = head - 'A';
+             
+            if (digit >= 6)
+                break;
+            
+            digit += 10;
+        }
         
         auto previous = value;
-        value *= 10;
-        value += head - '0';
+        value *= base;
+        value += digit;
         lang_require(previous <= value, parser->iterator, "number to big for 64bit representation");
         
         count++;
@@ -447,12 +493,18 @@ ast_number * parse_number(lang_parser *parser)
         string token = skip(&parser->iterator, count);
 
         new_local_node(number);
-        number->u64_value = value;
+        number->is_signed = is_signed;
+        
+        if (is_signed)
+            number->s64_value = -(s64) value;
+        else
+            number->u64_value = value;
 
         return number;
     }
     else
     {
+        lang_require(!is_hex, parser->iterator, "expected hexadecimal value after '0x'");
         return null;
     }
 }
@@ -714,7 +766,7 @@ ast_assignment * parse_assignment(lang_parser *parser)
     return assignment;
 }
 
-ast_node * parse_declaration(ast_node ***tail_next, lang_parser *parser)
+ast_variable * parse_declaration(ast_node ***tail_next, lang_parser *parser)
 {
     auto name = skip_name(&parser->iterator);
                 
@@ -740,7 +792,7 @@ ast_node * parse_declaration(ast_node ***tail_next, lang_parser *parser)
         append(tail_next, &assignment->node);
     }
     
-    return &variable->node;
+    return variable;
 }
 
 // assumes '(' was allready parsed
@@ -786,7 +838,11 @@ ast_node * parse_statements(lang_parser *parser)
         {
             if (token == s("var"))
             {
-                lang_require_call(parse_declaration(&tail_next, parser));
+                bool is_global = try_consume_keyword(parser, s("global"));
+                
+                auto variable = lang_require_call(parse_declaration(&tail_next, parser));
+                variable->is_global = is_global;
+                
                 lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
             }
             else if (token == s("if"))
@@ -875,11 +931,19 @@ ast_node * parse_statements(lang_parser *parser)
             {
                 auto name = skip_name(&parser->iterator);
                 
-                if (try_consume_keyword(parser, s("func")))
+                if (try_consume(parser, s("=")))
+                {
+                    new_local_node(constant);
+                    constant->name = name;
+                    constant->expression = lang_require_call(parse_expression(parser));
+                    lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' after constant definition");
+                    
+                    append(&tail_next, &constant->node);
+                }
+                else if (try_consume_keyword(parser, s("func")))
                 {
                     ast_node *type = null;
                 
-                    //, parser->iterator, 
                     if (try_consume(parser, s("(")))
                     {
                         new_local_node(function_type);
@@ -902,28 +966,64 @@ ast_node * parse_statements(lang_parser *parser)
                         type = &name_reference->node;
                     }
                     
-                    new_local_node(function);
-                    function->name = name;
-                    function->type = type;
-                    
-                    if (try_consume_keyword(parser, s("extern_binding_lib")))
+                    if (try_consume_keyword(parser, s("extern_binding")))
                     {
+                        new_local_node(function);
+                        function->name = name;
+                        function->type = type;
+                        
+                        lang_require(try_consume(parser, s("(")), parser->iterator, "expected '(' after 'extern_binding_lib'");
+                        
                         string library_name;
                         bool ok = lang_require_call(parse_quoted_string(&library_name, parser));
                         lang_require(ok && library_name.count, parser->iterator, "expected library name after 'extern_binding_lib'");
                         
-                        new_local_node(external_binding_lib);
-                        external_binding_lib->library_name = library_name;
-                        function->first_statement = &external_binding_lib->node;
+                        bool is_dll = false;
+                        if (try_consume(parser, s(",")))
+                        {
+                            if (try_consume_keyword(parser, s("true")))
+                                is_dll = true;
+                            else 
+                            {
+                                lang_require(try_consume_keyword(parser, s("false")), parser->iterator, "expected external binding is dynamic arguemnt after ',' ('true' or 'false')");
+                            }
+                        }
+                        
+                        lang_require(try_consume(parser, s(")")), parser->iterator, "expected ')' after 'extern_binding_lib' arguments");
+                        lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' after 'extern_binding_lib' statement");
+                        
+                        new_local_node(external_binding);
+                        external_binding->library_name = library_name;
+                        external_binding->is_dll = is_dll;
+                        
+                        function->first_statement = &external_binding->node;
+                        
+                        append(&tail_next, &function->node);
+                    }
+                    else if (try_consume(parser, s("{")))
+                    {
+                        new_local_node(function);
+                        function->name = name;
+                        function->type = type;
+                        
+                        function->first_statement = lang_require_call(parse_statements(parser));
+                        lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after function declaration");
+                        
+                        append(&tail_next, &function->node);
                     }
                     else
                     {
-                        lang_require(try_consume(parser, s("{")), parser->iterator, "expected function body startig with '{' or 'extern_binding_lib' after function declaration");
-                        function->first_statement = lang_require_call(parse_statements(parser));
-                        lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after function declaration");
+                        lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' after function type");
+                        
+                        if (type->node_type == ast_node_type_function_type)
+                        {
+                            local_node_type(function_type, type);
+                            function_type->name = name;
+                        }
+                        
+                        // add function signature
+                        append(&tail_next, type);
                     }
-                    
-                    append(&tail_next, &function->node);
                 }
                 else if (try_consume_keyword(parser, s("struct")))
                 {
@@ -973,9 +1073,19 @@ ast_node * parse_statements(lang_parser *parser)
                     
                     append(&tail_next, &enumeration->node);
                 }
+                else if (try_consume_keyword(parser, s("type")))
+                {
+                    new_local_node(type_alias);
+                    type_alias->name = name;
+                    type_alias->type = parse_type(parser);
+                    lang_require(type_alias->type.name.count, parser->iterator, "expected type expression after 'type' in type alias definition");
+                    lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of type alias definition");
+                    
+                    append(&tail_next, &type_alias->node);
+                }
                 else
                 {
-                    lang_require(false, parser->iterator, "expected function declaration ('func'), structure declaration ('struct') or enumeration declaration ('enum') after definition name");
+                    lang_require(false, parser->iterator, "expected function declaration or type ('func'), structure declaration ('struct'), type alias ('type'), enumeration declaration ('enum') or constant definition ('=') after definition name");
                 }
             }
             else if (token == s("module"))
@@ -1109,9 +1219,12 @@ struct ast_queue_entry
 
 struct ast_queue
 {
-    ast_queue_entry entries[4096];
+    ast_queue_entry *entries;
     u32 count;
+    u32 used_count;
 };
+
+#define local_ast_queue(name) ast_queue name = {}; defer { platform_free_bytes((u8 *) name.entries); };
 
 void enqueue(ast_queue *queue, ast_node *scope, ast_node **node)
 {
@@ -1121,14 +1234,23 @@ void enqueue(ast_queue *queue, ast_node *scope, ast_node **node)
     for (auto it = *node; it; it = it->next)
         count++;
 
-    assert(queue->count + count <= carray_count(queue->entries));
-    queue->count += count;
+    if (queue->used_count + count > queue->count)
+    {
+        queue->count = maximum(maximum(queue->count, queue->used_count + count) * 2, 1024);
+        auto new_entries = (ast_queue_entry *) platform_allocate_bytes(sizeof(ast_queue_entry) * queue->count).base;
+        memcpy(new_entries, queue->entries, sizeof(ast_queue_entry) * queue->used_count);
+        
+        platform_free_bytes((u8 *) queue->entries);
+        queue->entries = new_entries;
+    }
+    
+    queue->used_count += count;
     
     count = 0;
     for (auto it = node; *it; it = &(*it)->next)
     {
-        queue->entries[queue->count - 1 - count].scope       = scope;
-        queue->entries[queue->count - 1 - count].node_field  = it;
+        queue->entries[queue->used_count - 1 - count].scope       = scope;
+        queue->entries[queue->used_count - 1 - count].node_field  = it;
         count++;
     }
 }
@@ -1140,24 +1262,32 @@ void enqueue(ast_queue *queue, ast_node **node)
 
 bool next(ast_queue_entry *out_entry, ast_queue *queue)
 {
-    if (!queue->count)
+    if (!queue->used_count)
         return false;
 
-    auto entry = queue->entries[--queue->count];
+    auto entry = queue->entries[--queue->used_count];
     auto scope = entry.scope;
     auto node  = *entry.node_field;
-    //memcpy(queue->entries, queue->entries + 1, queue->count * sizeof(queue->entries[0]));
     
     switch (node->node_type)
     {
-        cases_complete;
+        cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
         
+        case ast_node_type_type_alias:
         case ast_node_type_comment:
         case ast_node_type_number:
         case ast_node_type_string:
         case ast_node_type_name_reference:
         case ast_node_type_variable:
+        case ast_node_type_external_binding:
         {
+        } break;
+        
+        case ast_node_type_constant:
+        {
+            local_node_type(constant, node);
+            
+            enqueue(queue, node, &constant->expression);
         } break;
         
         case ast_node_type_file:
@@ -1357,7 +1487,7 @@ ast_node * clone(lang_parser *parser, ast_node *root)
 
     // clone all nodes and hash node to clone
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -1378,7 +1508,7 @@ ast_node * clone(lang_parser *parser, ast_node *root)
     
     // replace all cloned nodes
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         enqueue(&queue, &cloned_root);
         
         ast_queue_entry entry;
@@ -1721,6 +1851,8 @@ bool parse(lang_parser *parser, string source, string source_name = s("(internal
     skip_white(&parser->iterator);
     file->first_statement = parse_statements(parser);
     
+    lang_require_return_value(parser->iterator.count == 0, false, parser->iterator, "expected statements, unexpected '%c'", parser->iterator.base[0]);
+    
     return !parser->error;
 }
 
@@ -1819,10 +1951,10 @@ void resolve(lang_parser *parser)
 {
     auto root = &parser->first_file->node;
     
-#if 1
+#if 0
     // print ast
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         
         if (root)
             enqueue(&queue, &root);
@@ -1839,7 +1971,7 @@ void resolve(lang_parser *parser)
     
     // collect declarations
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         
         auto variable_tail_next = &resolver.variable_list;
         auto function_tail_next = &resolver.function_list;
@@ -1864,14 +1996,15 @@ void resolve(lang_parser *parser)
                     *variable_tail_next = new_entry;
                     variable_tail_next = &new_entry->next;
                     
+                #if 0
                     local_node_type(variable, node);
-                    
                     if (entry.scope)
                         printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
                     else
                         printf("scope [0x%p] root: ", entry.scope);
                     
                     printf("var %.*s\n", fs(variable->name));
+                #endif
                 } break;
                 
                 case ast_node_type_function:
@@ -1884,6 +2017,7 @@ void resolve(lang_parser *parser)
                     *function_tail_next = new_entry;
                     function_tail_next = &new_entry->next;
                     
+                #if 0
                     local_node_type(function, node);
                     if (entry.scope)
                         printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
@@ -1891,6 +2025,7 @@ void resolve(lang_parser *parser)
                         printf("scope [0x%p] root: ", entry.scope);
                     
                     printf("func [0x%p] %.*s\n", function, fs(function->name));
+                #endif
                 } break;
             }
         }
@@ -1898,7 +2033,7 @@ void resolve(lang_parser *parser)
     
     // resolve name references
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         
         resolver.scope_stack_count = 0;
         
@@ -1944,7 +2079,7 @@ void resolve(lang_parser *parser)
     
     // check function calls
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         
         if (root)
             enqueue(&queue, &root);

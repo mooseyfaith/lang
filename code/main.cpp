@@ -46,21 +46,12 @@ s32 main(s32 argument_count, cstring arguments[])
                     // HACK:
                     cstring path = new char[1024];
                     sprintf_s(path, 1024, "%s\\%s", argument, find_data.cFileName);
-                    
-                    auto file = fopen(path, "r");
     
                     string source_name = { strlen(path), (u8 *) path };
-                    string source;
                     
-                    fseek(file, 0, SEEK_END);
-                    source.count = ftell(file);
-                    rewind(file);
-                
-                    source.base = (u8 *) malloc(source.count);
-                    fread((char *) source.base, 1, source.count, file);
-                
-                    fclose(file);
-                
+                    string source;
+                    require(platform_allocate_and_read_entire_file(&source, path));
+                    
                     if (!parse(&parser, source, source_name))
                         return -1;        
                 }
@@ -75,16 +66,9 @@ s32 main(s32 argument_count, cstring arguments[])
             auto file = fopen(path, "r");
     
             string source_name = { strlen(path), (u8 *) path };
-            string source;
             
-            fseek(file, 0, SEEK_END);
-            source.count = ftell(file);
-            rewind(file);
-        
-            source.base = (u8 *) malloc(source.count);
-            fread((char *) source.base, 1, source.count, file);
-        
-            fclose(file);
+            string source;
+            require(platform_allocate_and_read_entire_file(&source, path));
         
             if (!parse(&parser, source, source_name))
                 return -1;        

@@ -12,7 +12,10 @@ struct lang_c_buffer
 {
     lang_parser *parser;
     lang_c_compile_settings settings;
-    FILE *file;
+    
+    u8_array memory;
+    usize used_count;
+    
     u32 indent;
     bool previous_was_newline;
     bool previous_was_blank_line;
@@ -23,7 +26,20 @@ struct lang_c_buffer
 
 void print_raw_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
 {
-    vfprintf(buffer->file, format, va_arguments);
+    usize count = _vscprintf_p(format, va_arguments) + 1;
+
+    if (buffer->used_count + count > buffer->memory.count)
+    {
+        auto new_memory = platform_allocate_bytes(buffer->memory.count * 2);
+        memcpy(new_memory.base, buffer->memory.base, buffer->used_count);
+        
+        platform_free_bytes(buffer->memory.base);
+        buffer->memory = new_memory;
+    }
+
+    _vsprintf_p((char *) buffer->memory.base + buffer->used_count, count, format, va_arguments);
+    buffer->used_count += count - 1; // without \0 terminal character
+    
     buffer->previous_was_newline    = false;
     buffer->previous_was_blank_line = false;
 }
@@ -41,7 +57,7 @@ void print_raw(lang_c_buffer *buffer, cstring format, ...)
 // TODO: make sure newlines are not part of format in regular print
 void print_newline(lang_c_buffer *buffer)
 {
-    print_raw(buffer, "\n");
+    print_raw(buffer, "\r\n");
     buffer->previous_was_blank_line = buffer->previous_was_newline;
     buffer->previous_was_newline = true;
     buffer->pending_newline = false;
@@ -55,7 +71,7 @@ void print_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
     if (buffer->previous_was_newline && buffer->indent)
         print_raw(buffer, "%*c", buffer->indent * 4 - 1, ' ');
 
-    vfprintf(buffer->file, format, va_arguments);
+    print_raw_va(buffer, format, va_arguments);
     
     buffer->previous_was_newline    = false;
     buffer->previous_was_blank_line = false;
@@ -134,10 +150,10 @@ void print_scope_close(lang_c_buffer *buffer, bool with_newline = true)
 
 bool print_next(ast_node **out_node, ast_queue *queue)
 {
-    if (!queue->count)
+    if (!queue->used_count)
         return false;
 
-    auto node = *queue->entries[--queue->count].node_field;
+    auto node = *queue->entries[--queue->used_count].node_field;
     
     switch (node->node_type)
     {
@@ -173,12 +189,15 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
 {
     switch (node->node_type)
     {
-        cases_complete;
+        cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
         
         case ast_node_type_number:
         {
             local_node_type(number, node);
-            print(buffer, "%llu", number->u64_value);
+            if (number->is_signed)
+                print(buffer, "%lli", number->s64_value);
+            else
+                print(buffer, "%llu", number->u64_value);
         } break;
         
         case ast_node_type_string:
@@ -326,7 +345,8 @@ void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
 
 void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
 {
-    ast_queue queue = {};
+    local_ast_queue(queue);
+    
     enqueue(&queue, &first_statement);
     
     ast_node *node;
@@ -334,6 +354,15 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
     {
         switch (node->node_type)
         {
+            // skip global declarations
+            case ast_node_type_enumeration:
+            case ast_node_type_type_alias:
+            case ast_node_type_function:
+            case ast_node_type_function_type:
+            case ast_node_type_compound_type:
+            case ast_node_type_constant:
+            break;
+            
             case ast_node_type_comment:
             {
                 local_node_type(comment, node);
@@ -352,6 +381,8 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
             case ast_node_type_variable:
             {
                 local_node_type(variable, node);
+                if (variable->is_global)
+                    continue;
                 
                 print_declaration(buffer, variable);
                 print_line(buffer, " = {};");
@@ -488,12 +519,6 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 print(buffer, ";");
             } break;
             
-            // skip global declarations
-            case ast_node_type_enumeration:
-            case ast_node_type_function:
-            case ast_node_type_compound_type:
-            break;
-            
             // try expressions
             default:
             {
@@ -568,12 +593,55 @@ string write(string *memory, cstring format, ...)
     return result;
 }
 
+void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type, string name, bool is_function_pointer)
+{
+    if (function_type->first_output)
+    {
+        if (function_type->first_output->next)
+        {
+            // TODO: add unique result identifier
+            print(buffer, "%.*s_result", fs(name));
+        }
+        else
+        {
+            local_node_type(variable, function_type->first_output);
+            print_type(buffer, variable->type);
+        }
+    }
+    else
+    {
+        print(buffer, "void");
+    }
+    
+    if (is_function_pointer)
+        print(buffer, " (*%.*s)(", fs(name));
+    else
+        print(buffer, " %.*s(", fs(name));
+    
+    bool is_not_first = false;
+    for (auto argument = function_type->first_input; argument; argument = argument->next)
+    {
+        if (argument->node_type == ast_node_type_variable)
+        {
+            if (is_not_first)
+                print(buffer, ", ");
+                
+            local_node_type(variable, argument);
+            print_declaration(buffer, variable);
+            
+            is_not_first = true;
+        }
+    }
+    
+    print(buffer, ")");
+}
+
 void compile(lang_parser *parser, lang_c_compile_settings settings = {})
 {
     auto file = fopen("test.cpp","w");
 
     lang_c_buffer buffer = {};
-    buffer.file = file;
+    buffer.memory = platform_allocate_bytes(1 << 20); // 1MB
     buffer.settings = settings;
     buffer.parser = parser;
 
@@ -588,7 +656,8 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
 #include <stdio.h>
 #include <windows.h>    
 
-#pragma comment(lib, "user32"))CODE");
+#pragma comment(lib, "user32")
+)CODE");
     
     string name_buffer = { carray_count(_lang_c_base_type_name_buffer), _lang_c_base_type_name_buffer };
     
@@ -638,42 +707,15 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     auto root = &parser->first_file->node;
     
-    // forward declare all structs
+    
+    ast_list_entry *first_external_binding = null;
+    auto external_binding_tail_next = &first_external_binding;
+    
+    // collect and print all external bindings
     {
         maybe_print_blank_line(&buffer);
         
-        ast_queue queue = {};
-        enqueue(&queue, &root);
-        
-        ast_node *node;
-        while (next(&node, &queue))
-        {
-            if (node->node_type == ast_node_type_compound_type)
-            {
-                local_node_type(compound_type, node);
-                
-                print_line(&buffer, "struct %.*s;", fs(compound_type->name));
-            }
-            else if (node->node_type == ast_node_type_function)
-            {
-                local_node_type(function, node);
-                auto function_type = get_function_type(function);
-                
-                if (function_type->first_output && function_type->first_output->next)
-                {
-                    // TODO: add unique result identifier
-                    print_line(&buffer, "struct %.*s_result;", fs(function->name));
-                }
-            }
-        }
-    }
-
-    // forward declare all functions
-    // TODO: add default values
-    {
-        maybe_print_blank_line(&buffer);
-        
-        ast_queue queue = {};
+        local_ast_queue(queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -682,44 +724,70 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
-                auto function_type = get_function_type(function);
                 
-                if (function_type->first_output)
+                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
                 {
-                    if (function_type->first_output->next)
-                    {
-                        // TODO: add unique result identifier
-                        print(&buffer, "%.*s_result", fs(function->name));
-                    }
-                    else
-                    {
-                        local_node_type(variable, function_type->first_output);
-                        print_type(&buffer, variable->type);
-                    }
-                }
-                else
-                {
-                    print(&buffer, "void");
-                }
+                    local_node_type(external_binding, function->first_statement);
+                    string library_name = external_binding->library_name;
                 
-                print(&buffer, " %.*s(", fs(function->name));
-                
-                bool is_not_first = false;
-                for (auto argument = function_type->first_input; argument; argument = argument->next)
-                {
-                    if (argument->node_type == ast_node_type_variable)
+                    bool found = false;
+                    for (auto it = first_external_binding; it; it = it->next)
                     {
-                        if (is_not_first)
-                            print(&buffer, ", ");
-                            
-                        local_node_type(variable, argument);
-                        print_declaration(&buffer, variable);
+                        local_node_type(external_binding, it->node);
                         
-                        is_not_first = true;
+                        if (library_name == external_binding->library_name)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!found)
+                    {
+                        auto new_entry = new ast_list_entry;
+                        *new_entry = {};
+                        new_entry->node  = &external_binding->node;
+                        
+                        *external_binding_tail_next = new_entry;
+                        external_binding_tail_next = &new_entry->next;
+                        
+                        print_line(&buffer, "#pragma comment(lib, \"%.*s\")", fs(external_binding->library_name));
                     }
                 }
+            }
+        }
+    }
+    
+    // declare all type aliases
+    // right now we declare them as const values, instead of C enums for maximum expressivenes
+    {
+        maybe_print_blank_line(&buffer);
+        
+        local_ast_queue(queue);
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_type_alias)
+            {
+                local_node_type(type_alias, node);
                 
-                print_line(&buffer, ");", fs(function->name));
+                print(&buffer, "typedef ");
+                print_type(&buffer, type_alias->type);
+                print_line(&buffer, " %.*s;", fs(type_alias->name));
+            }
+            else if (node->node_type == ast_node_type_function_type)
+            {
+                local_node_type(function_type, node);
+                
+                if (!function_type->name.count)
+                    continue;
+                
+                print(&buffer, "typedef ");
+                print_function_type(&buffer, function_type, function_type->name, true);
+                
+                print_line(&buffer, ";");
             }
         }
     }
@@ -727,7 +795,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     // declare all enums
     // right now we declare them as const values, instead of C enums for maximum expressivenes
     {
-        ast_queue queue = {};
+        maybe_print_blank_line(&buffer);
+        
+        local_ast_queue(queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -778,10 +848,88 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             }
         }
     }
+    
+    // forward declare all structs
+    {
+        maybe_print_blank_line(&buffer);
+        
+        local_ast_queue(queue);
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_compound_type)
+            {
+                local_node_type(compound_type, node);
+                
+                print_line(&buffer, "struct %.*s;", fs(compound_type->name));
+            }
+            else if (node->node_type == ast_node_type_function)
+            {
+                local_node_type(function, node);
+                auto function_type = get_function_type(function);
+                
+                if (function_type->first_output && function_type->first_output->next)
+                {
+                    // TODO: add unique result identifier
+                    print_line(&buffer, "struct %.*s_result;", fs(function->name));
+                }
+            }
+            else if (node->node_type == ast_node_type_function_type)
+            {
+                local_node_type(function_type, node);
+                
+                if (!function_type->name.count)
+                    continue;
+                
+                if (function_type->first_output && function_type->first_output->next)
+                {
+                    // TODO: add unique result identifier
+                    print_line(&buffer, "struct %.*s_result;", fs(function_type->name));
+                }
+            }
+        }
+    }
+
+    // forward declare all functions
+    // TODO: add default values
+    {
+        maybe_print_blank_line(&buffer);
+        
+        local_ast_queue(queue);
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_function)
+            {
+                local_node_type(function, node);
+                
+                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
+                {
+                    local_node_type(external_binding, function->first_statement);
+                    
+                    if (external_binding->is_dll)
+                        print(&buffer, "__declspec(dllimport) ");
+                    else
+                        print(&buffer, "extern \"C\" ");
+                }
+                
+                auto function_type = get_function_type(function);
+                
+                print_function_type(&buffer, function_type, function->name, false);
+                
+                print_line(&buffer, ";");
+            }
+           
+        }
+    }
 
     // declare all structs
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -822,10 +970,56 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             }
         }
     }
+    
+    // declare all constants
+    {
+        maybe_print_blank_line(&buffer);
+    
+        local_ast_queue(queue);
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_constant)
+            {
+                local_node_type(constant, node);
+                
+                auto type = get_expression_type(parser, constant->expression);
+                print(&buffer, "const ");
+                print_type(&buffer, type);
+                print(&buffer, " %.*s = ", fs(constant->name));
+                print_expression(&buffer, constant->expression);
+                print_line(&buffer, ";");
+            }
+        }
+    }
+    
+    // declare all global variables
+    {
+        maybe_print_blank_line(&buffer);
+    
+        local_ast_queue(queue);
+        enqueue(&queue, &root);
+        
+        ast_node *node;
+        while (next(&node, &queue))
+        {
+            if (node->node_type == ast_node_type_variable)
+            {
+                local_node_type(variable, node);
+                if (!variable->is_global)
+                    continue;
+                
+                print_declaration(&buffer, variable);
+                print_line(&buffer, ";");
+            }
+        }
+    }
 
     // declare all functions
     {
-        ast_queue queue = {};
+        local_ast_queue(queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -834,6 +1028,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
+                
+                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
+                    continue;
+                
                 auto function_type = get_function_type(function);
                 
                 maybe_print_blank_line(&buffer);
@@ -899,5 +1097,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     print_scope_close(&buffer);
     
-    fclose(file);
+    u8_array data = { buffer.used_count, buffer.memory.base };
+    platform_write_entire_file("lang_output.cpp", buffer.memory);
 }
