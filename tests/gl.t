@@ -47,8 +47,13 @@ def init func(gl gl_api ref; platform platform_api ref)
     {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generated in function call scope
-        glDebugMessageCallback(render_gl_debug, render);
+        glDebugMessageCallback(gl_debug_message_callback, null);
     }
+}
+
+def gl_debug_message_callback func GLDEBUGPROC
+{
+    
 }
 
 def gl_win32_window_init_1 func(device_context HDC)

@@ -10,6 +10,36 @@ struct parsed_type
     u32 indirection_count;
 };
 
+struct string_array
+{
+    string *base;
+    usize count;
+    usize used_count;
+};
+
+bool add_unique(string_array *strings, string text)
+{
+    for (usize i = 0; i < strings->used_count; i++)
+    {
+        if (strings->base[i] == text)
+            return false;
+    }
+
+    if (strings->used_count + 1 >= strings->count)
+    {
+        strings->count = maximum(maximum(strings->count, strings->used_count) * 2, 1024);
+        auto new_base = (string *) platform_allocate_bytes(sizeof(string) * strings->count).base;
+        
+        memcpy(new_base, strings->base, sizeof(string) * strings->used_count);
+        platform_free_bytes((u8 *) strings->base);
+        
+        strings->base = new_base;
+    }
+    
+    strings->base[strings->used_count++] = text;
+    return true;
+}
+
 bool try_skip_keyword(string *iterator, string keyword)
 {
     auto backup = *iterator;
@@ -143,9 +173,9 @@ void parse_and_print_function_arguments(FILE *output, string *iterator, string n
     skip(iterator, s("(")); skip_white(iterator);
     
     if (define_function)
-        fprintf(output, "\r\ndef %.*s func(", fs(name));
+        fprintf(output, "\ndef %.*s func(", fs(name));
     else
-        fprintf(output, "\r\ndef %.*s_signature func(", fs(name));
+        fprintf(output, "\ndef %.*s_signature func(", fs(name));
     
     u32 argument_count = 0;
     while (true)
@@ -200,17 +230,22 @@ s32 main(s32 argument_count, cstring arguments[])
     for (u32 i = 0; i < table.count; i++)
         table.keys[i] = {};
     
-    cstring file_paths[] =
+    struct {
+        cstring path;
+        bool exclude_wgl_constants;
+    } files[] =
     {
-        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/wingdi.h",
-        "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/gl/GL.h",
-        "gl/glext.h",
-        "gl/wglext.h",
+        //{ "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/wingdi.h", true },
+        { "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/gl/GL.h", },
+        { "gl/glext.h", },
+        { "gl/wglext.h", },
     };
+    
+    string_array constants = {};
     
     auto output = fopen("tests/gl_win32.t", "w");
     
-    fprintf(output, "module gl;\r\n");
+    fprintf(output, "module gl;\n");
     
     // some GL types
     fprintf(output, R"CODE(
@@ -276,11 +311,13 @@ def HPVIDEODEV  type u8;
     
 )CODE");
     
-    for (u32 i = 0; i < carray_count(file_paths); i++)
+    for (u32 i = 0; i < carray_count(files); i++)
     {
         string source;
-        if (!platform_allocate_and_read_entire_file(&source, file_paths[i]))
-            printf("couldn't open file %s\n", file_paths[i]);
+        if (!platform_allocate_and_read_entire_file(&source, files[i].path))
+            printf("couldn't open file %s\n", files[i].path);
+            
+        bool exclude_wgl_constants = files[i].exclude_wgl_constants;
         
         //source = s("GLAPI void APIENTRY glUniformSubroutinesuiv (GLenum shadertype, GLsizei count, const GLuint *indices);");
         //source = s("WINGDIAPI BOOL  WINAPI wglCopyContext(HGLRC, HGLRC, UINT);");
@@ -294,7 +331,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
         auto it = source;
         skip_white(&it);
         
-        fprintf(output, "\r\n// file: %s\r\n\r\n", file_paths[i]);
+        fprintf(output, "\n// file: %s\n\n", files[i].path);
         
         while (it.count)
         {
@@ -314,14 +351,15 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 
                 auto name = skip_name(&line);
             
-                if (!starts_with(name, s("GL_")) && !starts_with(name, s("WGL_")))
+                if (!starts_with(name, s("GL_")) && (exclude_wgl_constants || !starts_with(name, s("WGL_"))))
                     continue;
                 
                 string value;
                 try_skip_until_set(&value, &line, s("u\r\n"), true); // u is number prefix, we don't care about
                 it = line;
                 
-                fprintf(output, "def %.*s = %.*s;\r\n", fs(name), fs(value));
+                if (add_unique(&constants, name))
+                    fprintf(output, "def %.*s = %.*s;\n", fs(name), fs(value));
                 continue;
             }
         #if 0
@@ -332,7 +370,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     continue;
                 
                 // forward declared structs will only be passed by pointer, so treat them as u8
-                fprintf(output, "def %.*s type u8;\r\n", fs(name));
+                fprintf(output, "def %.*s type u8;\n", fs(name));
                 it = line;
             }
         #endif
@@ -357,7 +395,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     skip(&line, s(")"));
                     
                     parse_and_print_function_arguments(output, &line, name, type, true);
-                    fprintf(output, ";\r\n");
+                    fprintf(output, ";\n");
                     
                     it = line;
                 }
@@ -380,7 +418,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     else
                         fprintf(output, "u8"); // replacing void
                         
-                    fprintf(output, ";\r\n");
+                    fprintf(output, ";\n");
                 #endif
                 }
                 continue;
@@ -409,12 +447,12 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             
             if (define_function)
             {
-                fprintf(output, " extern_binding(\"opengl32\", true);\r\n");
+                fprintf(output, " extern_binding(\"opengl32\", true);\n");
             }
             else
             {
-                fprintf(output, ";\r\n");
-                fprintf(output, "var global %.*s %.*s_signature;\r\n", fs(name), fs(name));
+                fprintf(output, ";\n");
+                fprintf(output, "var global %.*s %.*s_signature;\n", fs(name), fs(name));
             }
     
             it = line;

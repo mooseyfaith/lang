@@ -657,6 +657,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
 #include <windows.h>    
 
 #pragma comment(lib, "user32")
+#pragma comment(lib, "gdi32")
 )CODE");
     
     string name_buffer = { carray_count(_lang_c_base_type_name_buffer), _lang_c_base_type_name_buffer };
@@ -868,7 +869,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             else if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
-                auto function_type = get_function_type(function);
+                auto function_type = get_function_type(parser, function);
                 
                 if (function_type->first_output && function_type->first_output->next)
                 {
@@ -911,13 +912,13 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(external_binding, function->first_statement);
                     
+                    print(&buffer, "extern \"C\" ");
+                    
                     if (external_binding->is_dll)
                         print(&buffer, "__declspec(dllimport) ");
-                    else
-                        print(&buffer, "extern \"C\" ");
                 }
                 
-                auto function_type = get_function_type(function);
+                auto function_type = get_function_type(parser, function);
                 
                 print_function_type(&buffer, function_type, function->name, false);
                 
@@ -952,7 +953,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             else if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
-                auto function_type = get_function_type(function);
+                auto function_type = get_function_type(parser, function);
                 
                 if (function_type->first_output && function_type->first_output->next)
                 {
@@ -1032,7 +1033,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
                     continue;
                 
-                auto function_type = get_function_type(function);
+                auto function_type = get_function_type(parser, function);
                 
                 maybe_print_blank_line(&buffer);
                 
@@ -1074,8 +1075,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print_line(&buffer, ")", fs(function->name));
             
                 print_scope_open(&buffer);
-
-                print_statements(&buffer, function->first_statement);
+    
+                if (function->first_statement)
+                    print_statements(&buffer, function->first_statement);
     
                 print_scope_close(&buffer);
             }
