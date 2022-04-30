@@ -329,6 +329,17 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print_expression(buffer, bit_or->right);
             print(buffer, ")");
         } break;
+        
+        case ast_node_type_subtract:
+        {
+            local_node_type(subtract, node);
+            
+            print(buffer, "(");
+            print_expression(buffer, subtract->left);
+            print(buffer, " - ");
+            print_expression(buffer, subtract->right);
+            print(buffer, ")");
+        } break;
     }
 }
 
@@ -1100,5 +1111,5 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     print_scope_close(&buffer);
     
     u8_array data = { buffer.used_count, buffer.memory.base };
-    platform_write_entire_file("lang_output.cpp", buffer.memory);
+    platform_write_entire_file("lang_output.cpp", data);
 }

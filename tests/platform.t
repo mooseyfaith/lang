@@ -41,6 +41,24 @@ def platform_window func(platform platform_api ref; window platform_api_window r
     ShowWindow(window.handle, SW_SHOW);
 }
 
+def vec2s struct 
+{
+    var x s32;
+    var y s32;
+}
+
+def platform_window_frame func(platform platform_api ref; window platform_api_window ref) (result vec2s)
+{
+    var rect RECT;
+    platform_require(GetClientRect(window.handle, rect ref));
+    
+    var result vec2s;
+    result.x = rect.right - rect.left;
+    result.y = rect.bottom - rect.top;
+    
+    return result;
+}
+
 def platform_handle_messages func(platform platform_api ref) (result bool)
 {
     var msg MSG;

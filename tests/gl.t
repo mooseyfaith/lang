@@ -15,7 +15,7 @@ def gl_api struct
     var win32_init_device_context HDC;
 }
 
-def init func(gl gl_api ref; platform platform_api ref)
+def gl_init func(gl gl_api ref; platform platform_api ref)
 {
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;

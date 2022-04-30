@@ -38,6 +38,7 @@
     macro(is, __VA_ARGS__) \
     macro(is_not, __VA_ARGS__) \
     macro(bit_or, __VA_ARGS__) \
+    macro(subtract, __VA_ARGS__) \
     
     
 #define menum(entry, prefix) \
@@ -288,6 +289,7 @@ struct ast_binary_operator
 typedef ast_binary_operator ast_is;
 typedef ast_binary_operator ast_is_not;
 typedef ast_binary_operator ast_bit_or;
+typedef ast_binary_operator ast_subtract;
 
 #define menum_ast_type_byte_count(entry, ...) \
     sizeof(ast_ ## entry),
@@ -750,6 +752,16 @@ parse_expression_declaration
             lang_require(bit_or->right, parser->iterator, "expected expression after 'bit_or'");
             
             left = &bit_or->node;
+            continue;
+        }
+        else if (try_consume(parser, s("-")))
+        {
+            new_local_node(subtract);
+            subtract->left = left;
+            subtract->right = lang_require_call(parse_base_expression(parser));
+            lang_require(subtract->right, parser->iterator, "expected expression after subtract '-'");
+            
+            left = &subtract->node;
             continue;
         }
         
@@ -1319,6 +1331,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_is:
         case ast_node_type_is_not:
         case ast_node_type_bit_or:
+        case ast_node_type_subtract:
         {
             // HACK: set type to base type, so we can avoid assert
             scope_push(node->node_type, ast_node_type_binary_operator);
@@ -1976,6 +1989,7 @@ ast_node * find_node(lang_resolver *resolver, string name)
     {
         local_node_type(file, resolver->scope_stack[1]);
         
+        if (file->module)
         {
             auto module = file->module;
                 
@@ -2309,7 +2323,7 @@ void resolve(lang_parser *parser)
                             while (input)
                             {
                                 local_node_type(variable, input);
-                                lang_require_return_value(input->next && (input->next->node_type == ast_node_type_assignment), , function_name, "expected argument '%.*' in function '%.*s'", fs(variable->name), fs(function_name));
+                                lang_require_return_value(input->next && (input->next->node_type == ast_node_type_assignment), , function_name, "expected argument '%.*s' in function '%.*s'", fs(variable->name), fs(function_name));
                                 
                                 local_node_type(assignment, input->next);
                                         
