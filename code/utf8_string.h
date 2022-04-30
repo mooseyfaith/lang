@@ -96,6 +96,15 @@ string skip_until_set(string *iterator, string set, bool do_skip_set = false)
     return result;
 }
 
+string skip_until_set_or_all(string *iterator, string set, bool do_skip_set = false)
+{
+    string result;
+    if (!try_skip_until_set(&result, iterator, set, do_skip_set))
+        return skip(iterator, iterator->count);
+    else
+        return result;
+}
+
 void skip_white(string *iterator)
 {
     try_skip_set(iterator, s(" \t\n\r"));

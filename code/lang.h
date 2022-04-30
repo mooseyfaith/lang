@@ -13,7 +13,9 @@
     macro(variable, __VA_ARGS__) \
     macro(enumeration, __VA_ARGS__) \
     macro(enumeration_item, __VA_ARGS__) \
+    macro(external_binding_lib, __VA_ARGS__) \
     macro(function, __VA_ARGS__) \
+    macro(function_type, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
     macro(assignment, __VA_ARGS__) \
     macro(number, __VA_ARGS__) \
@@ -125,21 +127,33 @@ struct ast_enumeration
     ast_enumeration_item *first_item;
 };
 
-struct ast_function
+struct ast_external_binding_lib
 {
     ast_node node;
-    ast_type type;
+    string library_name;
+};
+
+struct ast_function_type
+{
+    ast_node node;
     string name;
     // list of variables, each possibly followed by an assignment
     ast_node *first_input;
     ast_node *first_output;
+};
+
+struct ast_function
+{
+    ast_node node;
+    ast_node *type;
+    string name;
     ast_node *first_statement;
 };
 
 struct ast_compound_type
 {
     ast_node node;
-    ast_type type;
+    //ast_type type;
     string name;
     ast_node *first_statement;
 };
@@ -278,7 +292,8 @@ void append(ast_node ***tail_next, ast_node *node)
     *tail_next  = &node->next;
 }
 
-#define local_node_type(type, node) ast_ ## type *type = (ast_ ## type *) (node); assert((node)->node_type == ast_node_type_ ## type)
+#define get_node_type(type, node)   (ast_ ## type *) (node); assert((node)->node_type == ast_node_type_ ## type)
+#define local_node_type(type, node) ast_ ## type *type = get_node_type(type, node)
 
 struct lang_parser
 {
@@ -442,10 +457,10 @@ ast_number * parse_number(lang_parser *parser)
     }
 }
 
-ast_string * parse_string_literal(lang_parser *parser)
+bool parse_quoted_string(string *out_text, lang_parser *parser)
 {
     if (!parser->iterator.count || (parser->iterator.base[0] != '"'))
-        return null;
+        return false;
     
     string text;
     text.base = parser->iterator.base + 1;
@@ -471,15 +486,32 @@ ast_string * parse_string_literal(lang_parser *parser)
         count++;
     }
     
-    lang_require(ok, parser->iterator, "expected '\"' after string literal");
+    lang_require_return_value(ok, false, parser->iterator, "expected '\"' after string literal");
     
     text.count = count - 1;
     advance(&parser->iterator, count + 1);
     
-    new_local_node(string);
-    string->text = text;
+    *out_text = text;
     
-    return string;
+    return true;
+}
+
+ast_string * parse_string_literal(lang_parser *parser)
+{
+    string text;
+    bool ok = lang_require_call(parse_quoted_string(&text, parser));
+    
+    if (ok)
+    {
+        new_local_node(string);
+        string->text = text;
+    
+        return string;
+    }
+    else
+    {
+        return null;
+    }
 }
 
 ast_type parse_type(lang_parser *parser)
@@ -740,7 +772,7 @@ ast_node * parse_statements(lang_parser *parser)
         if (try_consume(parser, s("//")))
         {
             new_local_node(comment);
-            comment->text = skip_until_set(&parser->iterator, s("\n\r"), true);
+            comment->text = skip_until_set_or_all(&parser->iterator, s("\n\r"), true);
             skip_white(&parser->iterator);
             
             append(&tail_next, &comment->node);
@@ -845,19 +877,51 @@ ast_node * parse_statements(lang_parser *parser)
                 
                 if (try_consume_keyword(parser, s("func")))
                 {
-                    lang_require(try_consume(parser, s("(")), parser->iterator, "expected '(' after function name");
+                    ast_node *type = null;
+                
+                    //, parser->iterator, 
+                    if (try_consume(parser, s("(")))
+                    {
+                        new_local_node(function_type);
+                        
+                        parse_arguments(&function_type->first_input, parser);
+                        
+                        if (try_consume(parser, s("(")))
+                            parse_arguments(&function_type->first_output, parser);
+                        
+                        type = &function_type->node;
+                    }
+                    else
+                    {
+                        auto function_type_name = skip_name(&parser->iterator);
+                        lang_require(function_type_name.count, parser->iterator, "expected explicit function type starting with '(' or function type name after function name");
+                        
+                        new_local_node(name_reference);
+                        name_reference->name = function_type_name;
+                        
+                        type = &name_reference->node;
+                    }
                     
                     new_local_node(function);
                     function->name = name;
+                    function->type = type;
                     
-                    parse_arguments(&function->first_input, parser);
-                    
-                    if (try_consume(parser, s("(")))
-                        parse_arguments(&function->first_output, parser);
-                    
-                    lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after function declaration");
-                    function->first_statement = lang_require_call(parse_statements(parser));
-                    lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after function declaration");
+                    if (try_consume_keyword(parser, s("extern_binding_lib")))
+                    {
+                        string library_name;
+                        bool ok = lang_require_call(parse_quoted_string(&library_name, parser));
+                        lang_require(ok && library_name.count, parser->iterator, "expected library name after 'extern_binding_lib'");
+                        
+                        new_local_node(external_binding_lib);
+                        external_binding_lib->library_name = library_name;
+                        function->first_statement = &external_binding_lib->node;
+                    }
+                    else
+                    {
+                        lang_require(try_consume(parser, s("{")), parser->iterator, "expected function body startig with '{' or 'extern_binding_lib' after function declaration");
+                        function->first_statement = lang_require_call(parse_statements(parser));
+                        lang_require(try_consume(parser, s("}")), parser->iterator, "expected '}' after function declaration");
+                    }
                     
                     append(&tail_next, &function->node);
                 }
@@ -1148,18 +1212,28 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, &enumeration_item->expression);
         } break;
         
+        case ast_node_type_function_type:
+        {
+            local_node_type(function_type, node);
+            
+            if (function_type->first_output)
+                enqueue(queue, node, &function_type->first_output);
+            
+            if (function_type->first_input)
+                enqueue(queue, node, &function_type->first_input);
+        } break;
+        
         case ast_node_type_function:
         {
             local_node_type(function, node);
             
+            // HACK:
+            // parent is function->type, so that statements can see input and output declarations
             if (function->first_statement)
-                enqueue(queue, node, &function->first_statement);
+                enqueue(queue, function->type, &function->first_statement);
             
-            if (function->first_output)
-                enqueue(queue, node, &function->first_output);
-            
-            if (function->first_input)
-                enqueue(queue, node, &function->first_input);
+            if (function->type)
+                enqueue(queue, node, &function->type);
         } break;
         
         case ast_node_type_compound_type:
@@ -1529,6 +1603,22 @@ ast_node * clone_recursive(ast_node *node)
 }
 #endif
 
+ast_function_type * get_function_type(ast_function *function)
+{
+    ast_function_type *function_type = null;
+    if (function->type->node_type == ast_node_type_function_type)
+    {
+        function_type = get_node_type(function_type, function->type);
+    }
+    else 
+    {
+        local_node_type(name_reference, function->type);
+        function_type = get_node_type(function_type, name_reference->reference);
+    }
+    
+    return function_type;
+}
+
 ast_type get_expression_type(lang_parser *parser, ast_node *node)
 {
     switch (node->node_type)
@@ -1597,9 +1687,10 @@ ast_type get_expression_type(lang_parser *parser, ast_node *node)
             
             local_node_type(function, name_reference->reference);
             
-            assert(function->first_output && !function->first_output->next);
+            auto function_type = get_function_type(function);
+            assert(function_type->first_output && !function_type->first_output->next);
             
-            return get_expression_type(parser, function->first_output);
+            return get_expression_type(parser, function_type->first_output);
         } break;
     }
     
@@ -1772,6 +1863,15 @@ void resolve(lang_parser *parser)
                     
                     *variable_tail_next = new_entry;
                     variable_tail_next = &new_entry->next;
+                    
+                    local_node_type(variable, node);
+                    
+                    if (entry.scope)
+                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
+                    else
+                        printf("scope [0x%p] root: ", entry.scope);
+                    
+                    printf("var %.*s\n", fs(variable->name));
                 } break;
                 
                 case ast_node_type_function:
@@ -1783,6 +1883,14 @@ void resolve(lang_parser *parser)
                     
                     *function_tail_next = new_entry;
                     function_tail_next = &new_entry->next;
+                    
+                    local_node_type(function, node);
+                    if (entry.scope)
+                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
+                    else
+                        printf("scope [0x%p] root: ", entry.scope);
+                    
+                    printf("func [0x%p] %.*s\n", function, fs(function->name));
                 } break;
             }
         }
@@ -1844,7 +1952,6 @@ void resolve(lang_parser *parser)
         ast_node *node;
         while (next(&node, &queue))
         {
-            
             switch (node->node_type)
             {
                 case ast_node_type_function_call:
@@ -1862,8 +1969,9 @@ void resolve(lang_parser *parser)
                         else
                         {
                             local_node_type(function, name_reference->reference);
+                            auto function_type = get_function_type(function);
                             
-                            auto input = function->first_input;
+                            auto input = function_type->first_input;
                             
                             auto argument_tail_next = &function_call->first_argument;
                             auto argument = *argument_tail_next;

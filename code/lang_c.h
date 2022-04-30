@@ -341,9 +341,9 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 auto lines = comment->text;
                 while (lines.count)
                 {
-                    auto line = skip_until_set(&lines, s("\n\r"));
+                    auto line = skip_until_set_or_all(&lines, s("\n\r"));
                     try_skip(&lines, s("\n\r"));
-                    skip_set(&lines, s(" \t"));
+                    try_skip_set(&lines, s(" \t"));
                     
                     print_line(buffer, "// %.*s", fs(line));
                 }
@@ -657,8 +657,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             else if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
+                auto function_type = get_function_type(function);
                 
-                if (function->first_output && function->first_output->next)
+                if (function_type->first_output && function_type->first_output->next)
                 {
                     // TODO: add unique result identifier
                     print_line(&buffer, "struct %.*s_result;", fs(function->name));
@@ -681,17 +682,18 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
+                auto function_type = get_function_type(function);
                 
-                if (function->first_output)
+                if (function_type->first_output)
                 {
-                    if (function->first_output->next)
+                    if (function_type->first_output->next)
                     {
                         // TODO: add unique result identifier
                         print(&buffer, "%.*s_result", fs(function->name));
                     }
                     else
                     {
-                        local_node_type(variable, function->first_output);
+                        local_node_type(variable, function_type->first_output);
                         print_type(&buffer, variable->type);
                     }
                 }
@@ -703,7 +705,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_input; argument; argument = argument->next)
+                for (auto argument = function_type->first_input; argument; argument = argument->next)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {
@@ -802,8 +804,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             else if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
+                auto function_type = get_function_type(function);
                 
-                if (function->first_output && function->first_output->next)
+                if (function_type->first_output && function_type->first_output->next)
                 {
                     // TODO: add unique result identifier
                     maybe_print_blank_line(&buffer);
@@ -811,10 +814,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     print_scope_open(&buffer);
 
-                    print_statements(&buffer, function->first_output);
+                    print_statements(&buffer, function_type->first_output);
     
                     print_scope_close(&buffer, false);
-                print_line(&buffer, ";");
+                    print_line(&buffer, ";");
                 }
             }
         }
@@ -831,19 +834,20 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             if (node->node_type == ast_node_type_function)
             {
                 local_node_type(function, node);
+                auto function_type = get_function_type(function);
                 
                 maybe_print_blank_line(&buffer);
                 
-                if (function->first_output)
+                if (function_type->first_output)
                 {
-                    if (function->first_output->next)
+                    if (function_type->first_output->next)
                     {
                         // TODO: add unique result identifier
                         print(&buffer, "%.*s_result", fs(function->name));
                     }
                     else
                     {
-                        local_node_type(variable, function->first_output);
+                        local_node_type(variable, function_type->first_output);
                         print_type(&buffer, variable->type);
                     }
                 }
@@ -855,7 +859,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 print(&buffer, " %.*s(", fs(function->name));
                 
                 bool is_not_first = false;
-                for (auto argument = function->first_input; argument; argument = argument->next)
+                for (auto argument = function_type->first_input; argument; argument = argument->next)
                 {
                     if (argument->node_type == ast_node_type_variable)
                     {

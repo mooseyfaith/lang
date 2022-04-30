@@ -38,6 +38,44 @@ parsed_type skip_type(string *iterator)
     try_skip_keyword(iterator, s("struct"));
     
     result.name = skip_name(iterator);
+    while ((result.name == s("unsigned")) || (result.name == s("signed")) || (result.name == s("long")))
+    {
+        auto name = skip_name(iterator);
+        result.name.count = name.base + name.count - result.name.base;
+    }
+    
+    string c_to_lang_types[][2] =
+    {
+        //{ s("void"),               s("u8") },
+        
+        { s("char"),   s("u8") },
+        { s("short"),  s("s16") },
+        { s("int"),    s("s32") },
+        { s("long"),   s("s32") },
+        { s("float"),  s("f32") },
+        { s("double"), s("f64") },
+        
+        { s("unsigned char"),      s("u8") },
+        { s("unsigned short"),     s("u16") },
+        { s("unsigned int"),       s("u32") },
+        { s("unsigned long long"), s("u64") },
+        //{ s("size_t"),             s("usize") },
+        
+        { s("signed char"),      s("s8") },
+        { s("signed short"),     s("s16") },
+        { s("signed int"),       s("s32") },
+        { s("signed long long"), s("s64") },
+        //{ s("size_t"),           s("ssize") },
+    };
+    
+    for (u32 i = 0; i < carray_count(c_to_lang_types); i++)
+    {
+        if (c_to_lang_types[i][0] == result.name)
+        {
+            result.name = c_to_lang_types[i][1];
+            break;
+        }
+    }
     
     //string name = *iterator;
     while (true)
@@ -57,28 +95,21 @@ parsed_type skip_type(string *iterator)
         skip_white(iterator);
     }
     
-    // last name is identifier not part of type
-    //iterator->count += (usize) (iterator->base - name.base);
-    //iterator->base = name.base;
-    
-    //result.name.count = (usize) (iterator->base - result.name.base);
+    if (result.name == s("void"))
+    {
+        if (result.indirection_count)
+            result.name = s("u8");
+        else
+            result.name = {};
+    }
     
     return result;
 }
 
 void print_type(FILE *output, parsed_type type)
 {
-    if (type.name == s("void"))
-    {
-        if (type.indirection_count == 0)
-            return;
-        
-        fprintf(output, "u8");
-    }
-    else
-    {
-        fprintf(output, "%.*s", fs(type.name));
-    }
+    assert(type.name.count);
+    fprintf(output, "%.*s", fs(type.name));
     
     for (u32 i = 0; i < type.indirection_count; i++)
         fprintf(output, " ref");
@@ -114,12 +145,13 @@ s32 main(s32 argument_count, cstring arguments[])
         
         //source = s("GLAPI void APIENTRY glUniformSubroutinesuiv (GLenum shadertype, GLsizei count, const GLuint *indices);");
         //source = s("WINGDIAPI BOOL  WINAPI wglCopyContext(HGLRC, HGLRC, UINT);");
-        source = s(R"CODE(
+        /*source = s(R"CODE(
 WINGDIAPI int   WINAPI wglSetLayerPaletteEntries(HDC, int, int, int,
         CONST COLORREF*);
 WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             COLORREF*);)CODE");
-
+        */
+        
         auto it = source;
         skip_white(&it);
         
@@ -159,7 +191,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 auto name = skip_name(&line);
                 
                 // probably parsed function pointer type
-                if (!name.count)
+                if (!starts_with(name, s("GL")))
                     continue;
                 
                 string ignored;
@@ -167,7 +199,11 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 it = line;
                 
                 fprintf(output, "def %.*s = type ", fs(name));
-                print_type(output, return_type);
+                if (return_type.name.count)
+                    print_type(output, return_type);
+                else
+                    fprintf(output, "u8"); // replacing void
+                    
                 fprintf(output, ";\n");
                 continue;
             }
@@ -204,6 +240,11 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 auto backup = it;
             
                 auto type = skip_type(&line);
+                
+                // function line foo(void), because C can ._.
+                if (!type.name.count)
+                    break;
+                
                 auto name = skip_name(&line);
                 
                 if (argument_count)
@@ -232,7 +273,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             
             fprintf(output, ")");
             
-            if ((return_type.name != s("void")) || (return_type.indirection_count != 0))
+            if (return_type.name.count)
             {
                 fprintf(output, " (result ");
                 print_type(output, return_type);
