@@ -171,21 +171,103 @@ bool print_next(ast_node **out_node, ast_queue *queue)
     return true;
 }
 
-void print_type(lang_c_buffer *buffer, ast_type type)
+#define print_expression_declaration void print_expression(lang_c_buffer *buffer, ast_node *node)
+print_expression_declaration;
+
+void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s(""))
 {
-    assert(type.name.count);
+    assert(type.reference);
         
-    print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(type.name));
+    type_modifier modifiers[64];
+    u32 modifier_count = 0;
+    
+    for (u32 i = 0; i < type.modifier_count; i++)
+    {
+        assert(modifier_count < carray_count(modifiers));
+        modifiers[modifier_count++] = type.modifiers[i];
+    }
+    
+    string name = s("_type_not_found_");
+    while (type.reference)
+    {
+        switch (type.reference->node_type)
+        {
+            cases_complete_message("%.*s", fs(ast_node_type_names[type.reference->node_type]));
+            
+            case ast_node_type_type_alias:
+            {
+                local_node_type(type_alias, type.reference);
+                name = type_alias->name;
+                type.reference = null;
+            } break;
+            
+            case ast_node_type_name_reference:
+            {
+                local_node_type(name_reference, type.reference);
+                name = name_reference->name;
+                
+                // will break if unresolved
+                type.reference = name_reference->reference;
+            } break;
+            
+            case ast_node_type_number_type:
+            {
+                local_node_type(number_type, type.reference);
+                name = number_type->name;
+                type.reference = null;
+            } break;
+        }
+    }
+        
+    print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
+    
+    for (u32 i = 0; i < modifier_count; i++)
+    {
+        auto modifier = modifiers[i];
+        switch (modifier.modifier_type)
+        {
+            cases_complete_message("%.*s", fs(type_modifier_type_names[modifier.modifier_type]));
+            
+            case type_modifier_type_indirection:
+            {
+                if (modifier.indirection_count)
+                    print(buffer, " ");
+                    
+                for (u32 i = 0; i < modifier.indirection_count; i++)
+                    print(buffer, "*");
+                
+                if (i == 0)
+                    print(buffer, "%.*s", fs(variable_name));
+            } break;
+            
+            case type_modifier_type_constant_array:
+            {
+                if (variable_name.count && (i == 0))
+                    print(buffer, " %.*s", fs(variable_name));
+                    
+                print(buffer, "[");
+                print_expression(buffer, modifier.constant_array_count_expression);
+                print(buffer, "]");
+            } break;
+            
+            /*
+            case type_modifier_type_dynamic_array:
+            {
+                print(buffer, "[");
+                print_expression(buffer, modifier.constant_array_count_expression);
+                print(buffer, "]");
+            } break;
+            */
+        }
+    }
+    
+    if (variable_name.count && (modifier_count == 0))
+        print(buffer, " %.*s", fs(variable_name));
     
     // some space for formating, since the * is considered part of the name, not the type in C
-    if (type.indirection_count)
-        print(buffer, " ");
-        
-    for (u32 i = 0; i < type.indirection_count; i++)
-        print(buffer, "*");
 }
 
-void print_expression(lang_c_buffer *buffer, ast_node *node)
+print_expression_declaration
 {
     switch (node->node_type)
     {
@@ -194,10 +276,10 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
         case ast_node_type_number:
         {
             local_node_type(number, node);
-            if (number->is_signed)
-                print(buffer, "%lli", number->s64_value);
+            if (number->value.is_signed)
+                print(buffer, "%lli", number->value.s64_value);
             else
-                print(buffer, "%llu", number->u64_value);
+                print(buffer, "%llu", number->value.u64_value);
         } break;
         
         case ast_node_type_string:
@@ -262,12 +344,23 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print_expression(buffer, field_reference->expression);
             
             auto type = get_expression_type(buffer->parser, field_reference->expression);
-            if (type.indirection_count)
+            if (type.modifier_count && (type.modifiers[type.modifier_count - 1].modifier_type == type_modifier_type_indirection))
                 print(buffer, "->");
             else
                 print(buffer, ".");
             
-            print(buffer, "%.*s", fs(field_reference->field_name));
+            print(buffer, "%.*s", fs(field_reference->name));
+        } break;
+        
+        case ast_node_type_array_index:
+        {
+            local_node_type(array_index, node);
+            
+            print_expression(buffer, array_index->array_expression);
+            
+            print(buffer, "[");
+            print_expression(buffer, array_index->index_expression);
+            print(buffer, "]");
         } break;
         
         case ast_node_type_cast:
@@ -330,6 +423,17 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
             print(buffer, ")");
         } break;
         
+        case ast_node_type_add:
+        {
+            local_node_type(add, node);
+            
+            print(buffer, "(");
+            print_expression(buffer, add->left);
+            print(buffer, " + ");
+            print_expression(buffer, add->right);
+            print(buffer, ")");
+        } break;
+        
         case ast_node_type_subtract:
         {
             local_node_type(subtract, node);
@@ -345,13 +449,7 @@ void print_expression(lang_c_buffer *buffer, ast_node *node)
 
 void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
 {
-    print_type(buffer, variable->type);
-                
-    // add space for formatting, since * is part of the name in C
-    if (!variable->type.indirection_count)
-        print(buffer, " ");
-    
-    print(buffer, "%.*s", fs(variable->name)); 
+    print_type(buffer, variable->type, variable->name);
 }
 
 void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
@@ -369,6 +467,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
             case ast_node_type_enumeration:
             case ast_node_type_type_alias:
             case ast_node_type_function:
+            case ast_node_type_number_type:
             case ast_node_type_function_type:
             case ast_node_type_compound_type:
             case ast_node_type_constant:
@@ -781,25 +880,56 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         ast_node *node;
         while (next(&node, &queue))
         {
-            if (node->node_type == ast_node_type_type_alias)
+            switch (node->node_type)
             {
-                local_node_type(type_alias, node);
+            #if 0
+                case ast_node_type_number_type:
+                {
+                    local_node_type(number_type, node);
+                    
+                    print(&buffer, "typedef ");
+                    
+                    if (number_type->is_float)
+                    {
+                        if (number_type->bit_count_power_of_two == 3)
+                            print(&buffer, "float ");
+                        else
+                            print(&buffer, "double ");
+                    }
+                    else if (number_type->is_signed)
+                    {
+                        print(&buffer, "signed ");
+                    }
+                    else 
+                    {
+                        print(&buffer, "unsigned ");
+                    }
+                    
+                    print_line(&buffer, " %.*s;", fs(number_type->name));
+                } break;
+            #endif
                 
-                print(&buffer, "typedef ");
-                print_type(&buffer, type_alias->type);
-                print_line(&buffer, " %.*s;", fs(type_alias->name));
-            }
-            else if (node->node_type == ast_node_type_function_type)
-            {
-                local_node_type(function_type, node);
+                case ast_node_type_type_alias:
+                {
+                    local_node_type(type_alias, node);
+                    
+                    print(&buffer, "typedef ");
+                    print_type(&buffer, type_alias->type, type_alias->name);
+                    print_line(&buffer, ";");
+                } break;
                 
-                if (!function_type->name.count)
-                    continue;
-                
-                print(&buffer, "typedef ");
-                print_function_type(&buffer, function_type, function_type->name, true);
-                
-                print_line(&buffer, ";");
+                case ast_node_type_function_type:
+                {
+                    local_node_type(function_type, node);
+                    
+                    if (!function_type->name.count)
+                        continue;
+                    
+                    print(&buffer, "typedef ");
+                    print_function_type(&buffer, function_type, function_type->name, true);
+                    
+                    print_line(&buffer, ";");
+                } break;
             }
         }
     }
@@ -821,8 +951,8 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 maybe_print_blank_line(&buffer);
                 print(&buffer, "typedef ");
-                print_type(&buffer, enumeration->type);
-                print_line(&buffer, " %.*s;", fs(enumeration->name));
+                print_type(&buffer, enumeration->type, enumeration->name);
+                print_line(&buffer, ";");
                 
                 //print_scope_open(&buffer);
                 
@@ -999,8 +1129,8 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 auto type = get_expression_type(parser, constant->expression);
                 print(&buffer, "const ");
-                print_type(&buffer, type);
-                print(&buffer, " %.*s = ", fs(constant->name));
+                print_type(&buffer, type, constant->name);
+                print(&buffer, " = ");
                 print_expression(&buffer, constant->expression);
                 print_line(&buffer, ";");
             }

@@ -1,19 +1,31 @@
 module platform;
 
-// on program start
-var platform platform_api;
-platform_init(platform ref);
-
 def platform_api struct
 {
     var win32_instance    HINSTANCE;
     var window_class_name cstring;
+    
+    var keys platform_button[256];
 }
 
 def platform_api_window struct
 {
     var handle         HWND;
     var device_context HDC;
+}
+
+//def platform_button mask u8
+//{
+//    is_active                       u1;
+//    half_transition_count           u6;
+//    half_transition_count_over_flow u1;
+//}
+
+def platform_button struct
+{
+    var is_active                       bool;
+    var half_transition_count           u32;
+    var half_transition_count_over_flow u8;
 }
 
 def platform_init func(platform platform_api ref)
@@ -64,9 +76,20 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
     var msg MSG;
     while PeekMessage(msg ref, null, 0, 0, PM_REMOVE)
     {
-        if msg.message is WM_QUIT
+        switch msg.message
+        case WM_QUIT
         {
             return false;
+        }
+        case WM_KEYDOWN
+        {
+            platform.keys[msg.wParam].is_active = true;
+            platform.keys[msg.wParam].half_transition_count = platform.keys[msg.wParam].half_transition_count + 1;
+        }
+        case WM_KEYUP
+        {
+            platform.keys[msg.wParam].is_active = false;
+            platform.keys[msg.wParam].half_transition_count = platform.keys[msg.wParam].half_transition_count + 1;
         }
     
         TranslateMessage(msg ref);

@@ -16,7 +16,8 @@ typedef unsigned __int64 u64;
 typedef s64 ssize;
 typedef u64 usize;
 
-typedef float f32;
+typedef float  f32;
+typedef double f64;
 
 #define null 0
 
