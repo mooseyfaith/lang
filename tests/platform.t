@@ -14,19 +14,19 @@ def platform_api_window struct
     var device_context HDC;
 }
 
-//def platform_button mask u8
-//{
-//    is_active                       u1;
-//    half_transition_count           u6;
-//    half_transition_count_over_flow u1;
-//}
-
 def platform_button struct
 {
     var is_active                       bool;
     var half_transition_count           u32;
     var half_transition_count_over_flow u8;
 }
+
+//def platform_button mask u8
+//{
+//    is_active                       u1;
+//    half_transition_count           u6;
+//    half_transition_count_over_flow u1;
+//}
 
 def platform_init func(platform platform_api ref)
 {

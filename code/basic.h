@@ -406,3 +406,42 @@ bool platform_allocate_and_read_entire_file(u8_array *out_data, cstring file_pat
     
     return true;
 }
+
+#define array_type(name, type) \
+struct name \
+{ \
+    type  *base; \
+    usize count; \
+};
+
+#define buffer_type(name, type) \
+struct name \
+{ \
+    type  *base; \
+    usize count; \
+    usize capacity; \
+};
+
+array_type(base_array, u8);
+buffer_type(base_buffer, u8);
+
+#define resize_buffer(buffer, new_count) resize_base_buffer((base_buffer *) (buffer), new_count, sizeof(*(buffer)->base))
+ 
+void resize_base_buffer(base_buffer *buffer, usize new_count, u32 item_byte_count)
+{
+    if (new_count >= buffer->capacity)
+    {
+        buffer->capacity = maximum(maximum(buffer->capacity, new_count) * 2, 32);
+        
+        auto new_base = platform_allocate_bytes(item_byte_count * buffer->capacity).base;
+        
+        if (buffer->base)
+            memcpy(new_base, buffer->base, item_byte_count * buffer->count);
+            
+        platform_free_bytes(buffer->base);
+    
+        buffer->base = new_base;
+    }
+    
+    buffer->count = new_count;
+}

@@ -209,7 +209,7 @@ struct ast_constant
 struct ast_type_alias
 {
     ast_node node;
-    string name;
+    string   name;
     ast_type type;
 };
 
@@ -1974,7 +1974,6 @@ ast_function_type * get_function_type(lang_parser *parser, ast_node *node)
 {
     ast_type type = { node };
     auto base_type = get_base_type(type);
-    
     local_node_type(function_type, base_type);
     
     return function_type;
