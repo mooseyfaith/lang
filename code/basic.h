@@ -30,11 +30,26 @@ typedef char * cstring;
 
 const f32 pi32 = 3.14159265358979323846;
 
-struct u8_array
-{
-    usize count;
-    u8   *base;
+#define array_type(name, type) \
+struct name \
+{ \
+    usize count; \
+    type  *base; \
 };
+
+#define buffer_type(name, type) \
+struct name \
+{ \
+    usize count; \
+    type  *base; \
+    usize capacity; \
+};
+
+array_type(base_array, u8);
+buffer_type(base_buffer, u8);
+
+array_type(u8_array, u8);
+buffer_type(u8_buffer, u8);
 
 typedef u8_array string;
 
@@ -163,6 +178,8 @@ auto mchain(_defer_, __LINE__) = ++[&]()
 
 #define using(struct, field)      auto field = &(struct)->field
 #define local_copy(struct, field) auto field = (struct).field
+
+#define field_to_struct_pointer(type, field, pointer) ( (type *) ((u8 *) (pointer) - ((usize) &((type *) null)->field)) )
 
 #define scope_save(var) \
     auto mchain(_scope_backup_, __LINE__) = var; \
@@ -407,26 +424,20 @@ bool platform_allocate_and_read_entire_file(u8_array *out_data, cstring file_pat
     return true;
 }
 
-#define array_type(name, type) \
-struct name \
-{ \
-    type  *base; \
-    usize count; \
-};
-
-#define buffer_type(name, type) \
-struct name \
-{ \
-    type  *base; \
-    usize count; \
-    usize capacity; \
-};
-
-array_type(base_array, u8);
-buffer_type(base_buffer, u8);
-
 #define resize_buffer(buffer, new_count) resize_base_buffer((base_buffer *) (buffer), new_count, sizeof(*(buffer)->base))
+
+#define buffer_to_array(buffer) { (buffer).count, (buffer).base }
  
+#define copy_array(dest, source) copy_base_array((base_array *) (dest), (base_array) { (source).base, (source).count }, sizeof((source).base[0]))
+
+void copy_base_array(base_array *destination, base_array source, u32 item_byte_count)
+{
+    *destination = {};
+    destination->count = source.count;
+    destination->base = platform_allocate_bytes(item_byte_count * source.count).base;
+    memcpy(destination->base, source.base, item_byte_count * source.count);
+}
+
 void resize_base_buffer(base_buffer *buffer, usize new_count, u32 item_byte_count)
 {
     if (new_count >= buffer->capacity)

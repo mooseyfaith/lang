@@ -13,8 +13,7 @@ struct lang_c_buffer
     lang_parser *parser;
     lang_c_compile_settings settings;
     
-    u8_array memory;
-    usize used_count;
+    u8_buffer memory;
     
     u32 indent;
     bool previous_was_newline;
@@ -28,17 +27,11 @@ void print_raw_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
 {
     usize count = _vscprintf_p(format, va_arguments) + 1;
 
-    if (buffer->used_count + count > buffer->memory.count)
-    {
-        auto new_memory = platform_allocate_bytes(buffer->memory.count * 2);
-        memcpy(new_memory.base, buffer->memory.base, buffer->used_count);
-        
-        platform_free_bytes(buffer->memory.base);
-        buffer->memory = new_memory;
-    }
+    auto offset = buffer->memory.count;
+    resize_buffer(&buffer->memory, buffer->memory.count + count);
 
-    _vsprintf_p((char *) buffer->memory.base + buffer->used_count, count, format, va_arguments);
-    buffer->used_count += count - 1; // without \0 terminal character
+    _vsprintf_p((char *) buffer->memory.base + offset, count, format, va_arguments);
+    resize_buffer(&buffer->memory, buffer->memory.count - 1); // without \0 terminal character
     
     buffer->previous_was_newline    = false;
     buffer->previous_was_blank_line = false;
@@ -54,7 +47,6 @@ void print_raw(lang_c_buffer *buffer, cstring format, ...)
     va_end(va_arguments);
 }
 
-// TODO: make sure newlines are not part of format in regular print
 void print_newline(lang_c_buffer *buffer)
 {
     print_raw(buffer, "\r\n");
@@ -71,7 +63,15 @@ void print_va(lang_c_buffer *buffer, cstring format, va_list va_arguments)
     if (buffer->previous_was_newline && buffer->indent)
         print_raw(buffer, "%*c", buffer->indent * 4 - 1, ' ');
 
+    auto debug_offset = buffer->memory.count;
     print_raw_va(buffer, format, va_arguments);
+    
+    // make sure no newline in format
+    for (u32 i = debug_offset; i < buffer->memory.count; i++)
+    {
+        u8 head = buffer->memory.base[i];
+        assert((head != '\r') && (head != '\n'));
+    }
     
     buffer->previous_was_newline    = false;
     buffer->previous_was_blank_line = false;
@@ -176,30 +176,29 @@ print_expression_declaration;
 
 void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s(""))
 {
-    assert(type.reference);
-        
-    type_modifier modifiers[64];
-    u32 modifier_count = 0;
+    //type_modifier modifiers[64];
+    //u32 modifiers.count = 0;
     
-    for (u32 i = 0; i < type.modifier_count; i++)
-    {
-        assert(modifier_count < carray_count(modifiers));
-        modifiers[modifier_count++] = type.modifiers[i];
-    }
+    //for (u32 i = 0; i < type.modifiers.count; i++)
+    //{
+//        assert(modifiers.count < carray_count(modifiers));
+//        modifiers[modifiers.count++] = type.modifiers[i];
+//    }
     
     string name = s("_type_not_found_");
-    while (type.reference)
+    if (type.base_type)
     {
-        switch (type.reference->node_type)
+        switch (type.base_type->node_type)
         {
-            cases_complete_message("%.*s", fs(ast_node_type_names[type.reference->node_type]));
+            cases_complete_message("%.*s", fs(ast_node_type_names[type.base_type->node_type]));
             
-            case ast_node_type_type_alias:
+            /*case ast_node_type_type_alias:
             {
                 local_node_type(type_alias, type.reference);
                 name = type_alias->name;
                 type.reference = null;
             } break;
+            
             
             case ast_node_type_name_reference:
             {
@@ -209,21 +208,39 @@ void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s("
                 // will break if unresolved
                 type.reference = name_reference->reference;
             } break;
+            */
             
             case ast_node_type_number_type:
             {
-                local_node_type(number_type, type.reference);
+                local_node_type(number_type, type.base_type);
                 name = number_type->name;
-                type.reference = null;
+            } break;
+            
+            case ast_node_type_compound_type:
+            {
+                local_node_type(compound_type, type.base_type);
+                name = compound_type->name;
+            } break;
+            
+            case ast_node_type_function_type:
+            {
+                local_node_type(function_type, type.base_type);
+                name = function_type->name;
             } break;
         }
     }
+    else
+    {
+        name = type.name;
+    }
         
+    assert(name.count);
+    
     print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
     
-    for (u32 i = 0; i < modifier_count; i++)
+    for (u32 i = 0; i < type.modifiers.count; i++)
     {
-        auto modifier = modifiers[i];
+        auto modifier = type.modifiers.base[i];
         switch (modifier.modifier_type)
         {
             cases_complete_message("%.*s", fs(type_modifier_type_names[modifier.modifier_type]));
@@ -261,7 +278,7 @@ void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s("
         }
     }
     
-    if (variable_name.count && (modifier_count == 0))
+    if (variable_name.count && (type.modifiers.count == 0))
         print(buffer, " %.*s", fs(variable_name));
     
     // some space for formating, since the * is considered part of the name, not the type in C
@@ -344,7 +361,7 @@ print_expression_declaration
             print_expression(buffer, field_reference->expression);
             
             auto type = get_expression_type(buffer->parser, field_reference->expression);
-            if (type.modifier_count && (type.modifiers[type.modifier_count - 1].modifier_type == type_modifier_type_indirection))
+            if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_indirection))
                 print(buffer, "->");
             else
                 print(buffer, ".");
@@ -746,15 +763,13 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
     print(buffer, ")");
 }
 
-buffer_type(ast_node_buffer, ast_node *);
-
 buffer_type(index_buffer, u32);
 
 struct node_dependency
 {
-    index_buffer children;
+    index_buffer children; // dependencies
     ast_node     *node;
-    u32          parent;
+    bool was_visited, is_root;
 };
 
 buffer_type(node_dependency_buffer, node_dependency);
@@ -770,12 +785,14 @@ u32 insert(node_dependency_buffer *buffer, ast_node *node)
     resize_buffer(buffer, buffer->count + 1);
     buffer_type(node_dependency_buffer, node_dependency);
     buffer->base[buffer->count - 1] = {};
-    buffer->base[buffer->count - 1].parent = -1;
     buffer->base[buffer->count - 1].node = node;
+    buffer->base[buffer->count - 1].is_root = true;
     
     return buffer->count - 1;
 }
 
+
+// TODO: add cycle check
 void insert_child(node_dependency_buffer *buffer, ast_node *parent, ast_node *child)
 {
     //assert(parent && child);
@@ -796,8 +813,32 @@ void insert_child(node_dependency_buffer *buffer, ast_node *parent, ast_node *ch
     parent_entry->children.base[parent_entry->children.count - 1] = child_index;
     
     auto child_entry = &buffer->base[child_index];
-    assert((child_entry->parent == -1) || (child_entry->parent = parent_index));
-    child_entry->parent = parent_index;
+    child_entry->is_root = false;
+}
+
+void insert_type_child(node_dependency_buffer *buffer, ast_type type, ast_node *child)
+{
+    if (!type.modifiers.count)
+        insert_child(buffer, type.base_type, child);
+}
+
+void insert_declarations(node_dependency_buffer *buffer, ast_node *first_statement, ast_node *child)
+{
+    for (auto it = first_statement; it; it = it->next)
+    {
+        local_node_type(variable, it);
+        
+        insert_type_child(buffer, variable->type, child);
+        
+        while (it->next && (it->next->node_type != ast_node_type_variable))
+            it = it->next;
+    }
+}
+
+void insert_function_type_dependencies(node_dependency_buffer *buffer, ast_node *node, ast_function_type *function_type)
+{
+    insert_declarations(buffer, function_type->first_input, node);
+    insert_declarations(buffer, function_type->first_output, node);
 }
 
 void compile(lang_parser *parser, lang_c_compile_settings settings = {})
@@ -805,7 +846,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     auto file = fopen("test.cpp","w");
 
     lang_c_buffer buffer = {};
-    buffer.memory = platform_allocate_bytes(1 << 20); // 1MB
     buffer.settings = settings;
     buffer.parser = parser;
 
@@ -814,15 +854,13 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     }
 
-    print(&buffer, R"CODE(
-// generated with lang_c compiler
-
-#include <stdio.h>
-#include <windows.h>    
-
-#pragma comment(lib, "user32")
-#pragma comment(lib, "gdi32")
-)CODE");
+    print_line(&buffer, "// generated with lang_c compiler");
+    print_newline(&buffer);
+    print_line(&buffer, "#include <stdio.h>");
+    print_line(&buffer, "#include <windows.h>");    
+    print_newline(&buffer);
+    print_line(&buffer, "#pragma comment(lib, \"user32\")");
+    print_line(&buffer, "#pragma comment(lib, \"gdi32\")");
     
     string name_buffer = { carray_count(_lang_c_base_type_name_buffer), _lang_c_base_type_name_buffer };
     
@@ -871,7 +909,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     }
     
     auto root = &parser->first_file->node;
-    
     
     ast_list_entry *first_external_binding = null;
     auto external_binding_tail_next = &first_external_binding;
@@ -966,6 +1003,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         }
     }
     
+    // declare typedefs, structs and functions in order of dependency
     {
         node_dependency_buffer dependencies = {};
         defer
@@ -988,57 +1026,39 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(type_alias, node);
                     
-                    insert_child(&dependencies, get_base_type(type_alias->type), &type_alias->node);
+                    insert_type_child(&dependencies, type_alias->type, &type_alias->node);
+                } break;
+                
+                case ast_node_type_function:
+                {
+                    local_node_type(function, node);
+                    
+                    auto function_type = get_function_type(parser, function);
+                    insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
                 case ast_node_type_function_type:
                 {
                     local_node_type(function_type, node);
                     
-                    for (auto it = function_type->first_output; it; it = it->next)
-                    {
-                        local_node_type(variable, it);
-                        
-                        auto base_type = get_base_type(variable->type);
-                        insert_child(&dependencies, base_type, &function_type->node);
-                        
-                        if (it->next && (it->next->node_type == ast_node_type_assignment))
-                            it = it->next;
-                    }
+                    if (!function_type->name.count)
+                        break;
                     
-                    for (auto it = function_type->first_input; it; it = it->next)
-                    {
-                        local_node_type(variable, it);
-                        
-                        auto base_type = get_base_type(variable->type);
-                        insert_child(&dependencies, base_type, &function_type->node);
-                        
-                        if (it->next && (it->next->node_type == ast_node_type_assignment))
-                            it = it->next;
-                    }
+                    insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
                 case ast_node_type_compound_type:
                 {
                     local_node_type(compound_type, node);
                     
-                    for (auto it = compound_type->first_statement; it; it = it->next)
-                    {
-                        local_node_type(variable, it);
-                        
-                        auto base_type = get_base_type(variable->type);
-                        insert_child(&dependencies, base_type, &compound_type->node);
-                        
-                        if (it->next && (it->next->node_type == ast_node_type_assignment))
-                            it = it->next;
-                    }
+                    insert_declarations(&dependencies, compound_type->first_statement, node);
                 } break;
                 
                 case ast_node_type_enumeration:
                 {
                     local_node_type(enumeration, node);
                     
-                    insert_child(&dependencies, null, &enumeration->node);
+                    insert_type_child(&dependencies, enumeration->type, &enumeration->node);
                 } break;
             }
         }
@@ -1046,54 +1066,51 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         ast_node_buffer ordered_dependencies = {};
         defer { resize_buffer(&ordered_dependencies, 0); };
         
-        ast_node_buffer parent_stack = {};
-        defer { resize_buffer(&parent_stack, 0); };
+        index_buffer stack = {};
+        defer { resize_buffer(&stack, 0); };
         
         for (u32 i = 0; i < dependencies.count; i++)
         {
-            parent_stack.count = 0;
+            auto root = &dependencies.base[i];
+            if (!root->is_root)
+                continue;
             
-            u32 index = i;
+            // depth first search per root
             
-            while (index != -1)
+            assert(!root->was_visited);
+            
+            resize_buffer(&stack, 1);
+            stack.base[0] = i;
+            root->was_visited = true;
+            
+            while (stack.count)
             {
-                auto node = dependencies.base[index].node;
-                
-                if (node)
+                auto index = stack.base[--stack.count];
+                auto entry = dependencies.base[index];
+            
+                for (u32 i = 0; i < entry.children.count; i++)
                 {
-                    resize_buffer(&parent_stack, parent_stack.count + 1);
-                    parent_stack.base[parent_stack.count - 1] = node;
-                }
-                
-                index = dependencies.base[index].parent;
-            }
-        
-            for (u32 i = 0; i < parent_stack.count; i++)
-            {
-                // add in reverse order
-                auto node = parent_stack.base[parent_stack.count - 1 - i];
-                
-                bool found = false;
-                for (u32 j = 0; j < ordered_dependencies.count; j++)
-                {
-                    if (ordered_dependencies.base[j] == node)
+                    auto child_index = entry.children.base[entry.children.count - 1 - i];
+                    auto child = &dependencies.base[child_index];
+                    if (!child->was_visited)
                     {
-                        found = true;
-                        break;
+                        child->was_visited = true;
+                        resize_buffer(&stack, stack.count + 1);
+                        stack.base[stack.count - 1] = child_index;
+                        
+                        resize_buffer(&ordered_dependencies, ordered_dependencies.count + 1);
+                        ordered_dependencies.base[ordered_dependencies.count - 1] = child->node;
                     }
-                }
-                
-                if (!found)
-                {
-                    resize_buffer(&ordered_dependencies, ordered_dependencies.count + 1);
-                    ordered_dependencies.base[ordered_dependencies.count - 1] = node;
                 }
             }
         }
         
+        maybe_print_blank_line(&buffer);
+        
         for (u32 i = 0; i < ordered_dependencies.count; i++)
         {
-            auto node = ordered_dependencies.base[i];
+            // in reverse order
+            auto node = ordered_dependencies.base[ordered_dependencies.count - 1 - i];
             printf("dependency [0x%p] %.*s\n", node, fs(ast_node_type_names[node->node_type]));
                 
             switch (node->node_type)
@@ -1118,6 +1135,20 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     if (!function_type->name.count)
                         continue;
+                    
+                    if (function_type->first_output && function_type->first_output->next)
+                    {
+                        // TODO: add unique result identifier
+                        maybe_print_blank_line(&buffer);
+                        print_line(&buffer, "struct %.*s_result", fs(function_type->name));
+                        
+                        print_scope_open(&buffer);
+    
+                        print_statements(&buffer, function_type->first_output);
+        
+                        print_scope_close(&buffer, false);
+                        print_line(&buffer, ";");
+                    }
                     
                     print(&buffer, "typedef ");
                     print_function_type(&buffer, function_type, function_type->name, true);
@@ -1342,41 +1373,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         }
     }
 
-    // forward declare all functions
-    // TODO: add default values
-    {
-        maybe_print_blank_line(&buffer);
-        
-        local_ast_queue(queue);
-        enqueue(&queue, &root);
-        
-        ast_node *node;
-        while (next(&node, &queue))
-        {
-            if (node->node_type == ast_node_type_function)
-            {
-                local_node_type(function, node);
-                
-                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
-                {
-                    local_node_type(external_binding, function->first_statement);
-                    
-                    print(&buffer, "extern \"C\" ");
-                    
-                    if (external_binding->is_dll)
-                        print(&buffer, "__declspec(dllimport) ");
-                }
-                
-                auto function_type = get_function_type(parser, function);
-                
-                print_function_type(&buffer, function_type, function->name, false);
-                
-                print_line(&buffer, ";");
-            }
-           
-        }
-    }
-
     // declare all structs
     {
         local_ast_queue(queue);
@@ -1549,6 +1545,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     print_scope_close(&buffer);
     
-    u8_array data = { buffer.used_count, buffer.memory.base };
+    u8_array data = buffer_to_array(buffer.memory);
     platform_write_entire_file("lang_output.cpp", data);
 }

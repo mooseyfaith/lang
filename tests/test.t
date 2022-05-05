@@ -11,6 +11,20 @@ def day enum
     sunday;
 }
 
+def foo func(name GLchar ref; count GLint)
+{
+}
+
+def bar func(name GLchar ref);
+var global bardaband bar;
+
+def my_bar func bar
+{
+}
+
+def GLint type s32;
+def GLchar type u8;
+
 def state enum u32
 {
     one;
@@ -40,6 +54,14 @@ else
 
 var window platform_api_window;
 platform_window(platform ref, window ref, "test");
+
+// new feature to get the condition expression inside the if/switch
+if x is 12
+{
+    var r = branch_expression; // x is 12
+}
+// or
+// if var r = x is 12 { ... }
 
 while true
 {
