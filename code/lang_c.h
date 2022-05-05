@@ -174,7 +174,7 @@ bool print_next(ast_node **out_node, ast_queue *queue)
 #define print_expression_declaration void print_expression(lang_c_buffer *buffer, ast_node *node)
 print_expression_declaration;
 
-void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s(""))
+void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_name = s(""))
 {
     //type_modifier modifiers[64];
     //u32 modifiers.count = 0;
@@ -186,45 +186,34 @@ void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s("
 //    }
     
     string name = s("_type_not_found_");
-    if (type.base_type)
+    auto name_type = type.name_type.node;
+    if (name_type)
     {
-        switch (type.base_type->node_type)
+        switch (name_type->node_type)
         {
-            cases_complete_message("%.*s", fs(ast_node_type_names[type.base_type->node_type]));
+            cases_complete_message("%.*s", fs(ast_node_type_names[name_type->node_type]));
             
-            /*case ast_node_type_type_alias:
+            case ast_node_type_type_alias:
             {
-                local_node_type(type_alias, type.reference);
+                local_node_type(type_alias, name_type);
                 name = type_alias->name;
-                type.reference = null;
             } break;
-            
-            
-            case ast_node_type_name_reference:
-            {
-                local_node_type(name_reference, type.reference);
-                name = name_reference->name;
-                
-                // will break if unresolved
-                type.reference = name_reference->reference;
-            } break;
-            */
             
             case ast_node_type_number_type:
             {
-                local_node_type(number_type, type.base_type);
+                local_node_type(number_type, name_type);
                 name = number_type->name;
             } break;
             
             case ast_node_type_compound_type:
             {
-                local_node_type(compound_type, type.base_type);
+                local_node_type(compound_type, name_type);
                 name = compound_type->name;
             } break;
             
             case ast_node_type_function_type:
             {
-                local_node_type(function_type, type.base_type);
+                local_node_type(function_type, name_type);
                 name = function_type->name;
             } break;
         }
@@ -238,9 +227,9 @@ void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s("
     
     print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
     
-    for (u32 i = 0; i < type.modifiers.count; i++)
+    for (u32 i = 0; i < type.name_type.modifiers.count; i++)
     {
-        auto modifier = type.modifiers.base[i];
+        auto modifier = type.name_type.modifiers.base[i];
         switch (modifier.modifier_type)
         {
             cases_complete_message("%.*s", fs(type_modifier_type_names[modifier.modifier_type]));
@@ -278,7 +267,7 @@ void print_type(lang_c_buffer *buffer, ast_type type, string variable_name = s("
         }
     }
     
-    if (variable_name.count && (type.modifiers.count == 0))
+    if (variable_name.count && (type.name_type.modifiers.count == 0))
         print(buffer, " %.*s", fs(variable_name));
     
     // some space for formating, since the * is considered part of the name, not the type in C
@@ -360,7 +349,7 @@ print_expression_declaration
             
             print_expression(buffer, field_reference->expression);
             
-            auto type = get_expression_type(buffer->parser, field_reference->expression);
+            auto type = get_expression_type(buffer->parser, field_reference->expression).base_type;
             if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_indirection))
                 print(buffer, "->");
             else
@@ -816,10 +805,10 @@ void insert_child(node_dependency_buffer *buffer, ast_node *parent, ast_node *ch
     child_entry->is_root = false;
 }
 
-void insert_type_child(node_dependency_buffer *buffer, ast_type type, ast_node *child)
+void insert_type_child(node_dependency_buffer *buffer, complete_type_info type, ast_node *child)
 {
-    if (!type.modifiers.count)
-        insert_child(buffer, type.base_type, child);
+    if (!type.name_type.modifiers.count)
+        insert_child(buffer, type.name_type.node, child);
 }
 
 void insert_declarations(node_dependency_buffer *buffer, ast_node *first_statement, ast_node *child)
