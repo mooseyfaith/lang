@@ -187,6 +187,7 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
     
     string name = s("_type_not_found_");
     auto name_type = type.name_type.node;
+    /*
     if (name_type)
     {
         switch (name_type->node_type)
@@ -219,13 +220,38 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
         }
     }
     else
+    */
     {
         name = type.name;
     }
         
     assert(name.count);
     
-    print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
+    bool is_dynamic_array = false;
+    for (u32 i = 0; i < type.name_type.modifiers.count; i++)
+    {
+        auto modifier = type.name_type.modifiers.base[i];
+        if (modifier.modifier_type == type_modifier_type_dynamic_array)
+        {
+            auto dynamic_array_type = type;
+            dynamic_array_type.name_type.modifiers.count = i;
+            
+            print(buffer, "struct { usize count; ");
+            print_type(buffer, dynamic_array_type, s("*base"));
+            print(buffer, "; }");
+            
+            //if (variable_name.count)
+                //print(buffer, " %.*s", fs(variable_name));
+            
+            type.name_type.modifiers.base  += i + 1;
+            type.name_type.modifiers.count -= i + 1;
+            is_dynamic_array = true;
+            break;
+        }
+    }
+    
+    if (!is_dynamic_array)
+        print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
     
     for (u32 i = 0; i < type.name_type.modifiers.count; i++)
     {
@@ -233,7 +259,7 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
         switch (modifier.modifier_type)
         {
             cases_complete_message("%.*s", fs(type_modifier_type_names[modifier.modifier_type]));
-            
+
             case type_modifier_type_indirection:
             {
                 if (modifier.indirection_count)
@@ -470,7 +496,7 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
         switch (node->node_type)
         {
             // skip global declarations
-            case ast_node_type_enumeration:
+            case ast_node_type_enumeration_type:
             case ast_node_type_type_alias:
             case ast_node_type_function:
             case ast_node_type_number_type:
@@ -709,13 +735,12 @@ string write(string *memory, cstring format, ...)
     return result;
 }
 
-void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type, string name, bool is_function_pointer)
-{
+void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type, string name, bool is_pointer)
+{    
     if (function_type->first_output)
     {
         if (function_type->first_output->next)
         {
-            // TODO: add unique result identifier
             print(buffer, "%.*s_result", fs(name));
         }
         else
@@ -729,7 +754,7 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
         print(buffer, "void");
     }
     
-    if (is_function_pointer)
+    if (is_pointer)
         print(buffer, " (*%.*s)(", fs(name));
     else
         print(buffer, " %.*s(", fs(name));
@@ -784,31 +809,36 @@ u32 insert(node_dependency_buffer *buffer, ast_node *node)
 // TODO: add cycle check
 void insert_child(node_dependency_buffer *buffer, ast_node *parent, ast_node *child)
 {
-    //assert(parent && child);
     assert(child);
     
-    u32 parent_index = insert(buffer, parent);
     u32 child_index = insert(buffer, child);
-    assert(parent_index != child_index);
     
-    auto parent_entry = &buffer->base[parent_index];
-    for (u32 i = 0; i < parent_entry->children.count; i++)
+    if (parent)
     {
-        if (parent_entry->children.base[i] == child_index)
-            return;
+        u32 parent_index = insert(buffer, parent);
+        assert(parent_index != child_index);
+        
+        auto parent_entry = &buffer->base[parent_index];
+        for (u32 i = 0; i < parent_entry->children.count; i++)
+        {
+            if (parent_entry->children.base[i] == child_index)
+                return;
+        }
+        
+        resize_buffer(&parent_entry->children, parent_entry->children.count + 1);
+        parent_entry->children.base[parent_entry->children.count - 1] = child_index;
     }
     
-    resize_buffer(&parent_entry->children, parent_entry->children.count + 1);
-    parent_entry->children.base[parent_entry->children.count - 1] = child_index;
-    
     auto child_entry = &buffer->base[child_index];
-    child_entry->is_root = false;
+    child_entry->is_root &= !parent;
 }
 
 void insert_type_child(node_dependency_buffer *buffer, complete_type_info type, ast_node *child)
 {
-    if (!type.name_type.modifiers.count)
-        insert_child(buffer, type.name_type.node, child);
+    //insert(&dependencies, &type_alias->node);
+    // structs can be forward declared, but others can't
+    //if (!type.name_type.modifiers.count || !is_node_type(type.base_type.node, compound_type))
+    insert_child(buffer, type.name_type.node, child);
 }
 
 void insert_declarations(node_dependency_buffer *buffer, ast_node *first_statement, ast_node *child)
@@ -957,36 +987,31 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         enqueue(&queue, &root);
         
         ast_node *node;
-        while (next(&node, &queue))
+        ast_queue_entry entry;
+        while (next(&entry, &queue))
         {
+            auto node = *entry.node_field;
+            
             if (node->node_type == ast_node_type_compound_type)
             {
                 local_node_type(compound_type, node);
                 
-                print_line(&buffer, "struct %.*s;", fs(compound_type->name));
-            }
-            else if (node->node_type == ast_node_type_function)
-            {
-                local_node_type(function, node);
-                auto function_type = get_function_type(parser, function);
-                
-                if (function_type->first_output && function_type->first_output->next)
+                if (entry.scope && is_node_type(entry.scope, type_alias))
                 {
-                    // TODO: add unique result identifier
-                    print_line(&buffer, "struct %.*s_result;", fs(function->name));
+                    local_node_type(type_alias, entry.scope);
+                    
+                    if (type_alias->type.base_type.modifiers.count == 0)
+                        print_line(&buffer, "struct %.*s;", fs(type_alias->name));
                 }
             }
             else if (node->node_type == ast_node_type_function_type)
             {
                 local_node_type(function_type, node);
                 
-                if (!function_type->name.count)
-                    continue;
-                
                 if (function_type->first_output && function_type->first_output->next)
                 {
                     // TODO: add unique result identifier
-                    print_line(&buffer, "struct %.*s_result;", fs(function_type->name));
+                    print_line(&buffer, "struct _result;", node->index);
                 }
             }
         }
@@ -1014,7 +1039,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 case ast_node_type_type_alias:
                 {
                     local_node_type(type_alias, node);
-                    
+                                        
                     insert_type_child(&dependencies, type_alias->type, &type_alias->node);
                 } break;
                 
@@ -1022,17 +1047,14 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(function, node);
                     
-                    auto function_type = get_function_type(parser, function);
-                    insert_function_type_dependencies(&dependencies, node, function_type);
+                    //auto function_type = get_function_type(parser, function);
+                    insert_type_child(&dependencies, function->type, &function->node);
+                    //insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
                 case ast_node_type_function_type:
                 {
                     local_node_type(function_type, node);
-                    
-                    if (!function_type->name.count)
-                        break;
-                    
                     insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
@@ -1043,11 +1065,11 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     insert_declarations(&dependencies, compound_type->first_statement, node);
                 } break;
                 
-                case ast_node_type_enumeration:
+                case ast_node_type_enumeration_type:
                 {
-                    local_node_type(enumeration, node);
+                    local_node_type(enumeration_type, node);
                     
-                    insert_type_child(&dependencies, enumeration->type, &enumeration->node);
+                    insert_type_child(&dependencies, enumeration_type->item_type, &enumeration_type->node);
                 } break;
             }
         }
@@ -1068,9 +1090,14 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             
             assert(!root->was_visited);
             
+            printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
+            
             resize_buffer(&stack, 1);
             stack.base[0] = i;
             root->was_visited = true;
+            
+            resize_buffer(&ordered_dependencies, ordered_dependencies.count + 1);
+            ordered_dependencies.base[ordered_dependencies.count - 1] = root->node;
             
             while (stack.count)
             {
@@ -1094,111 +1121,126 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             }
         }
         
+        assert(dependencies.count == ordered_dependencies.count);
+        
         maybe_print_blank_line(&buffer);
         
         for (u32 i = 0; i < ordered_dependencies.count; i++)
         {
             // in reverse order
-            auto node = ordered_dependencies.base[ordered_dependencies.count - 1 - i];
-            printf("dependency [0x%p] %.*s\n", node, fs(ast_node_type_names[node->node_type]));
+            auto node = ordered_dependencies.base[i]; //ordered_dependencies.count - 1 - i];
+
+            printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
                 
             switch (node->node_type)
             {
                 cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
                 
                 case ast_node_type_number_type:
+                case ast_node_type_compound_type:
+                case ast_node_type_function_type:
+                case ast_node_type_enumeration_type:
                 break;
                 
                 case ast_node_type_type_alias:
                 {
                     local_node_type(type_alias, node);
                     
-                    print(&buffer, "typedef ");
-                    print_type(&buffer, type_alias->type, type_alias->name);
-                    print_line(&buffer, ";");
-                } break;
-                
-                case ast_node_type_function_type:
-                {
-                    local_node_type(function_type, node);
+                    auto name = type_alias->name;
+                    auto base_type = type_alias->type.base_type.node;
                     
-                    if (!function_type->name.count)
-                        continue;
-                    
-                    if (function_type->first_output && function_type->first_output->next)
+                    if ((type_alias->type.base_type.modifiers.count == 0) && !is_node_type(base_type, number_type))
                     {
-                        // TODO: add unique result identifier
-                        maybe_print_blank_line(&buffer);
-                        print_line(&buffer, "struct %.*s_result", fs(function_type->name));
-                        
-                        print_scope_open(&buffer);
-    
-                        print_statements(&buffer, function_type->first_output);
-        
-                        print_scope_close(&buffer, false);
-                        print_line(&buffer, ";");
-                    }
-                    
-                    print(&buffer, "typedef ");
-                    print_function_type(&buffer, function_type, function_type->name, true);
-                    
-                    print_line(&buffer, ";");
-                } break;
+                        switch (base_type->node_type)
+                        {
+                            cases_complete_message("%.*s", fs(ast_node_type_names[base_type->node_type]));
+                            
+                            case ast_node_type_enumeration_type:
+                            {
+                                local_node_type(enumeration_type, base_type);
+                                
+                                maybe_print_blank_line(&buffer);
+                                print(&buffer, "typedef ");
+                                print_type(&buffer, enumeration_type->item_type, name);
+                                print_line(&buffer, ";");
 
-                case ast_node_type_enumeration:
-                {
-                    local_node_type(enumeration, node);
+                                //print_scope_open(&buffer);
+                                
+                                bool is_not_first = false;
+                                
+                                ast_enumeration_item *last_item_with_expression = null;
+                                u32 value = 0;
+                                
+                                for (auto item = enumeration_type->first_item; item; item = (ast_enumeration_item *) item->node.next)
+                                {
+                                    print(&buffer, "const %.*s %.*s_%.*s = ", fs(name), fs(name), fs(item->name));
+                                    
+                                    if (item->expression)
+                                    {
+                                        print_expression(&buffer, item->expression);
+                                        last_item_with_expression = item;
+                                        value = 0;
+                                    }
+                                    else if (last_item_with_expression)
+                                    {
+                                        print(&buffer, "%.*s_%.*s + %i", fs(name), fs(last_item_with_expression->name), value);
+                                    }
+                                    else
+                                    {
+                                        print(&buffer, "%i", value);
+                                    }
+                                    
+                                    value++;
+                                    
+                                    print_line(&buffer, ";");
+                                }
+                            } break;
+                            
+                            case ast_node_type_function_type:
+                            {
+                                local_node_type(function_type, base_type);
+                                
+                                if (function_type->first_output && function_type->first_output->next)
+                                {
+                                    maybe_print_blank_line(&buffer);
+                                    print_line(&buffer, "struct %.*s_result", fs(name));
+                                    
+                                    print_scope_open(&buffer);
+                
+                                    print_statements(&buffer, function_type->first_output);
                     
-                    maybe_print_blank_line(&buffer);
-                    print(&buffer, "typedef ");
-                    print_type(&buffer, enumeration->type, enumeration->name);
-                    print_line(&buffer, ";");
+                                    print_scope_close(&buffer, false);
+                                    print_line(&buffer, ";");
+                                }
+                                
+                                print(&buffer, "typedef ");
+                                print_function_type(&buffer, function_type, name, true);
+                                
+                                print_line(&buffer, ";");
+                            } break;
+                            
+                            case ast_node_type_compound_type:
+                            {
+                                local_node_type(compound_type, base_type);
+                                
+                                maybe_print_blank_line(&buffer);
+                                print_line(&buffer, "struct %.*s", fs(name));
+                                
+                                print_scope_open(&buffer);
+                
+                                print_statements(&buffer, compound_type->first_statement);
                     
-                    //print_scope_open(&buffer);
-                    
-                    bool is_not_first = false;
-                    
-                    ast_enumeration_item *last_item_with_expression = null;
-                    u32 value = 0;
-                    
-                    for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next)
+                                print_scope_close(&buffer, false);
+                                print_line(&buffer, ";");
+                            } break;
+                        }
+                    }
+                    else
                     {
-                        print(&buffer, "const %.*s %.*s_%.*s = ", fs(enumeration->name), fs(enumeration->name), fs(item->name));
-                        
-                        if (item->expression)
-                        {
-                            print_expression(&buffer, item->expression);
-                            last_item_with_expression = item;
-                            value = 0;
-                        }
-                        else if (last_item_with_expression)
-                        {
-                            print(&buffer, "%.*s_%.*s + %i", fs(enumeration->name), fs(last_item_with_expression->name), value);
-                        }
-                        else
-                        {
-                            print(&buffer, "%i", value);
-                        }
-                        
-                        value++;
-                        
+                        print(&buffer, "typedef ");
+                        print_type(&buffer, type_alias->type, type_alias->name);
                         print_line(&buffer, ";");
                     }
-                } break;
-                
-                case ast_node_type_compound_type:
-                {
-                    local_node_type(compound_type, node);
-                    
-                    maybe_print_blank_line(&buffer);
-                    print_line(&buffer, "struct %.*s", fs(compound_type->name));
-                    
-                    print_scope_open(&buffer);
-    
-                    print_statements(&buffer, compound_type->first_statement);
-        
-                    print_scope_close(&buffer, false);
-                    print_line(&buffer, ";");
                 } break;
                 
                 case ast_node_type_function:
@@ -1209,7 +1251,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     if (function_type->first_output && function_type->first_output->next)
                     {
-                        // TODO: add unique result identifier
                         maybe_print_blank_line(&buffer);
                         print_line(&buffer, "struct %.*s_result", fs(function->name));
                         
@@ -1316,13 +1357,13 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         ast_node *node;
         while (next(&node, &queue))
         {
-            if (node->node_type == ast_node_type_enumeration)
+            if (node->node_type == ast_node_type_enumeration_type)
             {
-                local_node_type(enumeration, node);
+                local_node_type(enumeration_type, node);
                 
                 maybe_print_blank_line(&buffer);
                 print(&buffer, "typedef ");
-                print_type(&buffer, enumeration->type, enumeration->name);
+                print_type(&buffer, enumeration_type->type, enumeration_type->name);
                 print_line(&buffer, ";");
                 
                 //print_scope_open(&buffer);
@@ -1334,7 +1375,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 for (auto item = enumeration->first_item; item; item = (ast_enumeration_item *) item->node.next)
                 {
-                    print(&buffer, "const %.*s %.*s_%.*s = ", fs(enumeration->name), fs(enumeration->name), fs(item->name));
+                    print(&buffer, "const %.*s %.*s_%.*s = ", fs(enumeration_type->name), fs(enumeration_type->name), fs(item->name));
                     
                     if (item->expression)
                     {
@@ -1344,7 +1385,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     }
                     else if (last_item_with_expression)
                     {
-                        print(&buffer, "%.*s_%.*s + %i", fs(enumeration->name), fs(last_item_with_expression->name), value);
+                        print(&buffer, "%.*s_%.*s + %i", fs(enumeration_type->name), fs(last_item_with_expression->name), value);
                     }
                     else
                     {
