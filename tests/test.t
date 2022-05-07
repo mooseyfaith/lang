@@ -52,13 +52,16 @@ else
     printf("default\n");
 }
 
+var platform platform_api;
+platform_init(platform ref);
+
 var window platform_api_window;
 platform_window(platform ref, window ref, "test");
 
 // new feature to get the condition expression inside the if/switch
 if x is 12
 {
-    var r = branch_expression; // x is 12
+    var r;// branch_expression; // x is 12
 }
 // or
 // if var r = x is 12 { ... }

@@ -439,6 +439,8 @@ struct lang_parser
         ast_node        *base_types[lang_base_type_count];
     };
     
+    ast_module *lang_module;
+    
     ast_module *first_module;
     ast_module **module_tail_next;
     
@@ -1521,7 +1523,6 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
         
         case ast_node_type_number_type:
-        case ast_node_type_type_alias:
         case ast_node_type_comment:
         case ast_node_type_number:
         case ast_node_type_string:
@@ -1529,6 +1530,28 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_variable:
         case ast_node_type_external_binding:
         {
+        } break;
+        
+        case ast_node_type_type_alias:
+        {
+            local_node_type(type_alias, node);
+            
+            auto name_node = type_alias->type.name_type.node;
+            if (name_node)
+            {
+                switch (name_node->node_type)
+                {
+                    case ast_node_type_compound_type:
+                    case ast_node_type_function_type:
+                    case ast_node_type_enumeration_type:
+                    {
+                        enqueue(queue, node, &type_alias->type.name_type.node);
+                    } break;
+                }
+            }
+            
+            //if (type_alias->type.name_type.modifiers.count == 0)
+            
         } break;
         
         case ast_node_type_constant:
@@ -1611,6 +1634,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, &function->first_statement);
             
             // function type is declared as part of the function
+            //if (is_node_type(function->type.name_type.node, function_type))
             if (!function->type.name.count)
                 enqueue(queue, node, &function->type.base_type.node);
         } break;
@@ -1733,6 +1757,8 @@ bool next(ast_node **out_node, ast_queue *queue)
     
     return ok;
 }
+
+#define fnode_type_name(node) fs(ast_node_type_names[(node)->node_type])
 
 string get_name(ast_node *node)
 {
@@ -2125,12 +2151,17 @@ def code_location struct
     lang_require_return_value(parse(parser, source, s("lang_internal")), , source, "internal compiler error");
     
     auto file = parser->first_file;
+    parser->lang_module = file->module;
+    
+    // prepend basic types into file
     append(&tail_next, file->first_statement);
     file->first_statement = first_statement;
 }
 
 struct lang_resolver
 {
+    lang_parser *parser;
+    
     ast_list_entry *variable_list;
     ast_list_entry *type_alias_list;
     ast_list_entry *constant_list;
@@ -2206,6 +2237,23 @@ ast_node * find_node(lang_resolver *resolver, ast_node *scope, string name)
     return null;
 }
 
+ast_node * find_node_in_module(lang_resolver *resolver, ast_module *module, string name)
+{
+    for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next)
+    {
+        //if (file == file_it->file)
+            //continue;
+    
+        auto scope = &file_it->file->node;
+        
+        auto node = find_node(resolver, scope, name);
+        if (node)
+            return node;
+    }
+    
+    return null;
+}
+
 ast_node * find_node(lang_resolver *resolver, ast_node_array scope_stack, string name)
 {
     for (u32 i = 0; i < scope_stack.count; i++)
@@ -2221,38 +2269,30 @@ ast_node * find_node(lang_resolver *resolver, ast_node_array scope_stack, string
     {
         local_node_type(file, scope_stack.base[1]);
         
+        {
+            auto module = resolver->parser->lang_module;
+            
+            auto node = find_node_in_module(resolver, module, name);
+            if (node)
+                return node;
+        }
+        
         if (file->module)
         {
             auto module = file->module;
-                
-            for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next)
-            {
-                if (file == file_it->file)
-                    continue;
             
-                auto scope = &file_it->file->node;
-                
-                auto node = find_node(resolver, scope, name);
-                if (node)
-                    return node;
-            }
+            auto node = find_node_in_module(resolver, module, name);
+            if (node)
+                return node;
         }
         
         for (auto module_it = file->first_module_dependency; module_it; module_it = (ast_module_reference *) module_it->node.next)
         {
             auto module = module_it->module;
             
-            for (auto file_it = module->first_file; file_it; file_it = (ast_file_reference *) file_it->node.next)
-            {
-                if (file == file_it->file)
-                    continue;
-            
-                auto scope = &file_it->file->node;
-                
-                auto node = find_node(resolver, scope, name);
-                if (node)
-                    return node;
-            }
+            auto node = find_node_in_module(resolver, module, name);
+            if (node)
+                return node;
         }
     }
     
@@ -2730,6 +2770,7 @@ void resolve(lang_parser *parser)
 #endif
     
     lang_resolver resolver = {};
+    resolver.parser = parser;
     
     // collect declarations
     {
