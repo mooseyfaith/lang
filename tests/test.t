@@ -66,6 +66,8 @@ if x is 12
 // or
 // if var r = x is 12 { ... }
 
+assert(false);
+
 while true
 {
     if not platform_handle_messages(platform ref) 

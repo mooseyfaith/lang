@@ -34,16 +34,26 @@
     macro(cast, __VA_ARGS__) \
     macro(field_reference, __VA_ARGS__) \
     macro(take_reference, __VA_ARGS__) \
+    \
+    \
     macro(prefix_operator, __VA_ARGS__) \
+    \
     macro(not, __VA_ARGS__) \
+    \
+    \
     macro(binary_operator, __VA_ARGS__) \
+    \
     macro(is, __VA_ARGS__) \
     macro(is_not, __VA_ARGS__) \
     macro(is_less, __VA_ARGS__) \
     macro(is_less_equal, __VA_ARGS__) \
     macro(is_greater, __VA_ARGS__) \
     macro(is_greater_equal, __VA_ARGS__) \
+    \
+    macro(bit_not, __VA_ARGS__) \
     macro(bit_or, __VA_ARGS__) \
+    macro(bit_and, __VA_ARGS__) \
+    \
     macro(add, __VA_ARGS__) \
     macro(subtract, __VA_ARGS__) \
     macro(multiply, __VA_ARGS__) \
@@ -102,7 +112,8 @@ string lang_base_type_names[] =
 struct ast_node
 {
     ast_node *next;
-    u32 index;
+    string source;
+    u32    index;
     ast_node_type node_type;
 };
 
@@ -397,14 +408,18 @@ struct ast_binary_operator
 
 typedef ast_binary_operator ast_is;
 typedef ast_binary_operator ast_is_not;
+
 typedef ast_binary_operator ast_is_less;
 typedef ast_binary_operator ast_is_less_equal;
 typedef ast_binary_operator ast_is_greater;
 typedef ast_binary_operator ast_is_greater_equal;
+
+typedef ast_binary_operator ast_bit_not;
 typedef ast_binary_operator ast_bit_or;
+typedef ast_binary_operator ast_bit_and;
+
 typedef ast_binary_operator ast_add;
 typedef ast_binary_operator ast_subtract;
-typedef ast_binary_operator ast_add;
 typedef ast_binary_operator ast_multiply;
 typedef ast_binary_operator ast_divide;
 
@@ -425,15 +440,50 @@ u32 ast_node_type_byte_counts[] = {
     ast_node_type_list(menum_ast_type_byte_count)
 };
 
-#define new_node(node_type) ( (ast_ ## node_type *) init((ast_node *) new ast_ ## node_type, sizeof(ast_ ## node_type), ast_node_type_ ## node_type) )
+#define new_node(node_type) ( (ast_ ## node_type *) node_init(parser, (ast_node *) new ast_ ## node_type, sizeof(ast_ ## node_type), ast_node_type_ ## node_type) )
 #define new_local_node(node_type) ast_ ## node_type *node_type = new_node(node_type)
 
-ast_node * init(ast_node *node, u32 byte_count, ast_node_type node_type)
+struct lang_parser
 {
-    static u32 next_index;
+    string source_name;
+    string source;
+    
+    string iterator;
+    u8 *node_source_base;
+    
+    string tested_patterns[32];
+    u32 tested_pattern_count;
+    
+    bool error;
+    
+    union
+    {
+        ast_number_type *base_number_types[10]; // first types are numbers
+        ast_node        *base_types[lang_base_type_count];
+    };
+    
+    u32 next_node_index;
+    
+    ast_module *lang_module;
+    
+    ast_module *first_module;
+    ast_module **module_tail_next;
+    
+    ast_file   *first_file;
+    ast_file   **file_tail_next;
+    
+    ast_file   *current_file;
+};
 
+ast_node * node_init(lang_parser *parser, ast_node *node, u32 byte_count, ast_node_type node_type)
+{
     memset(node, 0, byte_count);
-    node->index = next_index++;
+    
+    node->source.base  = parser->node_source_base;
+    node->source.count = parser->iterator.base - node->source.base;
+    parser->node_source_base = parser->iterator.base;
+    
+    node->index  = parser->next_node_index++;
     node->node_type = node_type;
     
     return node;
@@ -450,42 +500,20 @@ void append(ast_node ***tail_next, ast_node *node)
 
 #define is_node_type(node, type) ((node)->node_type == ast_node_type_ ## type)
 
-struct lang_parser
-{
-    string source_name;
-    string source;
-    
-    string iterator;
-    
-    bool error;
-    
-    union
-    {
-        ast_number_type *base_number_types[10]; // first types are numbers
-        ast_node        *base_types[lang_base_type_count];
-    };
-    
-    ast_module *lang_module;
-    
-    ast_module *first_module;
-    ast_module **module_tail_next;
-    
-    ast_file   *first_file;
-    ast_file   **file_tail_next;
-    
-    ast_file   *current_file;
-};
-
 bool try_consume(lang_parser *parser, string pattern)
 {
     if (try_skip(&parser->iterator, pattern))
     {
         skip_white(&parser->iterator);
+        parser->tested_pattern_count = 0;
         
         return true;
     }
     else
     {
+        assert(parser->tested_pattern_count < carray_count(parser->tested_patterns));
+        parser->tested_patterns[++parser->tested_pattern_count] = pattern;
+    
         return false;
     }
 }
@@ -499,9 +527,15 @@ bool try_consume_keyword(lang_parser *parser, string keyword)
         if (!parser->iterator.count || (!is_letter(parser->iterator.base[0]) && !is_digit(parser->iterator.base[0])))
         {
             skip_white(&parser->iterator);
+            
+            parser->tested_pattern_count = 0;
+            
             return true;
         }
     }
+    
+    assert(parser->tested_pattern_count < carray_count(parser->tested_patterns));
+    parser->tested_patterns[++parser->tested_pattern_count] = keyword;
     
     parser->iterator = backup;
     return false;
@@ -966,45 +1000,79 @@ parse_expression_declaration
         }
         else
         {
+            u32 operator_node_type = -1;
+            string operator_token = {};
             
-            struct
+            auto backup = parser->iterator;
+            
+            auto keyword = skip_name(&parser->iterator);
+            if (keyword.count)
             {
-                string token;
-                ast_node_type node_type;
-            }
-            operators[] = 
-            {
-                // first match wins, so order is important
-                { s("<="), ast_node_type_is_less_equal },
-                { s("<"), ast_node_type_is_less },
-                { s(">="), ast_node_type_is_greater_equal },
-                { s(">"), ast_node_type_is_greater },
-                
-                
-                { s("+"), ast_node_type_add },
-                { s("-"), ast_node_type_subtract },
-                { s("*"), ast_node_type_multiply },
-                { s("/"), ast_node_type_divide },
-            };
-        
-            u32 found_operator = -1;
-            for (u32 i = 0; i < carray_count(operators); i++)
-            {
-                if (try_consume(parser, operators[i].token))
+                struct
                 {
-                    found_operator = i;
-                    break;
+                    string token;
+                    ast_node_type node_type;
+                }
+                keyword_operators[] = 
+                {
+                    { s("bit_not"), ast_node_type_bit_not },
+                    { s("bit_or"), ast_node_type_bit_or },
+                    { s("bit_and"), ast_node_type_bit_and },
+                };
+                
+                for (u32 i = 0; i < carray_count(keyword_operators); i++)
+                {
+                    if (keyword == keyword_operators[i].token)
+                    {
+                        operator_node_type = keyword_operators[i].node_type;
+                        operator_token     = keyword_operators[i].token;
+                        break;
+                    }
+                }
+                
+                if (operator_node_type == -1)
+                    parser->iterator = backup;
+            }
+            else
+            {
+                struct
+                {
+                    string token;
+                    ast_node_type node_type;
+                }
+                symbol_operators[] = 
+                {
+                    // first match wins, so order is important
+                    { s("<="), ast_node_type_is_less_equal },
+                    { s("<"), ast_node_type_is_less },
+                    { s(">="), ast_node_type_is_greater_equal },
+                    { s(">"), ast_node_type_is_greater },
+                    
+                    
+                    { s("+"), ast_node_type_add },
+                    { s("-"), ast_node_type_subtract },
+                    { s("*"), ast_node_type_multiply },
+                    { s("/"), ast_node_type_divide },
+                };
+            
+                for (u32 i = 0; i < carray_count(symbol_operators); i++)
+                {
+                    if (try_consume(parser, symbol_operators[i].token))
+                    {
+                        operator_node_type = symbol_operators[i].node_type;
+                        operator_token     = symbol_operators[i].token;
+                        break;
+                    }
                 }
             }
-            
-            if (found_operator != -1)
+                
+            if (operator_node_type != -1)
             {
-                auto op = operators[found_operator];
                 new_local_node(binary_operator);
-                binary_operator->node.node_type = op.node_type;
+                binary_operator->node.node_type = (ast_node_type) operator_node_type;
                 binary_operator->left = left;
                 binary_operator->right = lang_require_call(parse_base_expression(parser));
-                lang_require(binary_operator->right, parser->iterator, "expected expression after %.*s '%.*s'", fnode_type_name(&binary_operator->node), fs(op.token));
+                lang_require(binary_operator->right, parser->iterator, "expected expression after %.*s '%.*s'", fnode_type_name(&binary_operator->node), fs(operator_token));
         
                 left = &binary_operator->node;
                 continue;
@@ -2120,6 +2188,7 @@ bool parse(lang_parser *parser, string source, string source_name = s("(internal
     parser->file_tail_next = (ast_file **) &file->node.next;
     
     skip_white(&parser->iterator);
+    parser->node_source_base = parser->iterator.base;
     file->first_statement = parse_statements(parser);
     
     lang_require_return_value(parser->iterator.count == 0, false, parser->iterator, "expected statements, unexpected '%c'", parser->iterator.base[0]);
@@ -2789,6 +2858,124 @@ void add_function_type(ast_node *node, ast_node *scope, ast_function_type *funct
     }
 }
 
+bool try_add_default_argument(lang_parser *parser, ast_function_call *function_call, ast_function_type *function_type, ast_node ***argument_tail_next, ast_node **input_pointer)
+{
+    auto input    = *input_pointer;
+    assert(input);
+    
+    local_node_type(variable, input);
+    
+    auto argument = **argument_tail_next;
+    
+    if (input->next && is_node_type(input->next, assignment))
+    {
+        local_node_type(assignment, input->next);
+        
+        // skip assignment
+        input = input->next;
+
+        // handle special pseudo functions
+        if (is_node_type(assignment->right, function_call))
+        {
+            auto pseudo_function_call = get_node_type(function_call, assignment->right);
+
+            if (is_node_type(pseudo_function_call->expression, name_reference))
+            {
+                local_node_type(name_reference, pseudo_function_call->expression);
+
+                if (name_reference->name == s("get_call_argument_text"))
+                {
+                    lang_require_return_value(pseudo_function_call->first_argument && !pseudo_function_call->first_argument->next && is_node_type(pseudo_function_call->first_argument, name_reference), false, name_reference->name, "pseudo function get_call_argument_text expects exactly one name reference argument");
+
+                    auto argument_name = get_node_type(name_reference, pseudo_function_call->first_argument);
+
+                    auto call_argument = function_call->first_argument;
+                    for (auto input_it = function_type->first_input; input_it; input_it = input_it->next)
+                    {
+                        local_node_type(variable, input_it);
+
+                        if (variable->name == argument_name->name)
+                        {
+                            lang_require_return_value(call_argument != argument, false, name_reference->name, "pseudo function get_call_argument_text can not have itself as the name reference argument");
+
+                            auto text_node = new_node(string);
+                            text_node->text = call_argument->source;
+
+                            // add new argument with default value
+                            text_node->node.next = argument;
+                            **argument_tail_next = &text_node->node;
+                            *argument_tail_next = &text_node->node.next;
+                            // argument stays the same
+
+                            input = input->next;
+                            break;
+                        }
+
+                        if (input_it->next && is_node_type(input_it->next, assignment))
+                            input_it = input_it->next;
+
+                        call_argument = call_argument->next;
+                    }
+
+                    lang_require_return_value(call_argument, false, name_reference->name, "can't find function argument %.*s for pseudo function get_call_argument_text, expects a name of an argument of the function type input", fs(name_reference->name));
+                    
+                    *input_pointer = input;
+                    return true;
+                }
+            }
+#if 0
+            else if (name_reference->name == s("get_call_location"))
+            {
+                lang_require(!pseudo_function_call->first_argument, name_reference->name, "pseudo function get_call_location expects no arguments");
+
+                new_local_node(name_reference);
+                name_reference->name = argument->name;
+                name_reference->reference = &argument->node;
+
+                // need to add struct values
+                assert(0);
+
+                new_local_node(literal);
+
+                new_local_node(assignment);
+                assignment->left = name_reference;
+                assignment->right = &literal->node;
+
+                assignment->node.next = argument->node.next;
+                argument_it->node.next = &assignment->node;
+
+                input = input->next;
+                *input_pointer = input;
+                return true;
+            }
+#endif                            
+        }
+
+        auto input_type = variable->type;
+        auto argument_type = input_type;
+        if (argument)
+            argument_type = get_expression_type(parser, argument);
+
+        // default argument skipped on type missmatch
+        if (argument_type.base_type.node && types_are_compatible(input_type, argument_type))
+        {
+            auto default_expression = clone(parser, assignment->right);
+
+            // add new argument with default value
+            default_expression->next = argument;
+            **argument_tail_next = default_expression;
+            *argument_tail_next = &default_expression->next;
+            // argument stays the same
+
+            input = input->next;
+            *input_pointer = input;
+            return true;
+        }                                                                                           
+    }
+    
+    return false;
+}
+
 void resolve(lang_parser *parser)
 {
     auto root = &parser->first_file->node;
@@ -3004,30 +3191,8 @@ void resolve(lang_parser *parser)
                         local_node_type(variable, input);
                         auto input_type = variable->type;
                         
-                        if (argument_type.base_type.node && input->next && input->next->node_type == ast_node_type_assignment)
-                        {
-                            local_node_type(assignment, input->next);
-                            
-                            // skip assignment
-                            input = input->next;
-                            
-                            // default argument skipped on type missmatch
-                            if (types_are_compatible(input_type, argument_type))
-                            {
-                                local_node_type(assignment, input->next);
-                                
-                                auto default_expression = clone(parser, assignment->right);
-                                
-                                // add new argument with default value
-                                default_expression->next = argument;
-                                *argument_tail_next = default_expression;
-                                argument_tail_next = &default_expression->next;
-                                // argument stays the same
-                            
-                                input = input->next;
-                                continue;
-                            }
-                        }
+                        if (try_add_default_argument(parser, function_call, function_type, &argument_tail_next, &input))
+                            continue;
                         
                         argument_tail_next = &argument->next;
                         argument = *argument_tail_next;
@@ -3041,18 +3206,8 @@ void resolve(lang_parser *parser)
                         local_node_type(variable, input);
                         lang_require_return_value(input->next && (input->next->node_type == ast_node_type_assignment), , parser->iterator, "expected argument '%.*s' in function call", fs(variable->name));
                         
-                        local_node_type(assignment, input->next);
-                                
-                        auto default_expression = clone(parser, assignment->right);
-                        
-                        *argument_tail_next = default_expression;
-                        argument_tail_next = &default_expression->next;
-                        // argument stays the same
-                        
-                        // skip assignment
-                        input = input->next;
-                        
-                        input = input->next;
+                        bool ok = try_add_default_argument(parser, function_call, function_type, &argument_tail_next, &input);
+                        assert(ok);
                     }
                 } break;
             }

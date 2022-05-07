@@ -437,7 +437,9 @@ print_expression_declaration
                     s(">"),
                     s(">="),
                     
+                    s("~"),
                     s("|"),
+                    s("&"),
                     
                     s("+"),
                     s("-"),
@@ -932,7 +934,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         
         // HACK: compiler should resolve this call internally an generate proper expressions
         print_newline(&buffer);
-        print_line(&buffer, "#define get_call_location code_location{ \"\", __FILE__, __FUNCTION__, __LINE__, 0 }");
+        print_line(&buffer, "#define get_call_location() code_location{ \"\", __FILE__, __FUNCTION__, __LINE__, 0 }");
     }
     
     auto root = &parser->first_file->node;

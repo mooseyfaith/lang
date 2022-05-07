@@ -16,9 +16,8 @@ def platform_api_window struct
 
 def platform_button struct
 {
-    var is_active                       bool;
-    var half_transition_count           u32;
-    var half_transition_count_over_flow u8;
+    var is_active             bool;
+    var half_transition_count u8;
 }
 
 def platform_button_was_pressed func(button platform_button) (result bool)
@@ -46,6 +45,18 @@ def platform_key_was_pressed func(platform platform_api; key u32) (result bool)
 def platform_key_was_released func(platform platform_api; key u32) (result bool)
 {
     return platform_button_was_released(platform.keys[key]);
+}
+
+def platform_button_update func(button platform_button ref; is_active bool)
+{
+    assert(button.is_active is_not is_active);
+    
+    button.is_active = is_active;
+    
+    // make sure overflow bit remains
+    var overflow_mask = button.half_transition_count bit_and 0x80;
+    button.half_transition_count = button.half_transition_count + 1;
+    button.half_transition_count = button.half_transition_count bit_or overflow_mask;
 }
 
 //def platform_button mask u8
@@ -100,6 +111,13 @@ def platform_window_frame func(platform platform_api ref; window platform_api_wi
 
 def platform_handle_messages func(platform platform_api ref) (result bool)
 {
+    var key_index;
+    while key_index < 256
+    {
+        platform.keys[key_index].half_transition_count = 0;
+        key_index = key_index + 1;
+    }
+
     var msg MSG;
     while PeekMessage(msg ref, null, 0, 0, PM_REMOVE)
     {
@@ -110,13 +128,11 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
         }
         case WM_KEYDOWN
         {
-            platform.keys[msg.wParam].is_active = true;
-            platform.keys[msg.wParam].half_transition_count = platform.keys[msg.wParam].half_transition_count + 1;
+            platform_button_update(platform.keys[msg.wParam] ref, true);
         }
         case WM_KEYUP
         {
-            platform.keys[msg.wParam].is_active = false;
-            platform.keys[msg.wParam].half_transition_count = platform.keys[msg.wParam].half_transition_count + 1;
+            platform_button_update(platform.keys[msg.wParam] ref, false);
         }
     
         TranslateMessage(msg ref);
@@ -138,12 +154,24 @@ def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param
     return DefWindowProc(window, msg, w_param, l_param);
 }
 
-def platform_require func(condition bool; location code_location = get_call_location)
+def platform_require func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
 {
     if not condition
     {
         printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
+        printf("\tCondition '%s' is false.\n\n", condition_text);
         printf("\tGetLastError() = 0x%x\n", GetLastError());
+        exit(0);
+    }
+}
+
+def assert func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+{
+    if not condition
+    {
+        printf("\n%s,%s(%i,%i): Assertion Failed\n\n", location.file, location.function, location.line, location.column);
+        printf("\tCondition '%s' is false.\n\n", condition_text);
+        __debugbreak();
         exit(0);
     }
 }
