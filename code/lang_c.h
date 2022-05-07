@@ -303,8 +303,6 @@ print_expression_declaration
 {
     switch (node->node_type)
     {
-        cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
-        
         case ast_node_type_number:
         {
             local_node_type(number, node);
@@ -422,60 +420,47 @@ print_expression_declaration
             print_expression(buffer, not->expression);
         } break;
         
-        case ast_node_type_is:
+        default:
         {
-            local_node_type(is, node);
+            if (is_prefix_operator(node))
+            {
+            }
+            else if (is_binary_operator(node))
+            {
+                string c_symbols[] =
+                {
+                    s("=="),
+                    s("!="),
+                    
+                    s("<"),
+                    s("<="),
+                    s(">"),
+                    s(">="),
+                    
+                    s("|"),
+                    
+                    s("+"),
+                    s("-"),
+                    s("*"),
+                    s("/"),
+                };
+                
+                u32 c_symbol_index = node->node_type - ast_node_type_binary_operator - 1;
+                assert(c_symbol_index < carray_count(c_symbols));
+                
+                auto binary_operator = (ast_binary_operator *) node;
             
-            print(buffer, "(");
-            print_expression(buffer, is->left);
-            print(buffer, " == ");
-            print_expression(buffer, is->right);
-            print(buffer, ")");
-        } break;
-        
-        case ast_node_type_is_not:
-        {
-            local_node_type(is_not, node);
-            
-            print(buffer, "(");
-            print_expression(buffer, is_not->left);
-            print(buffer, " != ");
-            print_expression(buffer, is_not->right);
-            print(buffer, ")");
-        } break;
-        
-        case ast_node_type_bit_or:
-        {
-            local_node_type(bit_or, node);
-            
-            print(buffer, "(");
-            print_expression(buffer, bit_or->left);
-            print(buffer, " | ");
-            print_expression(buffer, bit_or->right);
-            print(buffer, ")");
-        } break;
-        
-        case ast_node_type_add:
-        {
-            local_node_type(add, node);
-            
-            print(buffer, "(");
-            print_expression(buffer, add->left);
-            print(buffer, " + ");
-            print_expression(buffer, add->right);
-            print(buffer, ")");
-        } break;
-        
-        case ast_node_type_subtract:
-        {
-            local_node_type(subtract, node);
-            
-            print(buffer, "(");
-            print_expression(buffer, subtract->left);
-            print(buffer, " - ");
-            print_expression(buffer, subtract->right);
-            print(buffer, ")");
-        } break;
+                print(buffer, "(");
+                print_expression(buffer, binary_operator->left);
+                print(buffer, " %.*s ", fs(c_symbols[c_symbol_index]));
+                print_expression(buffer, binary_operator->right);
+                print(buffer, ")");
+            }
+            else
+            {
+                assert(false, "unhandled expression type %.*s", fnode_type_name(node));
+            }
+        }
     }
 }
 

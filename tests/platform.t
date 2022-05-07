@@ -21,6 +21,33 @@ def platform_button struct
     var half_transition_count_over_flow u8;
 }
 
+def platform_button_was_pressed func(button platform_button) (result bool)
+{
+    var x u32 = 2 - button.is_active;
+    return button.half_transition_count >= x;
+}
+
+def platform_button_was_released func(button platform_button) (result bool)
+{
+    var x u32 = 1 + button.is_active;
+    return button.half_transition_count >= x;
+}
+
+def platform_key_is_active func(platform platform_api; key u32) (result bool)
+{
+    return platform.keys[key].is_active;
+}
+
+def platform_key_was_pressed func(platform platform_api; key u32) (result bool)
+{
+    return platform_button_was_pressed(platform.keys[key]);
+}
+
+def platform_key_was_released func(platform platform_api; key u32) (result bool)
+{
+    return platform_button_was_released(platform.keys[key]);
+}
+
 //def platform_button mask u8
 //{
 //    is_active                       u1;

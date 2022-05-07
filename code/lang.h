@@ -39,9 +39,15 @@
     macro(binary_operator, __VA_ARGS__) \
     macro(is, __VA_ARGS__) \
     macro(is_not, __VA_ARGS__) \
+    macro(is_less, __VA_ARGS__) \
+    macro(is_less_equal, __VA_ARGS__) \
+    macro(is_greater, __VA_ARGS__) \
+    macro(is_greater_equal, __VA_ARGS__) \
     macro(bit_or, __VA_ARGS__) \
     macro(add, __VA_ARGS__) \
     macro(subtract, __VA_ARGS__) \
+    macro(multiply, __VA_ARGS__) \
+    macro(divide, __VA_ARGS__) \
     
     
 #define menum(entry, prefix) \
@@ -90,6 +96,8 @@ string lang_base_type_names[] =
 {
     lang_base_type_list(menum_name)
 };
+
+#define fnode_type_name(node) fs(ast_node_type_names[(node)->node_type])
 
 struct ast_node
 {
@@ -386,11 +394,29 @@ struct ast_binary_operator
     ast_node *left, *right;
 };
 
+
 typedef ast_binary_operator ast_is;
 typedef ast_binary_operator ast_is_not;
+typedef ast_binary_operator ast_is_less;
+typedef ast_binary_operator ast_is_less_equal;
+typedef ast_binary_operator ast_is_greater;
+typedef ast_binary_operator ast_is_greater_equal;
 typedef ast_binary_operator ast_bit_or;
 typedef ast_binary_operator ast_add;
 typedef ast_binary_operator ast_subtract;
+typedef ast_binary_operator ast_add;
+typedef ast_binary_operator ast_multiply;
+typedef ast_binary_operator ast_divide;
+
+bool is_prefix_operator(ast_node *node)
+{
+    return ((ast_node_type_prefix_operator <= node->node_type) && (node->node_type < ast_node_type_binary_operator));
+}
+
+bool is_binary_operator(ast_node *node)
+{
+    return ((ast_node_type_binary_operator <= node->node_type) && (node->node_type < ast_node_type_count));
+}
 
 #define menum_ast_type_byte_count(entry, ...) \
     sizeof(ast_ ## entry),
@@ -938,25 +964,51 @@ parse_expression_declaration
             left = &bit_or->node;
             continue;
         }
-        else if (try_consume(parser, s("-")))
+        else
         {
-            new_local_node(subtract);
-            subtract->left = left;
-            subtract->right = lang_require_call(parse_base_expression(parser));
-            lang_require(subtract->right, parser->iterator, "expected expression after subtract '-'");
             
-            left = &subtract->node;
-            continue;
-        }
-        else if (try_consume(parser, s("+")))
-        {
-            new_local_node(add);
-            add->left = left;
-            add->right = lang_require_call(parse_base_expression(parser));
-            lang_require(add->right, parser->iterator, "expected expression after add '+'");
+            struct
+            {
+                string token;
+                ast_node_type node_type;
+            }
+            operators[] = 
+            {
+                // first match wins, so order is important
+                { s("<="), ast_node_type_is_less_equal },
+                { s("<"), ast_node_type_is_less },
+                { s(">="), ast_node_type_is_greater_equal },
+                { s(">"), ast_node_type_is_greater },
+                
+                
+                { s("+"), ast_node_type_add },
+                { s("-"), ast_node_type_subtract },
+                { s("*"), ast_node_type_multiply },
+                { s("/"), ast_node_type_divide },
+            };
+        
+            u32 found_operator = -1;
+            for (u32 i = 0; i < carray_count(operators); i++)
+            {
+                if (try_consume(parser, operators[i].token))
+                {
+                    found_operator = i;
+                    break;
+                }
+            }
             
-            left = &add->node;
-            continue;
+            if (found_operator != -1)
+            {
+                auto op = operators[found_operator];
+                new_local_node(binary_operator);
+                binary_operator->node.node_type = op.node_type;
+                binary_operator->left = left;
+                binary_operator->right = lang_require_call(parse_base_expression(parser));
+                lang_require(binary_operator->right, parser->iterator, "expected expression after %.*s '%.*s'", fnode_type_name(&binary_operator->node), fs(op.token));
+        
+                left = &binary_operator->node;
+                continue;
+            }
         }
         
         break;
@@ -1509,6 +1561,75 @@ void enqueue(ast_queue *queue, ast_node **node)
     enqueue(queue, null, node);
 }
 
+string get_name(ast_node *node)
+{
+    string name = s("");
+    switch (node->node_type)
+    {
+        case ast_node_type_file:
+        {
+            local_node_type(file, node);
+            name = file->path;
+        } break;
+        
+        case ast_node_type_module:
+        {
+            local_node_type(module, node);
+            name = module->name;
+        } break;
+
+        case ast_node_type_variable:
+        {
+            local_node_type(variable, node);
+            name = variable->name;
+        } break;
+
+        case ast_node_type_enumeration_item:
+        {
+            local_node_type(enumeration_item, node);
+            name = enumeration_item->name;
+        } break;
+
+        case ast_node_type_constant:
+        {
+            local_node_type(constant, node);
+            name = constant->name;
+        } break;
+
+        case ast_node_type_number_type:
+        {
+            local_node_type(number_type, node);
+            name = number_type->name;
+        } break;
+
+        case ast_node_type_name_reference:
+        {
+            local_node_type(name_reference, node);
+            name = name_reference->name;
+        } break;
+
+        case ast_node_type_field_reference:
+        {
+            local_node_type(field_reference, node);
+            name = field_reference->name;
+        } break;
+
+        case ast_node_type_type_alias:
+        {
+            local_node_type(type_alias, node);
+            name = type_alias->name;
+        } break;
+
+        case ast_node_type_function:
+        {
+            local_node_type(function, node);
+            name = function->name;
+        } break;
+    }
+
+    return name;
+}
+
 bool next(ast_queue_entry *out_entry, ast_queue *queue)
 {
     if (!queue->used_count)
@@ -1520,8 +1641,6 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
     
     switch (node->node_type)
     {
-        cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
-        
         case ast_node_type_number_type:
         case ast_node_type_comment:
         case ast_node_type_number:
@@ -1574,21 +1693,6 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             local_node_type(not, node);
             
             enqueue(queue, node, &not->expression);
-        } break;
-        
-        // case ast_node_type_binary_operator:
-        case ast_node_type_is:
-        case ast_node_type_is_not:
-        case ast_node_type_bit_or:
-        case ast_node_type_add:
-        case ast_node_type_subtract:
-        {
-            // HACK: set type to base type, so we can avoid assert
-            scope_push(node->node_type, ast_node_type_binary_operator);
-            local_node_type(binary_operator, node);
-            
-            enqueue(queue, node, &binary_operator->right);
-            enqueue(queue, node, &binary_operator->left);
         } break;
         
         case ast_node_type_assignment:
@@ -1740,6 +1844,23 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             enqueue(queue, node, &array_index->array_expression);
         } break;
         
+        default:
+        {
+            if (is_prefix_operator(node))
+            {
+                assert(0);
+            }
+            else if (is_binary_operator(node))
+            {
+                auto binary_operator = (ast_binary_operator *) node;
+                enqueue(queue, node, &binary_operator->right);
+                enqueue(queue, node, &binary_operator->left);
+            }
+            else
+            {
+                assert(false, "unhandled node type '%.*s' %.*s", fs(get_name(node)), fnode_type_name(node));
+            }
+        }
     }
     
     *out_entry = entry;
@@ -1756,77 +1877,6 @@ bool next(ast_node **out_node, ast_queue *queue)
         *out_node = *out_entry.node_field;
     
     return ok;
-}
-
-#define fnode_type_name(node) fs(ast_node_type_names[(node)->node_type])
-
-string get_name(ast_node *node)
-{
-    string name = s("");
-    switch (node->node_type)
-    {
-        case ast_node_type_file:
-        {
-            local_node_type(file, node);
-            name = file->path;
-        } break;
-        
-        case ast_node_type_module:
-        {
-            local_node_type(module, node);
-            name = module->name;
-        } break;
-
-        case ast_node_type_variable:
-        {
-            local_node_type(variable, node);
-            name = variable->name;
-        } break;
-
-        case ast_node_type_enumeration_item:
-        {
-            local_node_type(enumeration_item, node);
-            name = enumeration_item->name;
-        } break;
-
-        case ast_node_type_constant:
-        {
-            local_node_type(constant, node);
-            name = constant->name;
-        } break;
-
-        case ast_node_type_number_type:
-        {
-            local_node_type(number_type, node);
-            name = number_type->name;
-        } break;
-
-        case ast_node_type_name_reference:
-        {
-            local_node_type(name_reference, node);
-            name = name_reference->name;
-        } break;
-
-        case ast_node_type_field_reference:
-        {
-            local_node_type(field_reference, node);
-            name = field_reference->name;
-        } break;
-
-        case ast_node_type_type_alias:
-        {
-            local_node_type(type_alias, node);
-            name = type_alias->name;
-        } break;
-
-        case ast_node_type_function:
-        {
-            local_node_type(function, node);
-            name = function->name;
-        } break;
-    }
-
-    return name;
 }
 
 ast_node * clone(lang_parser *parser, ast_node *root)
@@ -1976,11 +2026,14 @@ complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
             if (!type.name_type.node)
                 return {};
             
+            // THIS IS NOT ENTIRELY CORRECT
             auto name_type = &type.name_type;
             assert(name_type->modifiers.count && ((name_type->modifiers.base[name_type->modifiers.count - 1].modifier_type == type_modifier_type_constant_array) || (name_type->modifiers.base[name_type->modifiers.count - 1].modifier_type == type_modifier_type_dynamic_array)));
             
             // type without the array part, a sub array
-            name_type->modifiers.count--;
+            //name_type->modifiers.count--;
+            type.name_type.modifiers.count--; // this might fail
+            type.base_type.modifiers.count--;
             return type;
         } break;
         
