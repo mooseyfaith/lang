@@ -829,7 +829,7 @@ void insert_child(node_dependency_buffer *buffer, ast_node *parent, ast_node *ch
         auto child_entry = &buffer->base[child_index];
         child_entry->is_root = false;
         
-        printf("[%p] '%.*s' %.*s depends on [%p] '%.*s' %.*s\n", child, fs(get_name(child)), fnode_type_name(child), parent, fs(get_name(parent)), fnode_type_name(parent));
+        // printf("[%p] '%.*s' %.*s depends on [%p] '%.*s' %.*s\n", child, fs(get_name(child)), fnode_type_name(child), parent, fs(get_name(parent)), fnode_type_name(parent));
     }
 }
 
@@ -1114,7 +1114,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             // clear visited flags
             memset(node_is_visited.base, 0, sizeof(node_is_visited.base[0]) * node_is_visited.count);
             
-            printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
+            // printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
             
             resize_buffer(&stack, 1);
             stack.base[0] = root_index;
@@ -1205,7 +1205,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             // in reverse order
             auto node = ordered_dependencies.base[i]; //ordered_dependencies.count - 1 - i];
 
-            printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
+            // printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
                 
             switch (node->node_type)
             {

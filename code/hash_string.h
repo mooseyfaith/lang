@@ -37,19 +37,35 @@ void crc32_init()
     } while (i > 0);
 }
 
+u32 crc32_begin()
+{
+    return 0xFFFFFFFF;
+}
+
+u32 crc32_advance(u32 crc32_value, u8_array data)
+{
+    for (u32 i = 0; i < data.count; i++)
+    {
+        u32 index = (crc32_value ^ data.base[i]) & 255;
+        crc32_value = (crc32_value >> 8) ^ crc32_table[index];
+    }
+    
+    return crc32_value;
+}
+
+u32 crc32_end(u32 crc32_value)
+{
+    crc32_value = crc32_value ^ 0xFFFFFFFF;
+    return crc32_value;
+}
+
 u32 hash_of(string text)
 {
     assert(crc32_table[1], "crc32_table not init, run crc32_init first");
 
-    // CRC-32
-    u32 value = 0xFFFFFFFF;
-    for (u32 i = 0; i < text.count; i++)
-    {
-        u32 index = (value ^ text.base[i]) & 255;
-        value = (value >> 8) ^ crc32_table[index];
-    }
-    
-    value = value ^ 0xFFFFFFFF;
+    u32 value = crc32_begin();
+    value = crc32_advance(value, text);
+    value = crc32_end(value);
     
     return value;
 }

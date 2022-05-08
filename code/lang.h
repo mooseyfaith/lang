@@ -2280,23 +2280,160 @@ def code_location struct
     file->first_statement = first_statement;
 }
 
+struct resolve_table_key
+{
+    string name;
+    ast_node *scope;
+};
+
+struct resolve_table
+{
+    usize count;
+    usize used_count;
+    resolve_table_key *keys;
+    ast_node          **values;
+};
+
+usize hash_of(resolve_table_key key)
+{
+    u32 value = crc32_begin();
+    value = crc32_advance(value, { sizeof(key.scope), (u8 *) key.scope }); // pointer bytes
+    value = crc32_advance(value, key.name);
+    value = crc32_end(value);
+    
+    return value;
+}
+
+usize get_slot(resolve_table table, resolve_table_key key)
+{
+    auto it = find_begin(table.count, hash_of(key));
+    
+    usize slot;
+    while (find_next(&slot, &it))
+    {
+        auto slot_key = table.keys[slot];
+        if (!slot_key.name.count || ((slot_key.scope == key.scope) && (slot_key.name == key.name)))
+            return slot;
+    }
+    
+    return -1;
+}
+
+ast_node * get(resolve_table table, resolve_table_key key)
+{
+    auto slot = get_slot(table, key);
+    if ((slot == -1) || (!table.keys[slot].name.count))
+        return null;
+    
+    return table.values[slot];
+}
+
+resolve_table make_resolve_table(usize count)
+{
+    resolve_table table = {};
+    table.count = count;
+    
+    usize keys_byte_count   = sizeof(table.keys[0])   * table.count;
+    usize values_byte_count = sizeof(table.values[0]) * table.count;
+    
+    table.keys = (resolve_table_key *) platform_allocate_bytes(keys_byte_count + values_byte_count).base;
+    
+    // TODO check alignment?
+    table.values = (ast_node **) ((u8 *) table.keys + keys_byte_count);
+    
+    memset(table.keys, 0, keys_byte_count);
+    
+    return table;
+}
+
+void free(resolve_table *table)
+{
+    platform_free_bytes((u8 *) table->keys);
+    *table = {};
+}
+
+bool insert(resolve_table *table, resolve_table_key key, ast_node *value)
+{
+    auto slot = get_slot(*table, key);
+    usize new_count = table->count;
+    
+    u32 debug_repeat_count = 0;
+    while (slot == -1)
+    {
+        assert(debug_repeat_count < 2);
+        debug_repeat_count++;
+        
+        new_count <<= 1;
+        resolve_table new_table = make_resolve_table(new_count);
+        
+        for (usize i = 0; i < table->count; i++)
+        {
+            if (table->keys[i].name.count)
+            {
+                slot = get_slot(new_table, table->keys[i]);
+                
+                // can't insert all previous keys
+                if (slot == -1)
+                {
+                    free(&new_table);
+                    break;
+                }
+                
+                new_table.keys[slot]   = table->keys[i];
+                new_table.values[slot] = table->values[i];
+            }
+        }
+        
+        slot = get_slot(new_table, key);
+        
+        // still can't insert new key
+        if (slot == -1)
+        {
+            free(&new_table);
+            continue;
+        }
+        
+        new_table.used_count = table->used_count;
+        
+        // success, free old table
+        free(table);
+        *table = new_table;
+        break;
+    }
+    
+    bool is_new = !table->keys[slot].name.count;
+    table->keys[slot]   = key;
+    table->values[slot] = value;
+    
+    table->used_count += is_new;
+    
+    return is_new;
+}
+
 struct lang_resolver
 {
     lang_parser *parser;
     
+    resolve_table table;
+    
+#if 0
     ast_list_entry *variable_list;
     ast_list_entry *type_alias_list;
     ast_list_entry *constant_list;
     ast_list_entry *function_list;
     ast_list_entry *compound_type_list;
     ast_list_entry *function_type_list;
+#endif
 };
 
 ast_node * find_node(lang_resolver *resolver, ast_node *scope, string name)
 {
     if (!scope)
         return null;
+    
+    return get(resolver->table, { name, scope });
         
+#if 0
     for (auto it = resolver->variable_list; it; it = it->next)
     {
         local_node_type(variable, it->node);
@@ -2357,6 +2494,7 @@ ast_node * find_node(lang_resolver *resolver, ast_node *scope, string name)
     }
     
     return null;
+#endif
 }
 
 ast_node * find_node_in_module(lang_resolver *resolver, ast_module *module, string name)
@@ -2385,6 +2523,21 @@ ast_node * find_node(lang_resolver *resolver, ast_node_array scope_stack, string
         auto node = find_node(resolver, scope, name);
         if (node)
             return node;
+            
+        // check function type scope
+        if (scope && is_node_type(scope, function))
+        {
+            local_node_type(function, scope);
+            
+            scope = function->type.base_type.node;
+            if (scope)
+            {
+                auto node = find_node(resolver, scope, name);
+                
+                if (node)
+                    return node;
+            }
+        }
     }
     
     if (scope_stack.count >= 2)
@@ -3012,16 +3165,12 @@ void resolve(lang_parser *parser)
     lang_resolver resolver = {};
     resolver.parser = parser;
     
+    resolver.table = make_resolve_table(1024);
+    defer { free(&resolver.table); };
+    
     // collect declarations
     {
         local_ast_queue(queue);
-        
-        auto constant_tail_next = &resolver.constant_list;
-        auto type_alias_tail_next = &resolver.type_alias_list;
-        //auto function_type_tail_next = &resolver.function_type_list;
-        //auto compound_type_tail_next = &resolver.compound_type_list;
-        auto variable_tail_next = &resolver.variable_list;
-        auto function_tail_next = &resolver.function_list;
         
         if (root)
             enqueue(&queue, &root);
@@ -3034,120 +3183,18 @@ void resolve(lang_parser *parser)
             switch (node->node_type)
             {
                 case ast_node_type_type_alias:
-                {
-                    auto new_entry = new ast_list_entry;
-                    *new_entry = {};
-                    new_entry->node  = node;
-                    new_entry->scope = entry.scope;
-                    
-                    *type_alias_tail_next = new_entry;
-                    type_alias_tail_next = &new_entry->next;
-                } break;
-                
                 case ast_node_type_constant:
-                {
-                    auto new_entry = new ast_list_entry;
-                    *new_entry = {};
-                    new_entry->node  = node;
-                    new_entry->scope = entry.scope;
-                    
-                    *constant_tail_next = new_entry;
-                    constant_tail_next = &new_entry->next;
-                    
-                #if 0
-                    local_node_type(variable, node);
-                    if (entry.scope)
-                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
-                    else
-                        printf("scope [0x%p] root: ", entry.scope);
-                    
-                    printf("var %.*s\n", fs(variable->name));
-                #endif
-                } break;
-                
                 case ast_node_type_variable:
-                {
-                    auto new_entry = new ast_list_entry;
-                    *new_entry = {};
-                    new_entry->node  = node;
-                    new_entry->scope = entry.scope;
-                    
-                    *variable_tail_next = new_entry;
-                    variable_tail_next = &new_entry->next;
-                    
-                #if 0
-                    local_node_type(variable, node);
-                    if (entry.scope)
-                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
-                    else
-                        printf("scope [0x%p] root: ", entry.scope);
-                    
-                    printf("var %.*s\n", fs(variable->name));
-                #endif
-                } break;
-                
                 case ast_node_type_function:
                 {
-                    local_node_type(function, node);
-                    
-                    if (function->type.base_type.node)
-                    {
-                        auto function_type = get_function_type(parser, function);
-                        add_function_type(node, entry.scope, function_type, &function_tail_next, &variable_tail_next);
-                    }
-                    
-                #if 0
-                    local_node_type(function, node);
-                    if (entry.scope)
-                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
-                    else
-                        printf("scope [0x%p] root: ", entry.scope);
-                    
-                    printf("func [0x%p] %.*s\n", function, fs(function->name));
-                #endif
+                    auto is_new = insert(&resolver.table, { get_name(node), entry.scope }, node);
+                    assert(is_new);
                 } break;
-                
-            #if 0
-                case ast_node_type_function_type:
-                {
-                    local_node_type(function_type, node);
-                    
-                    // not a pure type definition
-                    if (!function_type->name.count)
-                        continue;
-                
-                    add_function_type(node, entry.scope, function_type, &function_type_tail_next, &variable_tail_next);
-                    
-                #if 0
-                    if (entry.scope)
-                        printf("scope [0x%p] %.*s: ", entry.scope, fs(ast_node_type_names[entry.scope->node_type]));
-                    else
-                        printf("scope [0x%p] root: ", entry.scope);
-                    
-                    printf("func type [0x%p] %.*s\n", function_type, fs(function_type->name));
-                #endif
-                } break;
-                
-                case ast_node_type_compound_type:
-                {
-                    local_node_type(compound_type, node);
-                    
-                    // not a pure type definition
-                    if (!compound_type->name.count)
-                        continue;
-                
-                    auto new_entry = new ast_list_entry;
-                    *new_entry = {};
-                    new_entry->node  = node;
-                    new_entry->scope = entry.scope;
-                    
-                    *compound_type_tail_next = new_entry;
-                    compound_type_tail_next = &new_entry->next;
-                } break;
-            #endif
             }
         }
     }
+    
+    printf("table used count / count: %llu / %llu\n", resolver.table.used_count, resolver.table.count);
     
     resolve_names(parser, &resolver, root);
     
