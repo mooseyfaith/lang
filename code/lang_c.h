@@ -176,125 +176,23 @@ print_expression_declaration;
 
 void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_name = s(""))
 {
-    //type_modifier modifiers[64];
-    //u32 modifiers.count = 0;
-    
-    //for (u32 i = 0; i < type.modifiers.count; i++)
-    //{
-//        assert(modifiers.count < carray_count(modifiers));
-//        modifiers[modifiers.count++] = type.modifiers[i];
-//    }
-    
-    string name = s("_type_not_found_");
     auto name_type = type.name_type.node;
-    /*
-    if (name_type)
-    {
-        switch (name_type->node_type)
-        {
-            cases_complete_message("%.*s", fs(ast_node_type_names[name_type->node_type]));
-            
-            case ast_node_type_type_alias:
-            {
-                local_node_type(type_alias, name_type);
-                name = type_alias->name;
-            } break;
-            
-            case ast_node_type_number_type:
-            {
-                local_node_type(number_type, name_type);
-                name = number_type->name;
-            } break;
-            
-            case ast_node_type_compound_type:
-            {
-                local_node_type(compound_type, name_type);
-                name = compound_type->name;
-            } break;
-            
-            case ast_node_type_function_type:
-            {
-                local_node_type(function_type, name_type);
-                name = function_type->name;
-            } break;
-        }
-    }
+    
+    if (is_node_type(name_type, array_type))
+        print(buffer, "_array_type_%x", name_type->index);
+    else if (type.name.count)
+        print(buffer, "%.*s", type.name);
     else
-    */
-    {
-        name = type.name;
-    }
+        print(buffer, "_type_not_resolved_");
+    
+    if (type.name_type.indirection_count)
+        print(buffer, " ");
         
-    assert(name.count);
+    for (u32 i = 0; i < type.name_type.indirection_count; i++)
+        print(buffer, "*");
     
-    bool is_dynamic_array = false;
-    for (u32 i = 0; i < type.name_type.modifiers.count; i++)
-    {
-        auto modifier = type.name_type.modifiers.base[i];
-        if (modifier.modifier_type == type_modifier_type_dynamic_array)
-        {
-            auto dynamic_array_type = type;
-            dynamic_array_type.name_type.modifiers.count = i;
-            
-            print(buffer, "struct { usize count; ");
-            print_type(buffer, dynamic_array_type, s("*base"));
-            print(buffer, "; }");
-            
-            //if (variable_name.count)
-                //print(buffer, " %.*s", fs(variable_name));
-            
-            type.name_type.modifiers.base  += i + 1;
-            type.name_type.modifiers.count -= i + 1;
-            is_dynamic_array = true;
-            break;
-        }
-    }
-    
-    if (!is_dynamic_array)
-        print(buffer, "%.*s%.*s", fs(buffer->settings.prefix), fs(name));
-    
-    for (u32 i = 0; i < type.name_type.modifiers.count; i++)
-    {
-        auto modifier = type.name_type.modifiers.base[i];
-        switch (modifier.modifier_type)
-        {
-            cases_complete_message("%.*s", fs(type_modifier_type_names[modifier.modifier_type]));
-
-            case type_modifier_type_indirection:
-            {
-                if (modifier.indirection_count)
-                    print(buffer, " ");
-                    
-                for (u32 i = 0; i < modifier.indirection_count; i++)
-                    print(buffer, "*");
-                
-                if (i == 0)
-                    print(buffer, "%.*s", fs(variable_name));
-            } break;
-            
-            case type_modifier_type_constant_array:
-            {
-                if (variable_name.count && (i == 0))
-                    print(buffer, " %.*s", fs(variable_name));
-                    
-                print(buffer, "[");
-                print_expression(buffer, modifier.constant_array_count_expression);
-                print(buffer, "]");
-            } break;
-            
-            /*
-            case type_modifier_type_dynamic_array:
-            {
-                print(buffer, "[");
-                print_expression(buffer, modifier.constant_array_count_expression);
-                print(buffer, "]");
-            } break;
-            */
-        }
-    }
-    
-    if (variable_name.count && (type.name_type.modifiers.count == 0))
-        print(buffer, " %.*s", fs(variable_name));
+    if (variable_name.count)
+        print(buffer, "%.*s", fs(variable_name));
     
     // some space for formating, since the * is considered part of the name, not the type in C
 }
@@ -396,26 +294,45 @@ print_expression_declaration
             local_node_type(field_reference, node);
             
             auto type = get_expression_type(buffer->parser, field_reference->expression).base_type;
-            if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_constant_array))
+            
+            if (!type.indirection_count && type.node)
             {
-                print_expression(buffer, type.modifiers.base[type.modifiers.count - 1].constant_array_count_expression);
+                if (is_node_type(type.node, enumeration_type))
+                {
+                    print_expression(buffer, field_reference->expression);
+                    print(buffer, "_%.*s", fs(field_reference->name));
+                    
+                    break;
+                }
+                else if (is_node_type(type.node, array_type))
+                {
+                    local_node_type(array_type, type.node);
+                    assert(field_reference->name == s("count"));
+                    
+                    if (array_type->count_expression)
+                        print_expression(buffer, array_type->count_expression);
+                    else
+                        print(buffer, ".count");
+                    
+                    break;
+                }
             }
-            else if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_indirection))
+            
+            if (type.indirection_count == 1)
             {
                 print_expression(buffer, field_reference->expression);
                 print(buffer, "->");
                 print(buffer, "%.*s", fs(field_reference->name));
             }
-            else if (type.node && !type.modifiers.count && is_node_type(type.node, enumeration_type))
-            {
-                print_expression(buffer, field_reference->expression);
-                print(buffer, "_%.*s", fs(field_reference->name));
-            }
-            else
+            else if (type.indirection_count == 0)
             {
                 print_expression(buffer, field_reference->expression);
                 print(buffer, ".");
                 print(buffer, "%.*s", fs(field_reference->name));
+            }
+            else
+            {
+                print(buffer, "/* to many indirections %.*s */", fs(field_reference->name));
             }
             
             if (field_reference->reference)
@@ -939,7 +856,7 @@ insert_type_child_declaration
     //if (name_node && ((!type.name_type.modifiers.count || (type.name_type.modifiers.base[0].modifier_type != type_modifier_type_constant_array)) && is_node_type(type.base_type.node, compound_type)))
         //name_node = null;
     
-    if (type.base_type.node && is_node_type(type.base_type.node, compound_type) && (type.name_type.modifiers.count && (type.name_type.modifiers.base[0].modifier_type != type_modifier_type_constant_array)))
+    if (type.base_type.node && is_node_type(type.base_type.node, compound_type) && type.base_type.indirection_count)
         name_node = null;
     
     insert_child(buffer, name_node, node);
@@ -1078,28 +995,31 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             {
                 local_node_type(type_alias, node);
                 
-                auto name_node = type_alias->type.name_type.node;
-                switch (name_node->node_type)
+                if (!type_alias->type.base_type.indirection_count)
                 {
-                    case ast_node_type_compound_type:
-                    {
-                        local_node_type(compound_type, name_node);
-                        
-                        if (type_alias->type.base_type.modifiers.count == 0)
-                            print_line(&buffer, "struct %.*s;", fs(type_alias->name));
-                    } break;
+                    auto name_node = type_alias->type.name_type.node;
                     
-                    case ast_node_type_function_type:
+                    switch (name_node->node_type)
                     {
-                        local_node_type(function_type, name_node);
-                        
-                        if (is_function_return_type_compound(function_type))
+                        case ast_node_type_compound_type:
                         {
-                            print(&buffer, "struct ");
-                            print_function_return_type(&buffer, function_type, type_alias->name);
-                            print_line(&buffer, ";");
-                        }
-                    } break;
+                            local_node_type(compound_type, name_node);
+                            
+                            print_line(&buffer, "struct %.*s;", fs(type_alias->name));
+                        } break;
+                        
+                        case ast_node_type_function_type:
+                        {
+                            local_node_type(function_type, name_node);
+                            
+                            if (is_function_return_type_compound(function_type))
+                            {
+                                print(&buffer, "struct ");
+                                print_function_return_type(&buffer, function_type, type_alias->name);
+                                print_line(&buffer, ";");
+                            }
+                        } break;
+                    }
                 }
             }
         }
@@ -1135,9 +1055,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(function, node);
                     
-                    //auto function_type = get_function_type(parser, function);
                     insert_type_child(&dependencies, function->type, &function->node);
-                    //insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
                 case ast_node_type_array_literal:
@@ -1173,7 +1091,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 } break;
             }
         }
-        
         
         index_buffer stack = {};
         defer { resize_buffer(&stack, 0); };
@@ -1311,7 +1228,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     auto name = type_alias->name;
                     auto base_type = type_alias->type.base_type.node;
                     
-                    if ((type_alias->type.base_type.modifiers.count == 0) && !is_node_type(base_type, number_type))
+                    if (!type_alias->type.base_type.indirection_count && !is_node_type(base_type, number_type))
                     {
                         switch (base_type->node_type)
                         {
@@ -1443,14 +1360,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(array_literal, node);
                     
-                    auto type = array_literal->type;
-                    
-                    // type without the array part
-                    type.base_type.modifiers.count--;
-                    type.name_type.modifiers.count--;
+                    local_node_type(array_type, array_literal->type.name_type.node);
                     
                     maybe_print_blank_line(&buffer);
-                    print_type(&buffer, type);
+                    print_type(&buffer, array_type->item_type);
                     print_line(&buffer, " _array_literal_%x_base[] =", node->index);
                     
                     print_scope_open(&buffer);

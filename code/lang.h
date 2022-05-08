@@ -21,6 +21,7 @@
     macro(array_literal, __VA_ARGS__) \
     macro(constant, __VA_ARGS__) \
     macro(number_type, __VA_ARGS__) \
+    macro(array_type, __VA_ARGS__) \
     macro(function_type, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
     macro(type_alias, __VA_ARGS__) \
@@ -126,48 +127,17 @@ struct ast_node
 buffer_type(ast_node_buffer, ast_node *);
 buffer_type(ast_node_array, ast_node *);
 
-#define type_modifier_type_list(macro, ...) \
-    macro(indirection, __VA_ARGS__) \
-    macro(dynamic_array, __VA_ARGS__) \
-    macro(constant_array, __VA_ARGS__) \
-
-enum type_modifier_type
-{
-    type_modifier_type_list(menum, type_modifier_type_)
-    
-    type_modifier_type_count,
-};
-
-string type_modifier_type_names[] = {
-    type_modifier_type_list(menum_name)
-};
-
-struct type_modifier
-{
-    type_modifier_type modifier_type;
-
-    union
-    {
-        ast_node *constant_array_count_expression;
-        u32       indirection_count;
-    };
-};
-
-array_type(type_modifiers, type_modifier);
-buffer_type(type_modifier_buffer, type_modifier);
-
 struct simple_type_info
 {
-    ast_node      *node;
-    type_modifiers modifiers;
+    ast_node *node;
+    u32      indirection_count;
 };
 
-// not an ast_node
 struct complete_type_info
 {
     simple_type_info base_type;
     simple_type_info name_type;
-    string    name;
+    string           name;
 };
 
 struct ast_comment
@@ -243,6 +213,14 @@ struct ast_number
     parsed_number value;
 };
 
+
+struct ast_array_type
+{
+    ast_node           node;
+    complete_type_info item_type;
+    ast_node           *count_expression; // is constant array
+};
+
 struct ast_enumeration_type
 {
     ast_node node;
@@ -301,8 +279,6 @@ struct ast_function
 struct ast_compound_type
 {
     ast_node node;
-    //complete_type_info type;
-    //string name;
     ast_node *first_statement;
 };
 
@@ -532,6 +508,9 @@ struct lang_parser
     };
     
     u32 next_node_index;
+    
+    ast_node *first_anonymous_type;
+    ast_node **anonymous_type_tail_next;
     
     ast_module *lang_module;
     
@@ -868,13 +847,13 @@ ast_string * parse_string_literal(lang_parser *parser)
     }
 }
 
-// assumes "type struct_name" was allready parsed
+// assumes "type(struct_name)" was allready parsed
 ast_compound_literal * parse_compound_literal(lang_parser *parser, complete_type_info type)
 {
     if (!try_consume(parser, s("{")))
         return null;
 
-    assert(!type.name_type.modifiers.count);
+    assert(!type.name_type.indirection_count);
 
     new_local_node(compound_literal);
     compound_literal->type = type;
@@ -911,26 +890,19 @@ ast_compound_literal * parse_compound_literal(lang_parser *parser, complete_type
     return compound_literal;
 }
 
-// assumes "type type_name []" was allready parsed
+// assumes "type(type_name[])" was allready parsed
 ast_array_literal * parse_array_literal(lang_parser *parser, complete_type_info type)
 {
-    assert(type.name_type.modifiers.count && (type.name_type.modifiers.base[type.name_type.modifiers.count - 1].modifier_type == type_modifier_type_dynamic_array));
-
     if (!try_consume(parser, s("{")))
         return null;
         
-    // HACK: ? change to constant array type
-    //new_local_node(number);
-    //type.name_type.modifiers.base[type.name_type.modifiers.count - 1].modifier_type = type_modifier_type_constant_array;
-    //type.name_type.modifiers.base[type.name_type.modifiers.count - 1].constant_array_count_expression = &number->node;
-    
     new_local_node(array_literal);
     array_literal->type = type;
     
     auto tail_next = &array_literal->first_expression;
     
-    auto expression_type = type;
-    expression_type.name_type.modifiers.count--;
+    local_node_type(array_type, type.name_type.node);
+    auto expression_type = array_type->item_type;
     
     bool is_first = true;
     while (!try_consume(parser, s("}")))
@@ -962,61 +934,55 @@ complete_type_info parse_type(lang_parser *parser)
     
     complete_type_info result = {};
     result.name = name;
-    
-    type_modifier_buffer modifiers = {};
 
-    while (true)
-    {
-        if (try_consume_keyword(parser, s("ref")))
-        {
-            if (!modifiers.count || (modifiers.base[modifiers.count - 1].modifier_type != type_modifier_type_indirection))
-            {
-                resize_buffer(&modifiers, modifiers.count + 1);
-                
-                auto modifier = &modifiers.base[modifiers.count - 1];
-                *modifier = {};
-                modifier->modifier_type = type_modifier_type_indirection;
-            }
-        
-            modifiers.base[modifiers.count - 1].indirection_count++;
-        }
-        else if (try_consume(parser, s("[")))
-        {
-            resize_buffer(&modifiers, modifiers.count + 1);
-            
-            auto modifier = &modifiers.base[modifiers.count - 1];
-            *modifier = {};
-            
-            auto expression = lang_require_call_return_value(parse_expression(parser, {}), {});
-            //lang_require_return_value(expression, {}, parser->iterator, "expected array count expression after '['");
-        
-            if (expression)
-            {
-                modifier->modifier_type = type_modifier_type_constant_array;
-                modifier->constant_array_count_expression = expression;
-            }
-            else
-            {
-                modifier->modifier_type = type_modifier_type_dynamic_array;
-            }
-            
-            lang_require_return_value(try_consume(parser, s("]")), {}, parser->iterator, "expected ']' after array count expression");
-        }
-        else
-        {
-            break;
-        }
-    }
-    
-    // HACK: what a waste of memory
-    result.name_type.modifiers = buffer_to_array(modifiers);
-    
     for (u32 i = 0; i < lang_base_type_count; i++)
     {
         if (name == lang_base_type_names[i])
         {
             result.name_type.node = parser->base_types[i];
             result.base_type      = result.name_type;
+            break;
+        }
+    }
+
+    while (true)
+    {
+        if (try_consume_keyword(parser, s("ref")))
+        {
+            result.name_type.indirection_count++;
+        }
+        else if (try_consume(parser, s("[")))
+        {
+        #if 0
+            ast_array_type *found_array_type = null;
+            for (auto it = parser->first_anonymous_type; it; it = it->next)
+            {
+                if (is_node_type(it, array_type))
+                {
+                    local_node_type(array_type, it);
+                
+                    if ((array_type->item_type.name == result.name) && (array_type->item_type.name_type.indirection_count == result.name_type.indirection_count))
+                    {
+                        found_array_type = array_type;
+                        break;
+                    }
+                }
+            }
+        #endif
+            
+            auto expression = lang_require_call_return_value(parse_expression(parser, {}), {});
+            //lang_require_return_value(expression, {}, parser->iterator, "expected array count expression after '['");
+            lang_require_return_value(try_consume(parser, s("]")), {}, parser->iterator, "expected ']' after array count expression");
+            
+            new_local_node(array_type);
+            array_type->count_expression = expression;
+            array_type->item_type = result;
+            
+            result = {};
+            result.name_type.node = &array_type->node;
+        }
+        else
+        {
             break;
         }
     }
@@ -1064,13 +1030,17 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         }
     }
         
-    if (type.name.count)
+    if ((type.name.count || type.name_type.node) && !type.name_type.indirection_count)
     {
-        if (type.name_type.modifiers.count && (type.name_type.modifiers.base[type.name_type.modifiers.count - 1].modifier_type == type_modifier_type_dynamic_array))
+        if (type.name_type.node && is_node_type(type.name_type.node, array_type))
+        {
             expression = lang_require_call(&parse_array_literal(parser, type)->node);
+        }
         
-        if (!expression && !type.name_type.modifiers.count)
+        if (!expression && (type.name.count || (type.name_type.node && is_node_type(type.name_type.node, compound_type))))
+        {
             expression = lang_require_call(&parse_compound_literal(parser, type)->node);
+        }
     }
 
     if (!expression && try_consume_keyword(parser, s("null")))
@@ -1673,8 +1643,8 @@ ast_node * parse_statements(lang_parser *parser)
                     enumeration_type->item_type = parse_type(parser);
                     if (!enumeration_type->item_type.name.count)
                         enumeration_type->item_type = get_default_type(parser);
-                        
-                    lang_require(enumeration_type->item_type.name_type.modifiers.count == 0, name, "enumeration can only be of integer number types");
+                    
+                    lang_require(is_node_type(enumeration_type->item_type.name_type.node, number_type) && !enumeration_type->item_type.name_type.indirection_count, name, "enumeration can only be of number types");
                     
                     auto item_tail_next = &(ast_node *) enumeration_type->first_item;
                     
@@ -2344,9 +2314,10 @@ bool types_are_compatible(complete_type_info to, complete_type_info from)
     else if (to.base_type.node != from.base_type.node)
         return false;
     
-    if (to.base_type.modifiers.count != from.base_type.modifiers.count)
+    if (to.base_type.indirection_count != from.base_type.indirection_count)
         return false;
         
+#if 0
     for (u32 i = 0; i < to.base_type.modifiers.count; i++)
     {
         auto to_modifier = to.base_type.modifiers.base[i];
@@ -2378,6 +2349,7 @@ bool types_are_compatible(complete_type_info to, complete_type_info from)
             } break;
         }
     }
+#endif
 
     return true;
 }
@@ -2425,34 +2397,8 @@ complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
         {
             local_node_type(take_reference, node);
             
-            if (!take_reference->type.name_type.modifiers.count)
-            {
-                auto type = get_expression_type(parser, take_reference->expression);
-    
-                type_modifier_buffer modifiers = {};
-                
-                u32 indirection_count = 0;
-                if (!type.name_type.modifiers.count || (type.name_type.modifiers.base[type.name_type.modifiers.count - 1].modifier_type != type_modifier_type_indirection))
-                {
-                    indirection_count = 1;
-                    resize_buffer(&modifiers, type.name_type.modifiers.count + 1);
-                }
-                else
-                {
-                    indirection_count = type.name_type.modifiers.base[type.name_type.modifiers.count - 1].indirection_count + 1;
-                    resize_buffer(&modifiers, type.name_type.modifiers.count);
-                }
-                    
-                memcpy(modifiers.base, type.name_type.modifiers.base, type.name_type.modifiers.count * sizeof(modifiers.base[0]));
-                
-                auto modifier = &modifiers.base[modifiers.count - 1];
-                modifier->modifier_type     = type_modifier_type_indirection;
-                modifier->indirection_count = indirection_count;
-                
-                type.name_type.modifiers = buffer_to_array(modifiers);
-                type.base_type = {}; // HACK: otherise we need to copy all the info
-                take_reference->type = type;
-            }
+            auto type = take_reference->type;
+            type.name_type.indirection_count++;
             
             return take_reference->type;
         } break;
@@ -2521,15 +2467,9 @@ complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
             if (!type.name_type.node)
                 return {};
             
-            // THIS IS NOT ENTIRELY CORRECT
-            auto name_type = &type.name_type;
-            assert(name_type->modifiers.count && ((name_type->modifiers.base[name_type->modifiers.count - 1].modifier_type == type_modifier_type_constant_array) || (name_type->modifiers.base[name_type->modifiers.count - 1].modifier_type == type_modifier_type_dynamic_array)));
+            local_node_type(array_type, type.name_type.node);
             
-            // type without the array part, a sub array
-            //name_type->modifiers.count--;
-            type.name_type.modifiers.count--; // this might fail
-            type.base_type.modifiers.count--;
-            return type;
+            return array_type->item_type;
         } break;
         
         case ast_node_type_name_reference:
@@ -2669,17 +2609,15 @@ void begin(lang_parser *parser)
     }
     
     {
-        new_local_node(type_alias);
-        type_alias->name = lang_base_type_names[lang_base_type_string];
-        type_alias->type.name           = lang_base_type_names[lang_base_type_u8];
-        type_alias->type.name_type.node = parser->base_types[lang_base_type_u8];
+        new_local_node(array_type);
+        array_type->item_type.name           = lang_base_type_names[lang_base_type_u8];
+        array_type->item_type.name_type.node = parser->base_types[lang_base_type_u8];
+        array_type->item_type.base_type      = array_type->item_type.name_type;
         
-        type_modifier_buffer modifiers = {};
-        resize_buffer(&modifiers, 1);
-        auto modifier = &modifiers.base[0];
-        modifier->modifier_type = type_modifier_type_dynamic_array;
-        type_alias->type.name_type.modifiers = buffer_to_array(modifiers);
-        type_alias->type.base_type = type_alias->type.name_type;
+        new_local_node(type_alias);
+        type_alias->name                = lang_base_type_names[lang_base_type_string];
+        type_alias->type.base_type      = array_type->item_type.base_type;
+        type_alias->type.name_type.node = &array_type->node;
         
         parser->base_types[lang_base_type_string] = &type_alias->node;
         append(&tail_next, &type_alias->node);
@@ -3063,59 +3001,21 @@ void resolve_complete_type(lang_parser *parser, complete_type_info *type)
             type->base_type = type->name_type;
         } break;
         
+        case ast_node_type_array_type:
+        {
+            local_node_type(array_type, name_type);
+            type->base_type = array_type->item_type.base_type;
+            type->base_type.indirection_count += array_type->item_type.name_type.indirection_count;
+        } break;
+        
         case ast_node_type_type_alias:
         {
             local_node_type(type_alias, name_type);
             
             resolve_complete_type(parser, &type_alias->type);            
         
-            if (!type->name_type.modifiers.count)
-            {
-                type->base_type = type_alias->type.base_type;
-            }
-            else
-            {
-                type->base_type.node = type_alias->type.base_type.node;
-                
-                auto base_modifiers = type_alias->type.base_type.modifiers;
-                auto name_modifiers = type->name_type.modifiers;
-                
-                type_modifier_buffer modifiers = {};
-                
-                if (base_modifiers.count && (base_modifiers.base[base_modifiers.count - 1].modifier_type == type_modifier_type_indirection) &&
-                    name_modifiers.count && (name_modifiers.base[0].modifier_type == type_modifier_type_indirection))
-                {
-                    resize_buffer(&modifiers, type->name_type.modifiers.count + base_modifiers.count - 1);
-                
-                    for (u32 i = 0; i < base_modifiers.count; i++)
-                    {
-                        modifiers.base[i] = base_modifiers.base[i];
-                    }
-                    
-                    modifiers.base[base_modifiers.count - 1].indirection_count += name_modifiers.base[0].indirection_count;
-                    
-                    for (u32 i = 0; i < base_modifiers.count - 1; i++)
-                    {
-                        modifiers.base[i + base_modifiers.count] = base_modifiers.base[i + 1];
-                    }
-                }
-                else
-                {
-                    resize_buffer(&modifiers, type->name_type.modifiers.count + base_modifiers.count);
-                
-                    for (u32 i = 0; i < base_modifiers.count; i++)
-                    {
-                        modifiers.base[i] = base_modifiers.base[i];
-                    }
-                    
-                    for (u32 i = 0; i < base_modifiers.count; i++)
-                    {
-                        modifiers.base[i + base_modifiers.count] = base_modifiers.base[i];
-                    }
-                }
-                
-                type->base_type.modifiers = buffer_to_array(modifiers);
-            }        
+            type->base_type = type_alias->type.base_type;
+            type->base_type.indirection_count += type_alias->type.name_type.indirection_count;
         } break;
     }
 }
@@ -3629,10 +3529,15 @@ void resolve(lang_parser *parser)
             }
             
             // add artificial count member to array
-            if (type.base_type.modifiers.count && (type.base_type.modifiers.base[type.base_type.modifiers.count - 1].modifier_type == type_modifier_type_constant_array))
+            if (is_node_type(type.name_type.node, array_type))
             {
-                auto is_new = insert(&resolver.table, { s("count"), node }, type.base_type.modifiers.base[type.base_type.modifiers.count - 1].constant_array_count_expression );
-                assert(is_new);
+                local_node_type(array_type, type.name_type.node);
+                
+                if (array_type->count_expression)
+                {
+                    auto is_new = insert(&resolver.table, { s("count"), node }, array_type->count_expression);
+                    assert(is_new);
+                }
             }
         }
     }
@@ -3665,7 +3570,7 @@ void resolve(lang_parser *parser)
                         break;
                     }
                     
-                    lang_require_return_value(!type.modifiers.count && (type.node->node_type == ast_node_type_function_type), , parser->iterator, "type of function call expression must be function type");
+                    lang_require_return_value(!type.indirection_count && is_node_type(type.node, function_type), , parser->iterator, "type of function call expression must be function type");
                     
                     local_node_type(function_type, type.node);
                     
