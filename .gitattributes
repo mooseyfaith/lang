@@ -1,0 +1,2 @@
+*.perl linguist-detectable=false
+*.raku linguist-detectable=false
