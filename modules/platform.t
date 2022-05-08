@@ -2,10 +2,14 @@ module platform;
 
 def platform_api struct
 {
+    var keys platform_button[256];
+    var delta_seconds f32;
+    
+    // win32 specific
     var win32_instance    HINSTANCE;
     var window_class_name cstring;
-    
-    var keys platform_button[256];
+    var time_ticks       u64;
+    var ticks_per_second u64;
 }
 
 def platform_api_window struct
@@ -79,6 +83,14 @@ def platform_init func(platform platform_api ref)
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
     platform_require(RegisterClass(window_class ref));
+    
+    var ticks_per_second LARGE_INTEGER;
+    platform_require(QueryPerformanceFrequency(ticks_per_second ref));
+    platform.ticks_per_second = ticks_per_second.QuadPart;
+    
+    var time_ticks LARGE_INTEGER;
+    platform_require(QueryPerformanceCounter(time_ticks ref));
+    platform.time_ticks = time_ticks.QuadPart;
 }
 
 def platform_window func(platform platform_api ref; window platform_api_window ref; title cstring)
@@ -138,6 +150,14 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
         TranslateMessage(msg ref);
         DispatchMessage(msg ref);
     }
+    
+    var time_ticks LARGE_INTEGER;
+    platform_require(QueryPerformanceCounter(time_ticks ref));
+    
+    var delta_ticks u64 = time_ticks.QuadPart - platform.time_ticks;
+    platform.delta_seconds = delta_ticks cast(f32) / platform.ticks_per_second;
+    
+    platform.time_ticks = time_ticks.QuadPart;
     
     return true;
 }

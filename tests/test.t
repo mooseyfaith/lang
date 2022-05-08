@@ -32,6 +32,12 @@ def state enum u32
     tree;
 }
 
+def indices = type(s32[]) { 1; 2; 3; 4 };
+// todo: support array literals in C
+//var indices2 s32[] = { 5; 6; 7; 8 };
+
+printf("day: %i of %i", day.monday, day.count);
+
 var x = 12;
 if x {
     x = 41;

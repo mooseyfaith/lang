@@ -306,7 +306,9 @@ print_expression_declaration
         case ast_node_type_number:
         {
             local_node_type(number, node);
-            if (number->value.is_signed)
+            if (number->value.is_float)
+                print(buffer, "%f", number->value.f64_value);
+            else if (number->value.is_signed)
                 print(buffer, "%lli", number->value.s64_value);
             else
                 print(buffer, "%llu", number->value.u64_value);
@@ -316,6 +318,28 @@ print_expression_declaration
         {
             local_node_type(string, node);
             print(buffer, "\"%.*s\"", fs(string->text));
+        } break;
+        
+        case ast_node_type_array_literal:
+        {
+            local_node_type(array_literal, node);
+            print(buffer, "_array_literal_%x", node->index);
+        } break;
+        
+        case ast_node_type_compound_literal:
+        {
+            local_node_type(compound_literal, node);
+            
+            print_type(buffer, compound_literal->type);
+            print(buffer, " { ");
+            
+            // TODO: sort by field name
+            for (auto it = compound_literal->first_field; it; it = (ast_compound_literal_field *) it->node.next)
+            {
+                print_expression(buffer, it->expression);
+                print(buffer, ", ");
+            }
+            print(buffer, "}");
         } break;
         
         /*
@@ -371,15 +395,35 @@ print_expression_declaration
         {
             local_node_type(field_reference, node);
             
-            print_expression(buffer, field_reference->expression);
-            
             auto type = get_expression_type(buffer->parser, field_reference->expression).base_type;
-            if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_indirection))
+            if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_constant_array))
+            {
+                print_expression(buffer, type.modifiers.base[type.modifiers.count - 1].constant_array_count_expression);
+            }
+            else if (type.modifiers.count && (type.modifiers.base[type.modifiers.count - 1].modifier_type == type_modifier_type_indirection))
+            {
+                print_expression(buffer, field_reference->expression);
                 print(buffer, "->");
+                print(buffer, "%.*s", fs(field_reference->name));
+            }
+            else if (type.node && !type.modifiers.count && is_node_type(type.node, enumeration_type))
+            {
+                print_expression(buffer, field_reference->expression);
+                print(buffer, "_%.*s", fs(field_reference->name));
+            }
             else
+            {
+                print_expression(buffer, field_reference->expression);
                 print(buffer, ".");
+                print(buffer, "%.*s", fs(field_reference->name));
+            }
             
-            print(buffer, "%.*s", fs(field_reference->name));
+            if (field_reference->reference)
+            {
+                print(buffer, "/* ");
+                print_expression(buffer, field_reference->reference);
+                print(buffer, " */");
+            }
         } break;
         
         case ast_node_type_array_index:
@@ -429,6 +473,9 @@ print_expression_declaration
             {
                 string c_symbols[] =
                 {
+                    s("||"),
+                    s("&&"),
+                
                     s("=="),
                     s("!="),
                     
@@ -480,6 +527,8 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
     ast_node *node;
     while (print_next(&node, &queue))
     {
+        //print_buffer(buffer, "#line %i",
+    
         switch (node->node_type)
         {
             // skip global declarations
@@ -569,6 +618,32 @@ void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
                 
                 if (loop->first_statement)
                     print_statements(buffer, loop->first_statement);
+                    
+                print_scope_close(buffer);
+                
+                pending_newline(buffer);
+            } break;
+            
+            case ast_node_type_loop_with_counter:
+            {
+                local_node_type(loop_with_counter, node);
+            
+                maybe_print_blank_line(buffer);
+                
+                print(buffer, "for (");
+                print_statements(buffer, loop_with_counter->first_counter_statement);
+                
+                string counter_name = get_name(loop_with_counter->first_counter_statement);
+                assert(counter_name.count);
+                
+                print(buffer, "%.*s <", fs(counter_name));
+                print_expression(buffer, loop_with_counter->end_condition);
+                print(buffer, "; %.*s++)", fs(counter_name));
+                
+                print_scope_open(buffer);
+                
+                if (loop_with_counter->first_statement)
+                    print_statements(buffer, loop_with_counter->first_statement);
                     
                 print_scope_close(buffer);
                 
@@ -1065,6 +1140,18 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     //insert_function_type_dependencies(&dependencies, node, function_type);
                 } break;
                 
+                case ast_node_type_array_literal:
+                {
+                    local_node_type(array_literal, node);
+                    insert_type_child(&dependencies, array_literal->type, &array_literal->node);
+                } break;
+                
+                case ast_node_type_compound_literal:
+                {
+                    local_node_type(compound_literal, node);
+                    insert_type_child(&dependencies, compound_literal->type, &compound_literal->node);
+                } break;
+                
                 case ast_node_type_function_type:
                 {
                     local_node_type(function_type, node);
@@ -1351,6 +1438,35 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     print_line(&buffer, ";");
                 } break;                
+                
+                case ast_node_type_array_literal:
+                {
+                    local_node_type(array_literal, node);
+                    
+                    auto type = array_literal->type;
+                    
+                    // type without the array part
+                    type.base_type.modifiers.count--;
+                    type.name_type.modifiers.count--;
+                    
+                    maybe_print_blank_line(&buffer);
+                    print_type(&buffer, type);
+                    print_line(&buffer, " _array_literal_%x_base[] =", node->index);
+                    
+                    print_scope_open(&buffer);
+    
+                    for (auto it = array_literal->first_expression; it; it = it->next)
+                    {
+                        print_expression(&buffer, it);
+                        print_line(&buffer, ",");
+                    }
+        
+                    print_scope_close(&buffer, false);
+                    print_line(&buffer, ";");
+                    
+                    print_type(&buffer, array_literal->type); // full type
+                    print_line(&buffer, " _array_literal_%x = { %llu, _array_literal_%x_base };", node->index, array_literal->item_count, node->index);
+                } break;
             }
         }
     }
@@ -1628,6 +1744,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
     {
         maybe_print_blank_line(&buffer);
         print_line(&buffer, "// file: %.*s", fs(file->path));
+        //print_line(&buffer, "#line 1 \"%.*s\"", fs(file->path));
         print_newline(&buffer);
         print_statements(&buffer, file->first_statement);
     }

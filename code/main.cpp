@@ -49,6 +49,10 @@ s32 main(s32 argument_count, cstring arguments[])
     
                     string source_name = { strlen(path), (u8 *) path };
                     
+                    for (u32 i = 0; i < source_name.count; i++)
+                        if (source_name.base[i] == '\\')
+                            source_name.base[i] = '/';
+                    
                     string source;
                     require(platform_allocate_and_read_entire_file(&source, path));
                     
@@ -66,6 +70,10 @@ s32 main(s32 argument_count, cstring arguments[])
             auto file = fopen(path, "r");
     
             string source_name = { strlen(path), (u8 *) path };
+            
+            for (u32 i = 0; i < source_name.count; i++)
+                if (source_name.base[i] == '\\')
+                    source_name.base[i] = '/';
             
             string source;
             require(platform_allocate_and_read_entire_file(&source, path));
