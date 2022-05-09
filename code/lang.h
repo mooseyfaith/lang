@@ -264,8 +264,12 @@ struct ast_function_type
     ast_node node;
     //string name;
     // list of variables, each possibly followed by an assignment
-    ast_node *first_input;
-    ast_node *first_output;
+    
+    complete_type_info input;
+    complete_type_info output;
+    
+    //ast_node *first_input;
+    //ast_node *first_output;
 };
 
 struct ast_function
@@ -1021,7 +1025,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         if (parsed_type_keyword)
         {
             type = lang_require_call(parse_type(parser));
-            lang_require(type.name.count, parser->iterator, "expected type after 'type' in expression");
+            lang_require(type.name_type.node, parser->iterator, "expected type after 'type' in expression");
             lang_require_consume(")", "after 'type(...' after type");
         }
         else
@@ -1545,10 +1549,32 @@ ast_node * parse_statements(lang_parser *parser)
                     {
                         new_local_node(function_type);
                         
-                        parse_arguments(&function_type->first_input, parser);
+                        ast_node *first_input = null;
+                        parse_arguments(&first_input, parser);
+                        
+                        if (first_input)
+                        {
+                            new_local_node(compound_type);
+                            compound_type->first_statement = first_input;
+                            
+                            function_type->input.name_type.node = &compound_type->node;
+                            function_type->input.base_type = function_type->input.name_type;
+                        }
                         
                         if (try_consume(parser, s("(")))
-                            parse_arguments(&function_type->first_output, parser);
+                        {
+                            ast_node *first_output = null;
+                            parse_arguments(&first_output, parser);
+                            
+                            if (first_output)
+                            {
+                                new_local_node(compound_type);
+                                compound_type->first_statement = first_output;
+                                
+                                function_type->output.name_type.node = &compound_type->node;
+                                function_type->output.base_type = function_type->output.name_type;
+                            }
+                        }
                         
                         type.name_type.node = &function_type->node;
                         type.base_type = type.name_type;
@@ -2052,11 +2078,11 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         {
             local_node_type(function_type, node);
             
-            if (function_type->first_output)
-                enqueue(queue, node, &function_type->first_output);
+            if (!function_type->output.name.count && function_type->output.name_type.node)
+                enqueue(queue, node, &function_type->output.name_type.node);
             
-            if (function_type->first_input)
-                enqueue(queue, node, &function_type->first_input);
+            if (!function_type->input.name.count && function_type->input.name_type.node)
+                enqueue(queue, node, &function_type->input.name_type.node);
         } break;
         
         case ast_node_type_function:
@@ -2528,11 +2554,14 @@ complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
             local_node_type(function, name_reference->reference);
             
             auto function_type = get_function_type(parser, function);
-            assert(function_type->first_output && !function_type->first_output->next);
             
-            local_node_type(variable, function_type->first_output);
+            return function_type->output;
             
-            return variable->type;
+            //assert(function_type->first_output && !function_type->first_output->next);
+            
+            //local_node_type(variable, function_type->first_output);
+            
+            //return variable->type;
         } break;
     }
     
@@ -2997,15 +3026,9 @@ void resolve_complete_type(lang_parser *parser, complete_type_info *type)
         case ast_node_type_function_type:
         case ast_node_type_compound_type:
         case ast_node_type_number_type:
-        {
-            type->base_type = type->name_type;
-        } break;
-        
         case ast_node_type_array_type:
         {
-            local_node_type(array_type, name_type);
-            type->base_type = array_type->item_type.base_type;
-            type->base_type.indirection_count += array_type->item_type.name_type.indirection_count;
+            type->base_type = type->name_type;
         } break;
         
         case ast_node_type_type_alias:
@@ -3286,6 +3309,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
 #endif
 }
 
+#if 0
 void add_function_type(ast_node *node, ast_node *scope, ast_function_type *function_type, ast_list_entry ***function_type_tail_next, ast_list_entry ***variable_tail_next)
 {
     auto new_entry = new ast_list_entry;
@@ -3310,6 +3334,7 @@ void add_function_type(ast_node *node, ast_node *scope, ast_function_type *funct
             it = it->next;
     }
 }
+#endif
 
 bool try_add_default_argument(lang_parser *parser, ast_function_call *function_call, ast_function_type *function_type, ast_node ***argument_tail_next, ast_node **input_pointer)
 {
@@ -3343,7 +3368,10 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     auto argument_name = get_node_type(name_reference, pseudo_function_call->first_argument);
 
                     auto call_argument = function_call->first_argument;
-                    for (auto input_it = function_type->first_input; input_it; input_it = input_it->next)
+                    
+                    auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
+                    
+                    for (auto input_it = input_compound_type->first_statement; input_it; input_it = input_it->next)
                     {
                         local_node_type(variable, input_it);
 
@@ -3499,11 +3527,24 @@ void resolve(lang_parser *parser)
                     //add_node = true;
                 } break;
                 
+                case ast_node_type_array_type:
+                {
+                    local_node_type(array_type, node);
+                    
+                    __debugbreak();
+                    
+                    if (array_type->count_expression)
+                    {
+                        auto is_new = insert(&resolver.table, { s("count"), node }, array_type->count_expression);
+                        assert(is_new);
+                    }
+                } break;
+                
                 case ast_node_type_enumeration_type:
                 {
                     local_node_type(enumeration_type, node);
                     auto is_new = insert(&resolver.table, { s("count"), node }, &enumeration_type->item_count.node);
-                assert(is_new);
+                    assert(is_new);
                 
                     add_node = true;
                 } break;
@@ -3526,18 +3567,6 @@ void resolve(lang_parser *parser)
             {
                 auto is_new = insert(&resolver.table, { get_name(node), entry.scope }, node);
                 assert(is_new);
-            }
-            
-            // add artificial count member to array
-            if (is_node_type(type.name_type.node, array_type))
-            {
-                local_node_type(array_type, type.name_type.node);
-                
-                if (array_type->count_expression)
-                {
-                    auto is_new = insert(&resolver.table, { s("count"), node }, array_type->count_expression);
-                    assert(is_new);
-                }
             }
         }
     }
@@ -3574,7 +3603,8 @@ void resolve(lang_parser *parser)
                     
                     local_node_type(function_type, type.node);
                     
-                    auto input = function_type->first_input;
+                    auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
+                    auto input = input_compound_type->first_statement;
                     
                     auto argument_tail_next = &function_call->first_argument;
                     auto argument = *argument_tail_next;

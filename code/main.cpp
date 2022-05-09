@@ -88,6 +88,8 @@ s32 main(s32 argument_count, cstring arguments[])
     lang_c_compile_settings settings = {};
     //settings.prefix = s("tk_");
     compile(&parser, settings);
+    
+    printf("done\n");
 
     return 0;
 }
