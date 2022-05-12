@@ -984,6 +984,7 @@ complete_type_info parse_type(lang_parser *parser)
             
             result = {};
             result.name_type.node = &array_type->node;
+            result.base_type = result.name_type;
         }
         else
         {
@@ -2645,8 +2646,8 @@ void begin(lang_parser *parser)
         
         new_local_node(type_alias);
         type_alias->name                = lang_base_type_names[lang_base_type_string];
-        type_alias->type.base_type      = array_type->item_type.base_type;
         type_alias->type.name_type.node = &array_type->node;
+        type_alias->type.base_type      = type_alias->type.name_type;
         
         parser->base_types[lang_base_type_string] = &type_alias->node;
         append(&tail_next, &type_alias->node);
@@ -2659,6 +2660,8 @@ def usize type u64;
 def ssize type s64;
 
 // def string type u8[];
+
+def cstring type u8 ref;
 
 def code_location struct
 {
