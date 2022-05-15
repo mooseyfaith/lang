@@ -35,9 +35,9 @@ def falling_piece struct
 
 var piece_type_colors rgba32[piece_type.count] = 
 {
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 0.0; 0.0; 1.0 };
+    { 0.0; 1.0; 0.0; 1.0 };
+    { 0.0; 0.0; 1.0; 1.0 };
     { 1.0; 1.0; 1.0; 1.0 };
     { 1.0; 1.0; 1.0; 1.0 };
     { 1.0; 1.0; 1.0; 1.0 };
@@ -48,9 +48,11 @@ var piece_type_colors rgba32[piece_type.count] =
 var board piece_type[10][20];
 var next_piece piece_type;
 
-var piece falling_piece = make_piece(piece_type.i, board.count, board[0].count);
+var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
 
 var tick_timeout f32 = 1;
+
+platform_update_time(platform ref); // skip startup time
 
 while true
 {
@@ -76,7 +78,7 @@ while true
             var y = piece.bricks[i].y - 1;
             
             var a bool = y is 0;
-            var b bool = board[y][piece.bricks[i].x] is_not pice_type_empty;
+            var b bool = board[y][piece.bricks[i].x] is_not piece_type.empty;
             if a or b
             {
                 piece_did_fall = true;
@@ -84,7 +86,7 @@ while true
             }
         }
         
-        if piede_did_fall
+        if piece_did_fall
         {
             loop var i; piece.bricks.count
             {
@@ -94,30 +96,55 @@ while true
             
             piece = make_piece(piece_type.i, board[0].count, board.count);
         }
+        else
+        {
+            loop var i; piece.bricks.count
+            {
+                piece.bricks[i].y = piece.bricks[i].y - 1;
+            }
+        }
     }
     
     var window_size vec2s = platform_window_frame(platform ref, window ref);
     var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
-    var viewport_scale vec2 = v2(2 * window_width_over_height, 2);
+    var viewport_scale vec2 = v2(2 /  window_width_over_height, 2);
     
     var quads quad[64];
     var quad_count;
     
-    var brick_size f32 = 0.1;
+    var brick_size f32 = 0.05;
+    
+    quads[quad_count].box   = box2_size(v2(0 * brick_size, 0 * brick_size), v2(brick_size, brick_size));
+    quads[quad_count].color = piece_type_colors[piece.type];
+    quad_count = quad_count + 1;
+    
+    loop var y; board.count
+    {
+        loop var x; board[0].count
+        {
+            var type piece_type = board[x][y];
+            if board[x][y] is_not piece_type.empty
+            {
+                quads[quad_count].box   = box2_size(v2(x * brick_size, y * brick_size), v2(brick_size, brick_size));
+                quads[quad_count].color = piece_type_colors[type];
+                quad_count = quad_count + 1;
+            }
+        }
+    }
     
     loop var i; piece.bricks.count
     {
-        var brick vec2 = piece.bricks[i];
+        var brick vec2s = piece.bricks[i];
         
-        quads[quad_count].box   = box2_size(v2(brick.x * brick_scale, brick.y * brick_scale), v2(brick_scale, brick_scale));
+        quads[quad_count].box   = box2_size(v2(brick.x * brick_size, brick.y * brick_size), v2(brick_size, brick_size));
         quads[quad_count].color = piece_type_colors[piece.type];
         quad_count = quad_count + 1;
     }
     
-    quads[quad_count].box = box2_size(player_pos, v2(1, 1));
-    quad_count = quad_count + 1;
+    //quads[quad_count].box = box2_size(player_pos, v2(1, 1));
+    //quad_count = quad_count + 1;
     
     glViewport(0, 0, window_size.x, window_size.y);
     glClearColor(0, 0, 0, 1);
@@ -125,12 +152,13 @@ while true
     
     glBegin(GL_TRIANGLES);
     
-    glColor3f(1, 0, 0);
-    
     var i = 0;
     while i < quad_count
     {
-        var box box2 = quads[i].box;
+        var q quad = quads[i];        
+        var box box2 = q.box;
+        
+        glColor4f(q.color.values[0], q.color.values[1], q.color.values[2], q.color.values[3]);
         
         glVertex2f(box.min.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);
         glVertex2f(box.max.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);

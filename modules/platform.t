@@ -53,7 +53,7 @@ def platform_key_was_released func(platform platform_api; key u32) (result bool)
 
 def platform_button_update func(button platform_button ref; is_active bool)
 {
-    assert(button.is_active is_not is_active);
+    //assert(button.is_active is_not is_active);
     
     button.is_active = is_active;
     
@@ -151,6 +151,13 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
         DispatchMessage(msg ref);
     }
     
+    platform_update_time(platform);
+    
+    return true;
+}
+
+def platform_update_time func(platform platform_api ref)
+{
     var time_ticks LARGE_INTEGER;
     platform_require(QueryPerformanceCounter(time_ticks ref));
     
@@ -158,8 +165,6 @@ def platform_handle_messages func(platform platform_api ref) (result bool)
     platform.delta_seconds = delta_ticks cast(f32) / platform.ticks_per_second;
     
     platform.time_ticks = time_ticks.QuadPart;
-    
-    return true;
 }
 
 def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param LPARAM) (result LRESULT)

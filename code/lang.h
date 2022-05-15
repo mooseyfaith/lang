@@ -215,7 +215,6 @@ struct ast_number
     parsed_number value;
 };
 
-
 struct ast_array_type
 {
     ast_base_node      node;
@@ -293,6 +292,8 @@ struct ast_compound_type
 {
     ast_base_node node;
     ast_compound_type_field *first_field;
+    u32 byte_count;
+    u32 byte_alignment;
 };
 
 struct ast_compound_literal_field
@@ -2480,26 +2481,6 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
     return function_type;
 }
 
-s64 evaluate_expression_s64(ast_node *expression)
-{
-    switch (expression->node_type)
-    {
-        cases_complete_message("%.*s", fs(ast_node_type_names[expression->node_type]));
-        
-        case ast_node_type_number:
-        {
-            local_node_type(number, expression);
-            
-            auto value = number->value;
-            
-            if (value.is_signed)
-                return value.s64_value;
-            else
-                return (s64) value.u64_value;
-        } break;
-    }
-}
-
 bool types_are_compatible(complete_type_info to, complete_type_info from)
 {
     if (is_node_type(to.base_type.node, number_type) && is_node_type(from.base_type.node, number_type))
@@ -2517,42 +2498,101 @@ bool types_are_compatible(complete_type_info to, complete_type_info from)
     
     if (to.base_type.indirection_count != from.base_type.indirection_count)
         return false;
-        
-#if 0
-    for (u32 i = 0; i < to.base_type.modifiers.count; i++)
-    {
-        auto to_modifier = to.base_type.modifiers.base[i];
-        auto from_modifier = from.base_type.modifiers.base[i];
-    
-        if (to_modifier.modifier_type != from_modifier.modifier_type)
-            return false;
-        
-        switch (to_modifier.modifier_type)
-        {
-            cases_complete_message("%.*s", fs(type_modifier_type_names[to_modifier.modifier_type]));
-            
-            case type_modifier_type_indirection:
-            {
-                if ((from_modifier.modifier_type != to_modifier.modifier_type) || (to_modifier.indirection_count != from_modifier.indirection_count))
-                    return false;
-            } break;
-            
-            case type_modifier_type_dynamic_array:
-            {
-                if ((from_modifier.modifier_type != type_modifier_type_dynamic_array) || (from_modifier.modifier_type != type_modifier_type_constant_array))
-                    return false;
-            } break;
-            
-            case type_modifier_type_constant_array:
-            {
-                if ((from_modifier.modifier_type != type_modifier_type_constant_array) || (evaluate_expression_s64(to_modifier.constant_array_count_expression) != evaluate_expression_s64(from_modifier.constant_array_count_expression)))
-                    return false;
-            } break;
-        }
-    }
-#endif
 
     return true;
+}
+
+parsed_number evaluate(ast_node *expression)
+{
+    switch (expression->node_type)
+    {
+        cases_complete;
+        
+        case ast_node_type_number:
+        {
+            local_node_type(number, expression);
+            return number->value;
+        } break;
+    }
+
+    return {};
+}
+
+struct byte_count_and_alignment
+{
+    u32 byte_count;
+    u32 byte_alignment;
+};
+
+byte_count_and_alignment get_type_byte_count(complete_type_info type)
+{
+    // all pointers have the same byte count and alignment
+    if (type.name_type.indirection_count)
+        return { 8, 8 };
+
+    auto base_type = type.base_type.node;
+    switch (base_type->node_type)
+    {
+        cases_complete;
+        
+        case ast_node_type_number_type:
+        {
+            local_node_type(number_type, base_type);
+            u32 byte_count = number_type->bit_count_power_of_two >> 3;
+            return { byte_count, byte_count };
+        } break;
+        
+        case ast_node_type_array_type:
+        {
+            local_node_type(array_type, base_type);
+            
+            if (array_type->count_expression)
+            {
+                auto count_and_alignment = get_type_byte_count(array_type->item_type);
+                
+                count_and_alignment.byte_count *= evaluate(array_type->count_expression).u64_value;
+                return count_and_alignment;
+            }
+            else
+            {
+                // usize + pointer
+                return { 16, 8 };
+            }
+        } break;
+        
+        case ast_node_type_compound_type:
+        {
+            local_node_type(compound_type, base_type);
+            
+            if (!compound_type->byte_count)
+            {
+                u32 byte_count = 0;
+                u32 byte_alignment = 1;
+                
+                for (auto field = compound_type->first_field; field; field = (ast_compound_type_field *) field->node.next)
+                {
+                    auto count_and_alignment = get_type_byte_count(field->variable->type);
+                    auto mask = count_and_alignment.byte_alignment - 1;
+                    byte_count = (byte_count + mask) & ~mask;
+                    byte_count += count_and_alignment.byte_count;
+                    byte_alignment = maximum(byte_alignment, count_and_alignment.byte_alignment);
+                }
+                
+                // byte_count is multiple of byte_alignment
+                auto mask = byte_alignment - 1;
+                byte_count = (byte_count + mask) & ~mask;
+                
+                compound_type->byte_count     = byte_count;
+                compound_type->byte_alignment = byte_alignment;
+            }
+            
+            assert(compound_type->byte_alignment);
+            
+            return { compound_type->byte_count, compound_type->byte_alignment };
+        } break;
+    }
+
+    return {};
 }
 
 complete_type_info get_expression_type(lang_parser *parser, ast_node *node)

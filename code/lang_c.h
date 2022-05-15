@@ -222,7 +222,27 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 
                 if (array_type->count_expression)
                 {
-                    print_type(buffer, array_type->item_type);
+                    auto item_type = array_type->item_type;
+                    while (is_node_type(item_type.base_type.node, array_type))
+                    {
+                        local_node_type(array_type, item_type.base_type.node);
+                        item_type = array_type->item_type;
+                    }
+                
+                    print_type(buffer, item_type, variable_name);
+                
+                    while (is_node_type(type.base_type.node, array_type))
+                    {
+                        local_node_type(array_type, type.base_type.node);
+                        
+                        print(buffer, "[");
+                        print_expression(buffer, array_type->count_expression);
+                        print(buffer, "]");
+                        
+                        type = array_type->item_type;
+                    }
+                    
+                    return;
                 }
                 else
                 {
@@ -259,18 +279,6 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
     
     if (variable_name.count)
         print(buffer, "%.*s", fs(variable_name));
-        
-    if (name_type.node && is_node_type(name_type.node, array_type))
-    {
-        local_node_type(array_type, name_type.node);
-        
-        if (array_type->count_expression)
-        {
-            print(buffer, "[", fs(variable_name));
-            print_expression(buffer, array_type->count_expression);
-            print(buffer, "]");
-        }
-    }
 }
 
 void print_type(lang_c_buffer *buffer, ast_node *base_type, string variable_name = {})
@@ -596,9 +604,36 @@ print_statements_declaration
             {
                 local_node_type(assignment, node);
                 
-                print_expression(buffer, assignment->left);
-                print(buffer, " = ");
-                print_expression(buffer, assignment->right);
+                if (is_node_type(assignment->right, compound_literal) || is_node_type(assignment->right, array_literal))
+                {
+                    u32 byte_count;
+                    
+                    if (is_node_type(assignment->right, compound_literal))
+                    {
+                        local_node_type(compound_literal, assignment->right)
+                        byte_count = get_type_byte_count(compound_literal->type).byte_count;
+                    }
+                    else
+                    {
+                        local_node_type(array_literal, assignment->right)
+                        local_node_type(array_type, array_literal->type.base_type.node);
+                        
+                        byte_count = get_type_byte_count(array_type->item_type).byte_count * array_literal->item_count;
+                    }
+                
+                    print(buffer, "memcpy((u8 *) &(");
+                    print_expression(buffer, assignment->left);
+                    print(buffer, "), (u8 *) (");
+                    print_expression(buffer, assignment->right);
+                    print(buffer, ").base, %llu)", byte_count);
+                }
+                else
+                {
+                    print_expression(buffer, assignment->left);
+                    print(buffer, " = ");
+                    print_expression(buffer, assignment->right);
+                }
+                
                 print_line(buffer, ";");
             } break;
             
