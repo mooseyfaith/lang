@@ -45,7 +45,7 @@ var piece_type_colors rgba32[piece_type.count] =
     { 1.0; 1.0; 1.0; 1.0 }
 };
 
-var board piece_type[10][20];
+var board piece_type[10][24];
 var next_piece piece_type;
 
 var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
@@ -61,7 +61,7 @@ while true
         break;
     }
     
-    var delta_seconds f32 = platform.delta_seconds;
+    var delta_seconds f32 = platform.delta_seconds * 4;
     tick_timeout = tick_timeout - delta_seconds;
     
     // 'D' - 'A'
@@ -77,7 +77,7 @@ while true
         {
             var y = piece.bricks[i].y - 1;
             
-            var a bool = y is 0;
+            var a bool = y < 0;
             var b bool = board[y][piece.bricks[i].x] is_not piece_type.empty;
             if a or b
             {
@@ -114,7 +114,7 @@ while true
     var quads quad[64];
     var quad_count;
     
-    var brick_size f32 = 0.05;
+    var brick_size f32 = 0.025;
     
     quads[quad_count].box   = box2_size(v2(0 * brick_size, 0 * brick_size), v2(brick_size, brick_size));
     quads[quad_count].color = piece_type_colors[piece.type];
@@ -124,8 +124,8 @@ while true
     {
         loop var x; board[0].count
         {
-            var type piece_type = board[x][y];
-            if board[x][y] is_not piece_type.empty
+            var type piece_type = board[y][x];
+            if type is_not piece_type.empty
             {
                 quads[quad_count].box   = box2_size(v2(x * brick_size, y * brick_size), v2(brick_size, brick_size));
                 quads[quad_count].color = piece_type_colors[type];
@@ -142,9 +142,6 @@ while true
         quads[quad_count].color = piece_type_colors[piece.type];
         quad_count = quad_count + 1;
     }
-    
-    //quads[quad_count].box = box2_size(player_pos, v2(1, 1));
-    //quad_count = quad_count + 1;
     
     glViewport(0, 0, window_size.x, window_size.y);
     glClearColor(0, 0, 0, 1);
@@ -170,15 +167,6 @@ while true
         
         i = i + 1;
     }
-    
-    //glColor3f(1, 0, 0);
-    //glVertex2f(0, 0);
-    
-    //glColor3f(0, 1, 0);
-    //glVertex2f(1, 0);
-    
-    //glColor3f(0, 0, 1);
-    //glVertex2f(0, 1);
     
     glEnd();
     
