@@ -15,6 +15,17 @@ def foo func(name GLchar ref; count GLint)
 {
 }
 
+def bla struct
+{
+    blubs blub[10];
+}
+
+def blub struct
+{
+    ok bool;
+    count s32;
+}
+
 def bar func(name GLchar ref);
 var global bardaband bar;
 

@@ -105,9 +105,9 @@ string skip_until_set_or_all(string *iterator, string set, bool do_skip_set = fa
         return result;
 }
 
-void skip_white(string *iterator)
+bool skip_white(string *iterator)
 {
-    try_skip_set(iterator, s(" \t\n\r"));
+    return try_skip_set(iterator, s(" \t\n\r"));
 }
 
 bool is_digit(u8 code)

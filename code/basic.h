@@ -53,6 +53,9 @@ buffer_type(u8_buffer, u8);
 
 typedef u8_array string;
 
+array_type(string_array, string);
+buffer_type(string_buffer, string);
+
 // without 0 terminal character
 #define s(cstring_literal) string { carray_count(cstring_literal) - 1, (u8 *) cstring_literal }
 

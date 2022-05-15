@@ -2,26 +2,26 @@ module platform;
 
 def platform_api struct
 {
-    var keys platform_button[256];
-    var delta_seconds f32;
+    keys platform_button[256];
+    delta_seconds f32;
     
     // win32 specific
-    var win32_instance    HINSTANCE;
-    var window_class_name cstring;
-    var time_ticks       u64;
-    var ticks_per_second u64;
+    win32_instance    HINSTANCE;
+    window_class_name cstring;
+    time_ticks        u64;
+    ticks_per_second  u64;
 }
 
 def platform_api_window struct
 {
-    var handle         HWND;
-    var device_context HDC;
+    handle         HWND;
+    device_context HDC;
 }
 
 def platform_button struct
 {
-    var is_active             bool;
-    var half_transition_count u8;
+    is_active             bool;
+    half_transition_count u8;
 }
 
 def platform_button_was_pressed func(button platform_button) (result bool)
@@ -105,8 +105,8 @@ def platform_window func(platform platform_api ref; window platform_api_window r
 
 def vec2s struct 
 {
-    var x s32;
-    var y s32;
+    x s32;
+    y s32;
 }
 
 def platform_window_frame func(platform platform_api ref; window platform_api_window ref) (result vec2s)
