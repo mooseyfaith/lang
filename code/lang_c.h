@@ -838,7 +838,7 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
     else
     {
         print(buffer, " (*");
-        print_type(buffer, &function_type->node);
+        print_type(buffer, get_base_node(function_type));
         print(buffer, ")(");
     }
     
@@ -950,7 +950,7 @@ insert_type_child_declaration;
 void insert_declarations(lang_c_buffer *buffer, node_dependency_buffer *dependencies, ast_compound_type *compound_type)
 {
     complete_type_info type = {};
-    type.base_type.node = &compound_type->node;
+    type.base_type.node = get_base_node(compound_type);
     type = get_unique_type(buffer, type);
     
     compound_type = get_node_type(compound_type, type.name_type.node);
@@ -959,21 +959,21 @@ void insert_declarations(lang_c_buffer *buffer, node_dependency_buffer *dependen
     {
         auto variable = it->variable;
         
-        insert_type_child(buffer, dependencies, variable->type, &compound_type->node);
+        insert_type_child(buffer, dependencies, variable->type, get_base_node(compound_type));
     }
 }
 
 void insert_function_type_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencies, ast_function_type *function_type)
 {
     complete_type_info type = {};
-    type.name_type.node = &function_type->node;
+    type.name_type.node = get_base_node(function_type);
     type.base_type = type.name_type;
     type = get_unique_type(buffer, type);
     
     function_type = get_node_type(function_type, type.name_type.node);
 
-    insert_type_child(buffer, dependencies, function_type->input, &function_type->node);
-    insert_type_child(buffer, dependencies, function_type->output, &function_type->node);
+    insert_type_child(buffer, dependencies, function_type->input,  get_base_node(function_type));
+    insert_type_child(buffer, dependencies, function_type->output, get_base_node(function_type));
 
 #if 0
     if (function_type->input.base_type.node)
@@ -1103,7 +1103,7 @@ get_unique_type_declaration
                     if ((unique_array_type->item_type.name_type.node == item_type.name_type.node) &&
                         (unique_array_type->item_type.name_type.indirection_count == array_type->item_type.name_type.indirection_count))
                     {
-                        base_type = &unique_array_type->node;
+                        base_type = get_base_node(unique_array_type);
                         found = true;
                         break;
                     }
@@ -1118,7 +1118,7 @@ get_unique_type_declaration
                 resize_buffer(unique_types, unique_types->count + 1);
                 auto unique_type = &unique_types->base[unique_types->count - 1];
                 *unique_type = {};
-                unique_type->node = &unique_array_type->node;
+                unique_type->node = get_base_node(unique_array_type);
                 
                 base_type = unique_type->node;
             }
@@ -1142,7 +1142,7 @@ get_unique_type_declaration
                     
                     if (unique_declarations_match(buffer, unique_compound_type->first_field, compound_type->first_field))
                     {
-                        base_type = &unique_compound_type->node;
+                        base_type = get_base_node(unique_compound_type);
                         found = true;
                         break;
                     }
@@ -1159,7 +1159,7 @@ get_unique_type_declaration
             resize_buffer(unique_types, unique_types->count + 1);
             auto unique_type = &unique_types->base[unique_types->count - 1];
             *unique_type = {};
-            unique_type->node = &unique_compound_type->node;
+            unique_type->node = get_base_node(unique_compound_type);
             
             base_type = unique_type->node;
         } break;
@@ -1182,7 +1182,7 @@ get_unique_type_declaration
                     if ((unique_input.name_type.node == unique_function_type->input.name_type.node) &&
                         (unique_output.name_type.node == unique_function_type->output.name_type.node))
                     {
-                        base_type = &unique_function_type->node;
+                        base_type = get_base_node(unique_function_type);
                         found = true;
                         break;
                     }
@@ -1200,7 +1200,7 @@ get_unique_type_declaration
             resize_buffer(unique_types, unique_types->count + 1);
             auto unique_type = &unique_types->base[unique_types->count - 1];
             *unique_type = {};
-            unique_type->node = &unique_function_type->node;
+            unique_type->node = get_base_node(unique_function_type);
             
             base_type = unique_type->node;
         } break;
@@ -1279,7 +1279,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         print_line(&buffer, "#define get_call_location() code_location{ \"\", __FILE__, __FUNCTION__, __LINE__, 0 }");
     }
     
-    auto root = &parser->first_file->node;
+    auto root = get_base_node(parser->first_file);
     
     ast_list_entry *first_external_binding = null;
     auto external_binding_tail_next = &first_external_binding;
@@ -1319,7 +1319,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     {
                         auto new_entry = new ast_list_entry;
                         *new_entry = {};
-                        new_entry->node  = &external_binding->node;
+                        new_entry->node  = get_base_node(external_binding);
                         
                         *external_binding_tail_next = new_entry;
                         external_binding_tail_next = &new_entry->next;
@@ -1357,26 +1357,26 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 {
                     local_node_type(type_alias, node);
                                         
-                    insert_type_child(&buffer, &dependencies, type_alias->type, &type_alias->node);
+                    insert_type_child(&buffer, &dependencies, type_alias->type, node);
                 } break;
                 
                 case ast_node_type_function:
                 {
                     local_node_type(function, node);
                     
-                    insert_type_child(&buffer, &dependencies, function->type, &function->node);
+                    insert_type_child(&buffer, &dependencies, function->type, node);
                 } break;
                 
                 case ast_node_type_array_literal:
                 {
                     local_node_type(array_literal, node);
-                    insert_type_child(&buffer, &dependencies, array_literal->type, &array_literal->node);
+                    insert_type_child(&buffer, &dependencies, array_literal->type, node);
                 } break;
                 
                 case ast_node_type_compound_literal:
                 {
                     local_node_type(compound_literal, node);
-                    insert_type_child(&buffer, &dependencies, compound_literal->type, &compound_literal->node);
+                    insert_type_child(&buffer, &dependencies, compound_literal->type, node);
                 } break;
                 
                 case ast_node_type_function_type:
@@ -1400,7 +1400,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     if (item_type.name_type.node == item_type.base_type.node)
                         item_type.base_type.indirection_count++;
                     
-                    insert_type_child(&buffer, &dependencies, item_type, &array_type->node);
+                    insert_type_child(&buffer, &dependencies, item_type, node);
                 } break;
             
                 // allways assumed to be preceded by a type alias
@@ -1575,7 +1575,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                     for (auto field = compound_type->first_field; field; field = (ast_compound_type_field *) field->node.next)
                     {
-                        print_statements(&buffer, &field->variable->node);
+                        print_statements(&buffer, get_base_node(field->variable));
                     }
                     
                     print_scope_close(&buffer, false);

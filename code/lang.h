@@ -587,6 +587,8 @@ void append_node(ast_node ***tail_next, ast_node *node)
 
 #define is_node_type(node, type) ((node)->node_type == ast_node_type_ ## type)
 
+#define get_base_node(super_node) ((ast_node *) (super_node))
+
 #define consume_white_or_comment_declaration void consume_white_or_comment(lang_parser *parser)
 consume_white_or_comment_declaration;
 
@@ -1057,7 +1059,7 @@ complete_type_info parse_type(lang_parser *parser)
             array_type->item_type = result;
             
             result = {};
-            result.name_type.node = &array_type->node;
+            result.name_type.node = get_base_node(array_type);
             result.base_type = result.name_type;
         }
         else
@@ -1083,7 +1085,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         {
             new_local_node(not);
             
-            *parent_expression = &not->node;
+            *parent_expression = get_base_node(not);
             parent_expression = &not->expression;
             continue;
         }
@@ -1113,12 +1115,12 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
     {
         if (type.name_type.node && is_node_type(type.name_type.node, array_type))
         {
-            expression = lang_require_call(&parse_array_literal(parser, type)->node);
+            expression = lang_require_call(get_base_node(parse_array_literal(parser, type)));
         }
         
         if (!expression && (type.name.count || (type.name_type.node && is_node_type(type.name_type.node, compound_type))))
         {
-            expression = lang_require_call(&parse_compound_literal(parser, type)->node);
+            expression = lang_require_call(get_base_node(parse_compound_literal(parser, type)));
         }
     }
 
@@ -1126,14 +1128,14 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
     {
         new_local_node(number);
         number->value.u64_value = 0;
-        expression = &number->node;
+        expression = get_base_node(number);
     }
     
     if (!expression)
-        expression = lang_require_call(&parse_number(parser)->node);
+        expression = lang_require_call(get_base_node(parse_number(parser)));
         
     if (!expression)
-        expression = lang_require_call(&parse_string_literal(parser)->node);
+        expression = lang_require_call(get_base_node(parse_string_literal(parser)));
     
     if (!expression)
     {
@@ -1142,7 +1144,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         {
             new_local_node(name_reference);
             name_reference->name = name;
-            expression = &name_reference->node;
+            expression = get_base_node(name_reference);
             
             // function call
             if (try_consume(parser, s("(")))
@@ -1167,7 +1169,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 function_call->expression = expression;
                 function_call->first_argument = first_argument;
                 
-                expression = &function_call->node;
+                expression = get_base_node(function_call);
             }
         }
     }
@@ -1185,7 +1187,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
             field_reference->expression = expression;
             field_reference->name       = name;
             
-            expression = &field_reference->node;
+            expression = get_base_node(field_reference);
             continue;
         }
         else if (try_consume(parser, s("[")))
@@ -1197,7 +1199,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
             
             lang_require(try_consume(parser, s("]")), parser->iterator, "expected ']' after array index expression");
             
-            expression = &array_index->node;
+            expression = get_base_node(array_index);
             
             continue;
         }
@@ -1217,7 +1219,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 cast->type = type;
                 cast->expression = expression;
                 
-                expression = &cast->node;
+                expression = get_base_node(cast);
                 continue;
             }
             else if (keyword == s("ref"))
@@ -1225,7 +1227,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 new_local_node(take_reference);
                 take_reference->expression = expression;
                 
-                expression = &take_reference->node;
+                expression = get_base_node(take_reference);
                 continue;
             }
             else
@@ -1255,7 +1257,7 @@ parse_expression_declaration
             is->right = lang_require_call(parse_base_expression(parser, {}));
             lang_require(is->right, parser->iterator, "expected expression after 'is' (equal opeator)");
             
-            left = &is->node;
+            left = get_base_node(is);
             continue;
         }
         else if (try_consume_keyword(parser, s("is_not")))
@@ -1265,7 +1267,7 @@ parse_expression_declaration
             is_not->right = lang_require_call(parse_base_expression(parser, {}));
             lang_require(is_not->right, parser->iterator, "expected expression after 'is_not' (equal opeator)");
             
-            left = &is_not->node;
+            left = get_base_node(is_not);
             continue;
         }
         else if (try_consume_keyword(parser, s("bit_or")))
@@ -1275,7 +1277,7 @@ parse_expression_declaration
             bit_or->right = lang_require_call(parse_base_expression(parser, {}));
             lang_require(bit_or->right, parser->iterator, "expected expression after 'bit_or'");
             
-            left = &bit_or->node;
+            left = get_base_node(bit_or);
             continue;
         }
         else
@@ -1357,7 +1359,7 @@ parse_expression_declaration
                 binary_operator->right = lang_require_call(parse_base_expression(parser, {}));
                 lang_require(binary_operator->right, parser->iterator, "expected expression after %.*s '%.*s'", fnode_type_name(&binary_operator->node), fs(operator_token));
         
-                left = &binary_operator->node;
+                left = get_base_node(binary_operator);
                 continue;
             }
         }
@@ -1435,9 +1437,9 @@ ast_variable * parse_declaration(ast_node ***tail_next, lang_parser *parser)
     {
         new_local_node(name_reference);
         name_reference->name      = name;
-        name_reference->reference = &variable->node;
+        name_reference->reference = get_base_node(variable);
         
-        assignment->left = &name_reference->node;
+        assignment->left = get_base_node(name_reference);
         append(tail_next, &assignment->node);
     }
     
@@ -1648,7 +1650,7 @@ ast_node * parse_statements(lang_parser *parser)
                             new_local_node(compound_type);
                             compound_type->first_field = get_node_type(compound_type_field, first_input);
                             
-                            function_type->input.name_type.node = &compound_type->node;
+                            function_type->input.name_type.node = get_base_node(compound_type);
                             function_type->input.base_type = function_type->input.name_type;
                         }
                         
@@ -1661,12 +1663,12 @@ ast_node * parse_statements(lang_parser *parser)
                                 new_local_node(compound_type);
                                 compound_type->first_field = get_node_type(compound_type_field, first_output);
                                 
-                                function_type->output.name_type.node = &compound_type->node;
+                                function_type->output.name_type.node = get_base_node(compound_type);
                                 function_type->output.base_type = function_type->output.name_type;
                             }
                         }
                         
-                        type.name_type.node = &function_type->node;
+                        type.name_type.node = get_base_node(function_type);
                         type.base_type = type.name_type;
                     }
                     else
@@ -1707,7 +1709,7 @@ ast_node * parse_statements(lang_parser *parser)
                         external_binding->library_name = library_name;
                         external_binding->is_dll = is_dll;
                         
-                        function->first_statement = &external_binding->node;
+                        function->first_statement = get_base_node(external_binding);
                         
                         append(&tail_next, &function->node);
                     }
@@ -1753,7 +1755,7 @@ ast_node * parse_statements(lang_parser *parser)
                     */
                     
                     new_local_node(type_alias);
-                    type_alias->type.base_type.node = &compound_type->node;
+                    type_alias->type.base_type.node = get_base_node(compound_type);
                     type_alias->type.name_type      = type_alias->type.base_type;
                     type_alias->name = name;
                     append(&tail_next, &type_alias->node);
@@ -1794,7 +1796,7 @@ ast_node * parse_statements(lang_parser *parser)
                     enumeration_type->item_count.value.u64_value = item_count;
                     
                     new_local_node(type_alias);
-                    type_alias->type.base_type.node = &enumeration_type->node;
+                    type_alias->type.base_type.node = get_base_node(enumeration_type);
                     type_alias->type.name_type      = type_alias->type.base_type;
                     type_alias->name = name;
                     append(&tail_next, &type_alias->node);
@@ -1856,7 +1858,7 @@ ast_node * parse_statements(lang_parser *parser)
                 {
                     new_local_node(file_reference);
                     file_reference->file = parser->current_file;
-                    *file_tail_next = &file_reference->node;
+                    *file_tail_next = get_base_node(file_reference);
                 }
                 
                 lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
@@ -1922,7 +1924,7 @@ ast_node * parse_statements(lang_parser *parser)
                     if (assignment)
                     {
                         assignment->left = expression;
-                        expression = &assignment->node;
+                        expression = get_base_node(assignment);
                     }
 
                     lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of the statement");
@@ -2746,7 +2748,7 @@ void begin(lang_parser *parser)
             number_type->is_float  = false;
             number_type->bit_count_power_of_two = 8 << byte_count_power_of_two;
             
-            parser->base_types[base_type] = &number_type->node;
+            parser->base_types[base_type] = get_base_node(number_type);
             
             append(&tail_next, &number_type->node);
         }
@@ -2761,7 +2763,7 @@ void begin(lang_parser *parser)
         number_type->is_float  = true;
         number_type->bit_count_power_of_two = 32 << i;
         
-        parser->base_types[base_type] = &number_type->node;
+        parser->base_types[base_type] = get_base_node(number_type);
         append(&tail_next, &number_type->node);
     }
     
@@ -2773,10 +2775,10 @@ void begin(lang_parser *parser)
         
         new_local_node(type_alias);
         type_alias->name                = lang_base_type_names[lang_base_type_string];
-        type_alias->type.name_type.node = &array_type->node;
+        type_alias->type.name_type.node = get_base_node(array_type);
         type_alias->type.base_type      = type_alias->type.name_type;
         
-        parser->base_types[lang_base_type_string] = &type_alias->node;
+        parser->base_types[lang_base_type_string] = get_base_node(type_alias);
         append(&tail_next, &type_alias->node);
     }
     
@@ -3036,7 +3038,7 @@ ast_node * find_node_in_module(lang_resolver *resolver, ast_module *module, stri
         //if (file == file_it->file)
             //continue;
     
-        auto scope = &file_it->file->node;
+        auto scope = get_base_node(file_it->file);
         
         auto node = find_node(resolver, scope, name);
         if (node)
@@ -3504,7 +3506,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
 
                             // add new argument with default value
                             text_node->node.next = argument;
-                            **argument_tail_next = &text_node->node;
+                            **argument_tail_next = get_base_node(text_node);
                             *argument_tail_next = &text_node->node.next;
                             // argument stays the same
 
@@ -3576,7 +3578,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
 
 void resolve(lang_parser *parser)
 {
-    auto root = &parser->first_file->node;
+    auto root = get_base_node(parser->first_file);
     
 #if 0
     // print ast
@@ -3658,7 +3660,7 @@ void resolve(lang_parser *parser)
                 case ast_node_type_enumeration_type:
                 {
                     local_node_type(enumeration_type, node);
-                    auto is_new = insert(&resolver.table, { s("count"), node }, &enumeration_type->item_count.node);
+                    auto is_new = insert(&resolver.table, { s("count"), node }, get_base_node(&enumeration_type->item_count));
                     assert(is_new);
                 
                     //add_node = true;
