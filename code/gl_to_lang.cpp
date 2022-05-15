@@ -10,33 +10,16 @@ struct parsed_type
     u32 indirection_count;
 };
 
-struct string_array
+bool add_unique(string_buffer *strings, string text)
 {
-    string *base;
-    usize count;
-    usize used_count;
-};
-
-bool add_unique(string_array *strings, string text)
-{
-    for (usize i = 0; i < strings->used_count; i++)
+    for (usize i = 0; i < strings->count; i++)
     {
         if (strings->base[i] == text)
             return false;
     }
 
-    if (strings->used_count + 1 >= strings->count)
-    {
-        strings->count = maximum(maximum(strings->count, strings->used_count) * 2, 1024);
-        auto new_base = (string *) platform_allocate_bytes(sizeof(string) * strings->count).base;
-        
-        memcpy(new_base, strings->base, sizeof(string) * strings->used_count);
-        platform_free_bytes((u8 *) strings->base);
-        
-        strings->base = new_base;
-    }
-    
-    strings->base[strings->used_count++] = text;
+    resize_buffer(strings, strings->count + 1);
+    strings->base[strings->count - 1] = text;
     return true;
 }
 
@@ -241,9 +224,9 @@ s32 main(s32 argument_count, cstring arguments[])
         { "gl/wglext.h", },
     };
     
-    string_array constants = {};
+    string_buffer constants = {};
     
-    auto output = fopen("tests/gl_win32.t", "w");
+    auto output = fopen("modules/gl_win32.t", "w");
     
     fprintf(output, "module gl;\n");
     
