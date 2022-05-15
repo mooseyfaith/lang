@@ -10,4 +10,20 @@ def bar func(f foo ref)
     printf("%i\n", f.a);
 }
 
+var platform platform_api;
+platform_init(platform ref);
+
+var window platform_api_window;
+platform_window(platform ref, window ref, "hello");
+
+while true
+{
+    if not platform_handle_messages(platform ref)
+    {
+        break;
+    }
+    
+}
+
+
 

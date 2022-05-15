@@ -295,11 +295,20 @@ print_expression_declaration
         {
             local_node_type(number, node);
             if (number->value.is_float)
-                print(buffer, "%f", number->value.f64_value);
+            {
+                if (number->value.bit_count_power_of_two == 32)
+                    print(buffer, "%ff", number->value.f64_value);
+                else
+                    print(buffer, "%f", number->value.f64_value);
+            }
             else if (number->value.is_signed)
+            {
                 print(buffer, "%lli", number->value.s64_value);
+            }
             else
+            {
                 print(buffer, "%llu", number->value.u64_value);
+            }
         } break;
         
         case ast_node_type_string:
@@ -389,8 +398,19 @@ print_expression_declaration
             {
                 if (is_node_type(type.node, enumeration_type))
                 {
-                    print_expression(buffer, field_reference->expression);
-                    print(buffer, "_%.*s", fs(field_reference->name));
+                    if (field_reference->name == s("count"))
+                    {
+                        local_node_type(enumeration_type, type.node);
+                        
+                        print(buffer, "/* ");
+                        print_expression(buffer, field_reference->expression);
+                        print(buffer, "_%.*s */ %i", fs(field_reference->name), enumeration_type->item_count);
+                    }
+                    else
+                    {
+                        print_expression(buffer, field_reference->expression);
+                        print(buffer, "_%.*s", fs(field_reference->name));
+                    }
                     
                     break;
                 }
@@ -400,9 +420,16 @@ print_expression_declaration
                     assert(field_reference->name == s("count"));
                     
                     if (array_type->count_expression)
+                    {
+                        print(buffer, "/* ");
+                        print_expression(buffer, field_reference->expression);
+                        print(buffer, ".count */ ");
                         print_expression(buffer, array_type->count_expression);
+                    }
                     else
+                    {
                         print(buffer, ".count");
+                    }
                     
                     break;
                 }
@@ -844,18 +871,21 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
     
     bool is_not_first = false;
     
-    local_node_type(compound_type, function_type->input.base_type.node);
-    
-    for (auto argument = compound_type->first_field; argument; argument = (ast_compound_type_field *) argument->node.next)
+    if (function_type->input.base_type.node)
     {
-        auto variable = argument->variable;
+        local_node_type(compound_type, function_type->input.base_type.node);
         
-        if (is_not_first)
-            print(buffer, ", ");
-                
-        print_declaration(buffer, variable);
+        for (auto argument = compound_type->first_field; argument; argument = (ast_compound_type_field *) argument->node.next)
+        {
+            auto variable = argument->variable;
             
-        is_not_first = true;
+            if (is_not_first)
+                print(buffer, ", ");
+                    
+            print_declaration(buffer, variable);
+                
+            is_not_first = true;
+        }
     }
     
     print(buffer, ")");
@@ -1107,7 +1137,6 @@ get_unique_type_declaration
                 base_type = unique_type->node;
             }
             
-            // fixed size arrays are unique
             if (array_type->count_expression)
                 return type;
         } break;
@@ -1378,19 +1407,27 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 case ast_node_type_array_type:
                 {
+                    local_node_type(array_type, node);
+                    
+                    auto array_type_without_count = *array_type;
+                    array_type_without_count.count_expression = null;
+                    
                     complete_type_info type = {};
-                    type.name_type.node = node;
+                    type.name_type.node = get_base_node(&array_type_without_count);
                     type.base_type = type.name_type;
                     type = get_unique_type(&buffer, type);
                     
-                    local_node_type(array_type, type.name_type.node);
+                    auto unique_array_type_without_count = get_node_type(array_type, type.name_type.node);
                     
-                    auto item_type = array_type->item_type;
+                    auto item_type = unique_array_type_without_count->item_type;
                     item_type.name_type.indirection_count++;
                     if (item_type.name_type.node == item_type.base_type.node)
                         item_type.base_type.indirection_count++;
                     
-                    insert_type_child(&buffer, &dependencies, item_type, type.name_type.node);
+                    insert_type_child(&buffer, &dependencies, item_type, get_base_node(unique_array_type_without_count));
+                    
+                    if (array_type->count_expression)
+                        insert_type_child(&buffer, &dependencies, item_type, get_base_node(array_type));
                 } break;
             
                 // allways assumed to be preceded by a type alias
@@ -1708,7 +1745,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     maybe_print_blank_line(&buffer);
                     print_type(&buffer, array_type->item_type);
-                    print_line(&buffer, " _array_literal_%x_base[] =", node->index);
+                    print(&buffer, " _array_literal_%x_base[", node->index);
+                    print_expression(&buffer, array_type->count_expression);
+                    print_line(&buffer, "] =");
                     
                     print_scope_open(&buffer);
     
@@ -1721,8 +1760,37 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     print_scope_close(&buffer, false);
                     print_line(&buffer, ";");
                     
-                    print_type(&buffer, array_literal->type); // full type
+                    auto type_without_count = *array_type;
+                    type_without_count.count_expression = null;
+                    print_type(&buffer, get_base_node(&type_without_count));
                     print_line(&buffer, " _array_literal_%x = { %llu, _array_literal_%x_base };", node->index, array_literal->item_count, node->index);
+                    print_newline(&buffer);
+                } break;
+                
+                case ast_node_type_compound_literal:
+                {
+                    maybe_print_blank_line(&buffer);
+                    
+                    local_node_type(compound_literal, node);
+                    
+                    local_node_type(compound_type, compound_literal->type.base_type.node);
+                    
+                    maybe_print_blank_line(&buffer);
+                    print_type(&buffer, compound_literal->type);
+                    print_line(&buffer, " _compound_literal_%x =", node->index);
+                    
+                    print_scope_open(&buffer);
+    
+                    // TODO: make sure order is correct
+                    for (auto field = compound_literal->first_field; field; field = (ast_compound_literal_field *) field->node.next)
+                    {
+                        print_expression(&buffer, field->expression);
+                        print_line(&buffer, ",");
+                    }
+        
+                    print_scope_close(&buffer, false);
+                    print_line(&buffer, ";");
+                    
                     print_newline(&buffer);
                 } break;
             }

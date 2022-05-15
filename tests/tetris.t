@@ -29,17 +29,26 @@ def piece_type enum
 
 def falling_piece struct
 {
-    var bricks vec2s[4];
-    var type piece_type;
+    bricks vec2s[4];
+    type piece_type;
 }
 
-var piece_type_colors rgba32[piece_type.count];
-piece_type_colors[piece_type.o] = type(rgba32) { 1.0; 1.0; 1.0; 1.0 };
+var piece_type_colors rgba32[piece_type.count] = 
+{
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 };
+    { 1.0; 1.0; 1.0; 1.0 }
+};
 
-var board piece_type[20][10];
+var board piece_type[10][20];
 var next_piece piece_type;
 
-var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
+var piece falling_piece = make_piece(piece_type.i, board.count, board[0].count);
 
 var tick_timeout f32 = 1;
 
@@ -83,12 +92,12 @@ while true
                 board[brick.y][brick.x] = piece.type;
             }
             
-            piece = make_piece(piece_type_i, board[0].count, board.count);
+            piece = make_piece(piece_type.i, board[0].count, board.count);
         }
     }
     
     var window_size vec2s = platform_window_frame(platform ref, window ref);
-    var window_width_over_height f32 = window_size.x / window_size.y;
+    var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
     var viewport_scale vec2 = v2(2 * window_width_over_height, 2);
@@ -154,7 +163,7 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
     piece.type = type;
     
     switch type
-    case piece_type_i
+    case piece_type.i
     {
         var x s32 = board_width / 2;
         piece.bricks[0].x = x;
@@ -176,8 +185,8 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
 
 def vec2 struct
 { 
-    var x f32;
-    var y f32;
+    x f32;
+    y f32;
 }
     
 
@@ -192,19 +201,19 @@ def v2 func(x f32; y f32) (result vec2)
 
 def box2 struct
 {
-    var min vec2;
-    var max vec2;
+    min vec2;
+    max vec2;
 }
 
 def rgba32 struct
 {
-    var values f32[4];
+    values f32[4];
 }
 
 def quad struct
 {
-    var box   box2;
-    var color rgba32;
+    box   box2;
+    color rgba32;
 }
 
 def box2_size func(min vec2; size vec2) (result box2)

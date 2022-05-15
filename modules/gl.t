@@ -7,12 +7,12 @@ import platform;
 
 def gl_api struct
 {
-    var is_version_3_3 bool;
+    is_version_3_3 bool;
     
     // win32 specific
-    var win32_context             HGLRC;
-    var win32_init_window_handle  HWND;
-    var win32_init_device_context HDC;
+    win32_context             HGLRC;
+    win32_init_window_handle  HWND;
+    win32_init_device_context HDC;
 }
 
 def gl_init func(gl gl_api ref; platform platform_api ref)
