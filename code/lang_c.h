@@ -974,22 +974,6 @@ void insert_function_type_dependencies(lang_c_buffer *buffer, node_dependency_bu
 
     insert_type_child(buffer, dependencies, function_type->input,  get_base_node(function_type));
     insert_type_child(buffer, dependencies, function_type->output, get_base_node(function_type));
-
-#if 0
-    if (function_type->input.base_type.node)
-    {
-        auto input_compound = get_node_type(compound_type, function_type->input.base_type.node);
-        insert_declarations(buffer, dependencies, input_compound);
-        
-        insert_type_child(buffer, function_type->input, &function_type->node);
-    }
-    
-    if (function_type->output.base_type.node)
-    {
-        auto output_compound = get_node_type(compound_type, function_type->output.base_type.node);
-        insert_declarations(buffer, dependencies, output_compound);
-    }
-#endif
 }
 
 // node depends on type
@@ -1271,8 +1255,9 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         print_newline(&buffer);
         print_line(&buffer, "#define %.*snull 0", fs(buffer.settings.prefix));
         
-        //print_newline(&buffer);
-        //print_line(&buffer, "typedef char * %.*scstring;", fs(buffer.settings.prefix));
+        // since unsigned char, signed char and char are different for c++, IDIOTS!
+        print_newline(&buffer);
+        print_line(&buffer, "typedef char * %.*scstring;", fs(buffer.settings.prefix));
         
         // HACK: compiler should resolve this call internally an generate proper expressions
         print_newline(&buffer);
@@ -1393,14 +1378,19 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                 case ast_node_type_array_type:
                 {
-                    local_node_type(array_type, node);
+                    complete_type_info type = {};
+                    type.name_type.node = node;
+                    type.base_type = type.name_type;
+                    type = get_unique_type(&buffer, type);
+                    
+                    local_node_type(array_type, type.name_type.node);
                     
                     auto item_type = array_type->item_type;
                     item_type.name_type.indirection_count++;
                     if (item_type.name_type.node == item_type.base_type.node)
                         item_type.base_type.indirection_count++;
                     
-                    insert_type_child(&buffer, &dependencies, item_type, node);
+                    insert_type_child(&buffer, &dependencies, item_type, type.name_type.node);
                 } break;
             
                 // allways assumed to be preceded by a type alias
@@ -1575,7 +1565,8 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 
                     for (auto field = compound_type->first_field; field; field = (ast_compound_type_field *) field->node.next)
                     {
-                        print_statements(&buffer, get_base_node(field->variable));
+                        print_declaration(&buffer, field->variable);
+                        print_line(&buffer, ";");
                     }
                     
                     print_scope_close(&buffer, false);
