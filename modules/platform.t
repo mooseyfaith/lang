@@ -20,38 +20,38 @@ def platform_api_window struct
 
 def platform_button struct
 {
-    is_active             bool;
+    is_active             b8;
     half_transition_count u8;
 }
 
-def platform_button_was_pressed func(button platform_button) (result bool)
+def platform_button_was_pressed func(button platform_button) (result b8)
 {
     var x u32 = 2 - button.is_active;
     return button.half_transition_count >= x;
 }
 
-def platform_button_was_released func(button platform_button) (result bool)
+def platform_button_was_released func(button platform_button) (result b8)
 {
     var x u32 = 1 + button.is_active;
     return button.half_transition_count >= x;
 }
 
-def platform_key_is_active func(platform platform_api; key u32) (result bool)
+def platform_key_is_active func(platform platform_api; key u32) (result b8)
 {
     return platform.keys[key].is_active;
 }
 
-def platform_key_was_pressed func(platform platform_api; key u32) (result bool)
+def platform_key_was_pressed func(platform platform_api; key u32) (result b8)
 {
     return platform_button_was_pressed(platform.keys[key]);
 }
 
-def platform_key_was_released func(platform platform_api; key u32) (result bool)
+def platform_key_was_released func(platform platform_api; key u32) (result b8)
 {
     return platform_button_was_released(platform.keys[key]);
 }
 
-def platform_button_update func(button platform_button ref; is_active bool)
+def platform_button_update func(button platform_button ref; is_active b8)
 {
     //assert(button.is_active is_not is_active);
     
@@ -121,7 +121,7 @@ def platform_window_frame func(platform platform_api ref; window platform_api_wi
     return result;
 }
 
-def platform_handle_messages func(platform platform_api ref) (result bool)
+def platform_handle_messages func(platform platform_api ref) (result b8)
 {
     var key_index;
     while key_index < 256

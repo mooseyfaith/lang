@@ -7,8 +7,8 @@ if "%name%"=="" (
 )
 
 set source=%cd%\code\main.cpp
-rem set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
-set options=/MT /O2 /EHsc /nologo /I %cd%/code
+set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
+rem set options=/MT /O2 /EHsc /nologo /I %cd%/code
 
 if not exist build mkdir build
 pushd build

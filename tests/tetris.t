@@ -13,8 +13,6 @@ gl_init(gl ref, platform ref);
 gl_win32_window_init_1(window.device_context);
 platform_require(wglMakeCurrent(window.device_context, gl.win32_context));
 
-var player_pos vec2;
-
 def piece_type enum 
 {
     empty;
@@ -45,7 +43,7 @@ var piece_type_colors rgba32[piece_type.count] =
     { 1.0; 1.0; 1.0; 1.0 }
 };
 
-var board piece_type[10][24];
+var board piece_type[10][24]; // or [24][10]piece_type ?
 var next_piece piece_type;
 
 var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
@@ -53,6 +51,8 @@ var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
 var tick_timeout f32 = 1;
 
 platform_update_time(platform ref); // skip startup time
+
+var game_over b32 = false;
 
 while true
 {
@@ -65,42 +65,75 @@ while true
     tick_timeout = tick_timeout - delta_seconds;
     
     // 'D' - 'A'
-    var move_x f32 = platform_key_is_active(platform, 0x44) - platform_key_is_active(platform, 0x41);
-    player_pos.x = move_x / 1000 + player_pos.x;
+    // var move_x f32 = platform_key_is_active(platform, 0x44) - platform_key_is_active(platform, 0x41);
+    // player_pos.x = move_x / 1000 + player_pos.x;
     
-    while tick_timeout <= 0
+    if game_over
     {
-        tick_timeout = tick_timeout + 1;
-        
-        var piece_did_fall bool = false;
-        loop var i; piece.bricks.count
+        if platform_key_was_pressed(platform, 13) // enter
         {
-            var y = piece.bricks[i].y - 1;
+            game_over = false;
             
-            var a bool = y < 0;
-            var b bool = board[y][piece.bricks[i].x] is_not piece_type.empty;
-            if a or b
+            // board = piece_type.empty; like this?
+            
+            loop var y; board.count
             {
-                piece_did_fall = true;
-                break;
-            }
-        }
-        
-        if piece_did_fall
-        {
-            loop var i; piece.bricks.count
-            {
-                var brick vec2s = piece.bricks[i];
-                board[brick.y][brick.x] = piece.type;
+                loop var x; board[0].count
+                {
+                    board[y][x] = piece_type.empty;
+                }
             }
             
             piece = make_piece(piece_type.i, board[0].count, board.count);
+            tick_timeout = 1;
+            continue;
         }
-        else
+    }
+    else
+    {
+        while tick_timeout <= 0
         {
+            tick_timeout = tick_timeout + 1;
+            
+            var piece_did_fall b32 = false;
             loop var i; piece.bricks.count
             {
-                piece.bricks[i].y = piece.bricks[i].y - 1;
+                var y = piece.bricks[i].y - 1;
+                
+                var a b32 = y < 0;
+                var b b32 = board[y][piece.bricks[i].x] is_not piece_type.empty;
+                if a or b
+                {
+                    piece_did_fall = true;
+                    break;
+                }
+            }
+            
+            if piece_did_fall
+            {
+                loop var i; piece.bricks.count
+                {
+                    var brick vec2s = piece.bricks[i];
+                    
+                    if board[brick.y][brick.x] is_not piece_type.empty
+                    {
+                        game_over = true;
+                        break;
+                    }
+                    
+                    board[brick.y][brick.x] = piece.type;
+                }
+                
+                if game_over { break; }
+                
+                piece = make_piece(piece_type.i, board[0].count, board.count);
+            }
+            else
+            {
+                loop var i; piece.bricks.count
+                {
+                    piece.bricks[i].y = piece.bricks[i].y - 1;
+                }
             }
         }
     }
@@ -109,16 +142,12 @@ while true
     var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
-    var viewport_scale vec2 = v2(2 /  window_width_over_height, 2);
+    var viewport_scale vec2 = v2(2 / window_width_over_height, 2);
     
     var quads quad[64];
     var quad_count;
     
     var brick_size f32 = 0.025;
-    
-    quads[quad_count].box   = box2_size(v2(0 * brick_size, 0 * brick_size), v2(brick_size, brick_size));
-    quads[quad_count].color = piece_type_colors[piece.type];
-    quad_count = quad_count + 1;
     
     loop var y; board.count
     {
@@ -204,7 +233,6 @@ def vec2 struct
     x f32;
     y f32;
 }
-    
 
 def v2 func(x f32; y f32) (result vec2)
 {

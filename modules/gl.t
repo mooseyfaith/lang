@@ -2,12 +2,9 @@ module gl;
 
 import platform;
 
-//#include <gl\gl.h>
-//#pragma comment(lib, "opengl32.lib")
-
 def gl_api struct
 {
-    is_version_3_3 bool;
+    is_version_3_3 b8;
     
     // win32 specific
     win32_context             HGLRC;
@@ -78,23 +75,23 @@ def gl_win32_window_init_1 func(device_context HDC)
 //{
 //    var pixel_format_attributes s32[] =
 //    {
-//        WGL_DRAW_TO_WINDOW_ARB, GL_TRUE,
-//        WGL_SUPPORT_OPENGL_ARB, GL_TRUE,
-//        WGL_DOUBLE_BUFFER_ARB,  GL_TRUE,
-//        WGL_PIXEL_TYPE_ARB, WGL_TYPE_RGBA_ARB,
-//        WGL_COLOR_BITS_ARB, 24,
-//        WGL_DEPTH_BITS_ARB, 24,
-//        WGL_STENCIL_BITS_ARB, 8,
+//        WGL_DRAW_TO_WINDOW_ARB; GL_TRUE;
+//        WGL_SUPPORT_OPENGL_ARB; GL_TRUE;
+//        WGL_DOUBLE_BUFFER_ARB;  GL_TRUE;
+//        WGL_PIXEL_TYPE_ARB; WGL_TYPE_RGBA_ARB;
+//        WGL_COLOR_BITS_ARB; 24;
+//        WGL_DEPTH_BITS_ARB; 24;
+//        WGL_STENCIL_BITS_ARB; 8;
 //        
 //        // multi sample anti aliasing
-//        //WGL_SAMPLE_BUFFERS_ARB, GL_TRUE, //Number of buffers (must be 1 at time of writing)
-//        //WGL_SAMPLES_ARB, 1, // Number of samples
+//        WGL_SAMPLE_BUFFERS_ARB; GL_TRUE; // Number of buffers (must be 1 at time of writing)
+//        WGL_SAMPLES_ARB; 1; // Number of samples
 //        
-//        0, // end
+//        0 // end
 //    };
 //    
 //    var pixel_format s32;
 //    var pixel_format_count u32;
-//    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes, null, 1, pixel_format ref, pixel_format_count ref));
+//    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes.base, null, 1, pixel_format ref, pixel_format_count ref));
 //    platform_require(SetPixelFormat(device_context, pixel_format, null));
 //}

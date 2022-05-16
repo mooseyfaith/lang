@@ -664,7 +664,7 @@ void consume_white_or_comment(lang_parser *parser)
         if (try_consume(parser, s("//")))
         {
             auto comment = skip_until_set_or_all(&parser->iterator, s("\n\r"), true);
-            consume_white_or_comment(parser);
+            skip_white(&parser->iterator);
             
             if (parser->pending_comment.count)
                 parser->pending_comment.count = comment.base + comment.count - parser->pending_comment.base;
@@ -2642,6 +2642,13 @@ complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
             }
         } break;
         
+        case ast_node_type_cast:
+        {
+            local_node_type(cast, node);
+            
+            return cast->type;
+        } break;
+        
         case ast_node_type_take_reference:
         {
             local_node_type(take_reference, node);
@@ -2818,6 +2825,12 @@ bool parse(lang_parser *parser, string source, string source_name)
     
     lang_require_return_value(parser->iterator.count == 0, false, parser->iterator, "expected statements, unexpected '%c'", parser->iterator.base[0]);
     
+    // give trailing comments in files a home
+    if (parser->pending_comment.count)
+    {
+        new_local_node(base_node);
+    }
+    
     if (!file->module)
     {
         if (!parser->unnamed_module)
@@ -2904,11 +2917,17 @@ module lang;
 def usize type u64;
 def ssize type s64;
 
-// def bool type u32;
+def b8 type u8;
+def b32 type u32;
+
+// def null = 0 cast(u8 ref);
+
+// def false = 0 cast(b8);
+// def true  = 1 cast(b8);
 
 //def string type u8[];
 
-// def cstring type u8 ref; since C++ does not like unsigned char or signned char instead of plain char
+// def cstring type u8 ref; // since C++ does not like unsigned char or signned char instead of plain char
 
 def code_location struct
 {
@@ -3360,6 +3379,20 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                         entry->name = array_type->item_type.name;
                     }
                 } break;
+                
+                 case ast_node_type_cast:
+                {
+                    local_node_type(cast, node);
+
+                    if (!cast->type.name_type.node)
+                    {
+                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                        entry->scope_stack = copy_scope_stack(scope_stack);
+                        entry->type = &cast->type;
+                        entry->name = cast->type.name;
+                    }
+                } break;
 
                 case ast_node_type_function:
                 {
@@ -3473,7 +3506,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                         {
                             local_node_type(array_type, base_type);
                             
-                            lang_require_return_value(field_reference->name == s("count"), ,field_reference->name, "arrays have no field '%.*s'", fs(field_reference->name));
+                            lang_require_return_value(field_reference->name == s("count") || field_reference->name == s("base"), ,field_reference->name, "arrays have no field '%.*s'", fs(field_reference->name));
                         }
                         else
                         {

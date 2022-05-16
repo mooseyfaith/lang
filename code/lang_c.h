@@ -425,19 +425,48 @@ print_expression_declaration
                 else if (is_node_type(type.node, array_type))
                 {
                     local_node_type(array_type, type.node);
-                    assert(field_reference->name == s("count"));
                     
-                    if (array_type->count_expression)
+                #if 0
+                    print_expression(buffer, field_reference->expression);
+                    print(buffer, ".%.*s", fs(field_reference->name));
+                #else
+                    if (field_reference->name == s("count"))
                     {
-                        print(buffer, "/* ");
-                        print_expression(buffer, field_reference->expression);
-                        print(buffer, ".count */ ");
-                        print_expression(buffer, array_type->count_expression);
+                        if (array_type->count_expression)
+                        {
+                            print(buffer, "/* ");
+                            print_expression(buffer, field_reference->expression);
+                            print(buffer, ".count */ ");
+                            print_expression(buffer, array_type->count_expression);
+                        }
+                        else
+                        {
+                            print_expression(buffer, field_reference->expression);
+                            print(buffer, ".count");
+                        }
+                    }
+                    else if (field_reference->name == s("base"))
+                    {
+                        if (array_type->count_expression)
+                        {
+                            local_node_type(array_literal, field_reference->expression);
+                            
+                            print(buffer, "/* ");
+                            print_expression(buffer, field_reference->expression);
+                            print(buffer, ".base */ _array_literal_base_%x", array_literal->node.index);
+                            //print_expression(buffer, array_type->count_expression);
+                        }
+                        else
+                        {
+                            print_expression(buffer, field_reference->expression);
+                            print(buffer, ".base");
+                        }
                     }
                     else
                     {
-                        print(buffer, ".count");
+                        unreachable_codepath;
                     }
+                #endif
                     
                     break;
                 }
@@ -570,8 +599,8 @@ print_statements_declaration
             
             while (lines.count)
             {
-                auto line = skip_until_set_or_all(&lines, s("\n\r"));
-                try_skip(&lines, s("\n\r"));
+                auto line = skip_until_set_or_all(&lines, s("\r\n"));
+                try_skip(&lines, s("\r\n"));
                 try_skip_set(&lines, s(" \t"));
                 
                 print_line(buffer, "// %.*s", fs(line));
@@ -1479,6 +1508,12 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     insert_type_child(&buffer, &dependencies, enumeration_type->item_type, &enumeration_type->node);
                 } break;
             #endif
+            
+                case ast_node_type_constant:
+                {
+                    local_node_type(constant, node);
+                    insert_type_child(&buffer, &dependencies, get_expression_type(parser, constant->expression), node);
+                } break;
             }
         }
         
@@ -1519,12 +1554,14 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     assert(!child->is_root);
                     
-                    resize_buffer(&stack, stack.count + 1);
-                    stack.base[stack.count - 1] = child_index;
-                    
-                    node_depths.base[child_index] = maximum(node_depths.base[child_index], node_depths.base[index] + 1);
-                    
-                    max_depth = maximum(max_depth, node_depths.base[child_index]);
+                    if (node_depths.base[child_index] < node_depths.base[index] + 1)
+                    {
+                        resize_buffer(&stack, stack.count + 1);
+                        stack.base[stack.count - 1] = child_index;
+                        
+                        node_depths.base[child_index] = node_depths.base[index] + 1;
+                        max_depth = maximum(max_depth, node_depths.base[child_index]);
+                    }
                 }
             }
         }
@@ -1544,47 +1581,47 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 }
             }
         }
-        
-        assert(dependencies.count == ordered_dependencies.count);
-        
+    
         // check if ordered_dependencies are correct
-        for (u32 i = 0; i < dependencies.count; i++)
         {
-            // children depend on parent
-            // so all its chilren must be inserted before the parent
-            
-            auto entry = dependencies.base[i];
-            auto parent = entry.node;
-            
-            u32 ordered_parent_index = 0;
-            for (; ordered_parent_index < ordered_dependencies.count; ordered_parent_index++)
+            assert(dependencies.count == ordered_dependencies.count);
+        
+            for (u32 i = 0; i < dependencies.count; i++)
             {
-                if (ordered_dependencies.base[ordered_parent_index] == parent)
-                    break;
-            }
-            
-            assert(ordered_parent_index < ordered_dependencies.count);
-            
-            for (u32 child_slot = 0; child_slot < entry.children.count; child_slot++)
-            {
-                u32 child_index = entry.children.base[child_slot];
-                auto child = dependencies.base[child_index].node;
+                // children depend on parent
+                // so all its chilren must be inserted before the parent
                 
-                // child must come after the parent
-                u32 ordered_child_index = 0; //ordered_parent_index + 1;
-                for (; ordered_child_index < ordered_dependencies.count; ordered_child_index++)
+                auto entry = dependencies.base[i];
+                auto parent = entry.node;
+                
+                u32 ordered_parent_index = 0;
+                for (; ordered_parent_index < ordered_dependencies.count; ordered_parent_index++)
                 {
-                    if (ordered_dependencies.base[ordered_child_index] == child)
+                    if (ordered_dependencies.base[ordered_parent_index] == parent)
                         break;
                 }
                 
-                //assert(ordered_child_index < ordered_dependencies.count, 
-                assert(ordered_parent_index < ordered_child_index,"'%.*s' (%.*s) [%i] depends on '%.*s' (%.*s) [%i], but is in wrong order", fs(get_name(child)), fnode_type_name(child), node_depths.base[child_index], fs(get_name(parent)), fnode_type_name(parent), node_depths.base[i]);
+                assert(ordered_parent_index < ordered_dependencies.count);
+                
+                for (u32 child_slot = 0; child_slot < entry.children.count; child_slot++)
+                {
+                    u32 child_index = entry.children.base[child_slot];
+                    auto child = dependencies.base[child_index].node;
+                    
+                    // child must come after the parent
+                    u32 ordered_child_index = ordered_parent_index + 1;
+                    for (; ordered_child_index < ordered_dependencies.count; ordered_child_index++)
+                    {
+                        if (ordered_dependencies.base[ordered_child_index] == child)
+                            break;
+                    }
+                    
+                    assert(ordered_parent_index < ordered_child_index,"'%.*s' (%.*s) [%i] depends on '%.*s' (%.*s) [%i], but is in wrong order", fs(get_name(child)), fnode_type_name(child), node_depths.base[child_index], fs(get_name(parent)), fnode_type_name(parent), node_depths.base[i]);
+                }
             }
         }
         
         maybe_print_blank_line(&buffer);
-        
         
         // forward declare unique types (structs, arrays and functions)
         for (u32 i = 0; i < buffer.unique_types.count; i++)
@@ -1773,9 +1810,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     maybe_print_blank_line(&buffer);
                     print_type(&buffer, array_type->item_type);
-                    print(&buffer, " _array_literal_%x_base[", node->index);
-                    print_expression(&buffer, array_type->count_expression);
-                    print_line(&buffer, "] =");
+                    print(&buffer, " _array_literal_%x_base[%llu] =", node->index, array_literal->item_count);
                     
                     print_scope_open(&buffer);
     
@@ -1821,30 +1856,18 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     
                     print_newline(&buffer);
                 } break;
-            }
-        }
-    }
-
-    // declare all constants
-    {
-        maybe_print_blank_line(&buffer);
-    
-        local_ast_queue(queue);
-        enqueue(&queue, &root);
-        
-        ast_node *node;
-        while (next(&node, &queue))
-        {
-            if (node->node_type == ast_node_type_constant)
-            {
-                local_node_type(constant, node);
                 
-                auto type = get_expression_type(parser, constant->expression);
-                print(&buffer, "const ");
-                print_type(&buffer, type, constant->name);
-                print(&buffer, " = ");
-                print_expression(&buffer, constant->expression);
-                print_line(&buffer, ";");
+                case ast_node_type_constant:
+                {
+                    local_node_type(constant, node);
+                    
+                    auto type = get_expression_type(parser, constant->expression);
+                    print(&buffer, "const ");
+                    print_type(&buffer, type, constant->name);
+                    print(&buffer, " = ");
+                    print_expression(&buffer, constant->expression);
+                    print_line(&buffer, ";");
+                } break;
             }
         }
     }
