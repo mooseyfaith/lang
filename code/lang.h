@@ -546,9 +546,7 @@ struct lang_parser
     
     u32 next_node_index;
     
-    ast_node *first_anonymous_type;
-    ast_node **anonymous_type_tail_next;
-    
+    ast_module *unnamed_module;
     ast_module *lang_module;
     
     ast_module *first_module;
@@ -2820,6 +2818,27 @@ bool parse(lang_parser *parser, string source, string source_name)
     
     lang_require_return_value(parser->iterator.count == 0, false, parser->iterator, "expected statements, unexpected '%c'", parser->iterator.base[0]);
     
+    if (!file->module)
+    {
+        if (!parser->unnamed_module)
+        {
+            new_local_node(module);
+            module->name = s("(unnamed)");
+            *parser->module_tail_next = module;
+            parser->module_tail_next = &(ast_module *) module->node.next;
+            
+            parser->unnamed_module = module;
+        }
+    
+        file->module = parser->unnamed_module;
+        
+        new_local_node(file_reference);
+        file_reference->file = file;
+        
+        file_reference->node.next = (ast_node *) parser->unnamed_module->first_file;
+        parser->unnamed_module->first_file = file_reference;
+    }
+    
     return !parser->error;
 }
 
@@ -3574,7 +3593,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
         }
     #endif
     
-        printf("unresolved reference to '%.*s'\n", fs(entry.name));
+        //printf("unresolved reference to '%.*s'\n", fs(entry.name));
         
     }
 
@@ -3608,8 +3627,6 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                     
                     if (!field_reference->variable)
                     {
-                        
-                    
                         printf("unresolved reference to '%.*s'\n", fs(field_reference->name));
                     }
                 } break;
@@ -3894,7 +3911,7 @@ void resolve(lang_parser *parser)
                     auto type = complete_type.base_type;
                     if (!type.node)
                     {
-                        printf("unresolved type of function_call expression\n");
+                        //printf("unresolved type of function_call expression\n");
                         break;
                     }
                     

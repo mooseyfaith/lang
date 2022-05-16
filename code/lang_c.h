@@ -1005,7 +1005,9 @@ void insert_child(node_dependency_buffer *dependencies, ast_node *parent, ast_no
         auto child_entry = &dependencies->base[child_index];
         child_entry->is_root = false;
         
-        printf("[%p] '%.*s' %.*s depends on [%p] '%.*s' %.*s\n", child, fs(get_name(child)), fnode_type_name(child), parent, fs(get_name(parent)), fnode_type_name(parent));
+        //printf("n%x%.*s -> n%x%.*s\n", parent->index, fs(get_name(parent)), child->index, fs(get_name(child)));
+        
+        //printf("[%p] '%.*s' %.*s depends on [%p] '%.*s' %.*s\n", child, fs(get_name(child)), fnode_type_name(child), parent, fs(get_name(parent)), fnode_type_name(parent));
     }
 }
 
@@ -1483,10 +1485,6 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
         index_buffer stack = {};
         defer { resize_buffer(&stack, 0); };
         
-        u8_buffer node_is_visited = {};
-        resize_buffer(&node_is_visited, dependencies.count);
-        defer { resize_buffer(&node_is_visited, 0); };
-        
         u8_buffer node_depths = {};
         resize_buffer(&node_depths, dependencies.count);
         defer { resize_buffer(&node_depths, 0); };
@@ -1503,14 +1501,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             
             // depth first search per root
             
-            // clear visited flags
-            memset(node_is_visited.base, 0, sizeof(node_is_visited.base[0]) * node_is_visited.count);
-            
             // printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
             
             resize_buffer(&stack, 1);
             stack.base[0] = root_index;
-            node_is_visited.base[root_index] = true;
             assert(node_depths.base[root_index] == 0);
             
             while (stack.count)
@@ -1523,13 +1517,10 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                     auto child_index = entry.children.base[entry.children.count - 1 - i];
                     auto child = &dependencies.base[child_index];
                     
-                    if (!node_is_visited.base[child_index])
-                    {
-                        node_is_visited.base[child_index] = true;
-                        
-                        resize_buffer(&stack, stack.count + 1);
-                        stack.base[stack.count - 1] = child_index;
-                    }
+                    assert(!child->is_root);
+                    
+                    resize_buffer(&stack, stack.count + 1);
+                    stack.base[stack.count - 1] = child_index;
                     
                     node_depths.base[child_index] = maximum(node_depths.base[child_index], node_depths.base[index] + 1);
                     
@@ -1566,7 +1557,7 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             auto parent = entry.node;
             
             u32 ordered_parent_index = 0;
-            for (; ordered_parent_index <= ordered_dependencies.count; ordered_parent_index++)
+            for (; ordered_parent_index < ordered_dependencies.count; ordered_parent_index++)
             {
                 if (ordered_dependencies.base[ordered_parent_index] == parent)
                     break;
@@ -1576,17 +1567,19 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
             
             for (u32 child_slot = 0; child_slot < entry.children.count; child_slot++)
             {
-                auto child = dependencies.base[entry.children.base[child_slot]].node;
+                u32 child_index = entry.children.base[child_slot];
+                auto child = dependencies.base[child_index].node;
                 
                 // child must come after the parent
-                u32 ordered_child_index = ordered_parent_index + 1;
+                u32 ordered_child_index = 0; //ordered_parent_index + 1;
                 for (; ordered_child_index < ordered_dependencies.count; ordered_child_index++)
                 {
                     if (ordered_dependencies.base[ordered_child_index] == child)
                         break;
                 }
                 
-                assert(ordered_child_index < ordered_dependencies.count);
+                //assert(ordered_child_index < ordered_dependencies.count, 
+                assert(ordered_parent_index < ordered_child_index,"'%.*s' (%.*s) [%i] depends on '%.*s' (%.*s) [%i], but is in wrong order", fs(get_name(child)), fnode_type_name(child), node_depths.base[child_index], fs(get_name(parent)), fnode_type_name(parent), node_depths.base[i]);
             }
         }
         
@@ -1608,14 +1601,14 @@ void compile(lang_parser *parser, lang_c_compile_settings settings = {})
                 } break;
             }
             
-            printf("unique type [0x%p] %x %.*s '%.*s'\n", node, node->index, fnode_type_name(node), fs(get_name(node)));
+            //printf("unique type [0x%p] %x %.*s '%.*s'\n", node, node->index, fnode_type_name(node), fs(get_name(node)));
         }
         
         for (u32 i = 0; i < ordered_dependencies.count; i++)
         {
             auto node = ordered_dependencies.base[i]; //ordered_dependencies.count - 1 - i];
 
-            printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
+            //printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
                 
             switch (node->node_type)
             {
