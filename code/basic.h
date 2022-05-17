@@ -56,6 +56,22 @@ typedef u8_array string;
 array_type(string_array, string);
 buffer_type(string_buffer, string);
 
+struct base_single_list_entry
+{
+    base_single_list_entry *next;
+};
+
+#define single_list_type(name, type) \
+struct name \
+{ \
+    type *first; \
+    type **tail_next; \
+};
+
+typedef base_single_list_entry **base_list_tail_next;
+
+single_list_type(base_single_list, base_single_list_entry);
+
 // without 0 terminal character
 #define s(cstring_literal) string { carray_count(cstring_literal) - 1, (u8 *) cstring_literal }
 
@@ -458,4 +474,29 @@ void resize_base_buffer(base_buffer *buffer, usize new_count, u32 item_byte_coun
     }
     
     buffer->count = new_count;
+}
+
+#define make_tail_next(pointer_to_first)   new_base_list((base_single_list_entry **) (pointer_to_first))
+#define append_tail_next(tail_next, entry) append_base_list(tail_next, (base_single_list_entry *) (entry))
+
+#define begin_list(list)         begin_base_list((base_single_list *) (list))
+#define append_list(list, entry) append_base_list(&((base_single_list *) (list))->tail_next, (base_single_list_entry *) (entry))
+
+base_list_tail_next new_base_list(base_single_list_entry **first)
+{
+    assert(first && !*first);
+    return (base_list_tail_next) first;
+}
+
+void begin_base_list(base_single_list *list)
+{
+    list->first = null;
+    list->tail_next = &list->first;
+}
+
+void append_base_list(base_single_list_entry ***tail_next, base_single_list_entry *entry)
+{
+    assert(!entry->next);
+    **tail_next = entry;
+    *tail_next = &entry->next;
 }

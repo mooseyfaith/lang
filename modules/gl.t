@@ -36,6 +36,55 @@ def gl_init func(gl gl_api ref; platform platform_api ref)
     
     platform_require(wglMakeCurrent(device_context, gl_context));
     
+    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB")    cast(wglChoosePixelFormatARB_signature);
+    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB") cast(wglCreateContextAttribsARB_signature);
+    
+    if wglChoosePixelFormatARB and wglCreateContextAttribsARB
+    {
+        platform_require(wglMakeCurrent(null, null));
+    
+        var gl_33_window_handle HWND = CreateWindow(platform.window_class_name, "gl init dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, null, null, platform.win32_instance, 0);
+        platform_require(gl_33_window_handle is_not INVALID_HANDLE_VALUE);
+
+        var gl_33_device_context HDC = GetDC(gl_33_window_handle);
+        platform_require(gl_33_device_context);
+        
+        gl_win32_window_init_33(gl_33_device_context);
+        
+        var context_attributes s32[] = {
+            WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
+            WGL_CONTEXT_MINOR_VERSION_ARB; 3;
+            WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
+            WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
+            0
+        };
+        
+        var gl_33_context HGLRC = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+        if gl_33_context
+        {
+            platform_require(wglMakeCurrent(gl_33_device_context, gl_33_context));
+            
+            platform_require(wglDeleteContext(gl_context));
+            platform_require(ReleaseDC(window_handle, device_context));
+            platform_require(DestroyWindow(window_handle));
+            
+            gl_context     = gl_33_context;
+            device_context = gl_33_device_context;
+            window_handle  = gl_33_window_handle;
+            
+            gl.is_version_3_3 = true;
+        }
+        else
+        {
+            platform_require(ReleaseDC(gl_33_window_handle, gl_33_device_context));
+            platform_require(DestroyWindow(gl_33_window_handle));
+        }
+        
+        platform_require(wglMakeCurrent(device_context, gl_context));
+    }
+    
+    glDebugMessageCallback = wglGetProcAddress("glDebugMessageCallback") cast(glDebugMessageCallback_signature);
+    
     gl.win32_context             = gl_context;
     gl.win32_init_window_handle  = window_handle;
     gl.win32_init_device_context = device_context;
@@ -45,6 +94,18 @@ def gl_init func(gl gl_api ref; platform platform_api ref)
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generated in function call scope
         glDebugMessageCallback(gl_debug_message_callback, null);
+    }
+}
+
+def gl_window_init func(platform platform_api ref; gl gl_api ref; window platform_api_window ref)
+{
+    if gl.is_version_3_3
+    {
+        gl_win32_window_init_33(window.device_context);
+    }
+    else
+    {
+        gl_win32_window_init_1(window.device_context);
     }
 }
 
@@ -71,27 +132,27 @@ def gl_win32_window_init_1 func(device_context HDC)
     platform_require(SetPixelFormat(device_context, pixel_format, pixel_format_descriptor ref));
 }
 
-//def gl_win32_window_init_33 func(device_context HDC)
-//{
-//    var pixel_format_attributes s32[] =
-//    {
-//        WGL_DRAW_TO_WINDOW_ARB; GL_TRUE;
-//        WGL_SUPPORT_OPENGL_ARB; GL_TRUE;
-//        WGL_DOUBLE_BUFFER_ARB;  GL_TRUE;
-//        WGL_PIXEL_TYPE_ARB; WGL_TYPE_RGBA_ARB;
-//        WGL_COLOR_BITS_ARB; 24;
-//        WGL_DEPTH_BITS_ARB; 24;
-//        WGL_STENCIL_BITS_ARB; 8;
-//        
-//        // multi sample anti aliasing
-//        WGL_SAMPLE_BUFFERS_ARB; GL_TRUE; // Number of buffers (must be 1 at time of writing)
-//        WGL_SAMPLES_ARB; 1; // Number of samples
-//        
-//        0 // end
-//    };
-//    
-//    var pixel_format s32;
-//    var pixel_format_count u32;
-//    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes.base, null, 1, pixel_format ref, pixel_format_count ref));
-//    platform_require(SetPixelFormat(device_context, pixel_format, null));
-//}
+def gl_win32_window_init_33 func(device_context HDC)
+{
+    var pixel_format_attributes s32[] =
+    {
+        WGL_DRAW_TO_WINDOW_ARB; GL_TRUE;
+        WGL_SUPPORT_OPENGL_ARB; GL_TRUE;
+        WGL_DOUBLE_BUFFER_ARB;  GL_TRUE;
+        WGL_PIXEL_TYPE_ARB; WGL_TYPE_RGBA_ARB;
+        WGL_COLOR_BITS_ARB; 24;
+        WGL_DEPTH_BITS_ARB; 24;
+        WGL_STENCIL_BITS_ARB; 8;
+        
+        // multi sample anti aliasing
+        // WGL_SAMPLE_BUFFERS_ARB; GL_TRUE; // Number of buffers (must be 1 at time of writing)
+        // WGL_SAMPLES_ARB; 1;  // Number of samples
+        
+        0 // end
+    };
+    
+    var pixel_format s32;
+    var pixel_format_count u32;
+    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes.base, null, 1, pixel_format ref, pixel_format_count ref));
+    platform_require(SetPixelFormat(device_context, pixel_format, null));
+}

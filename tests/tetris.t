@@ -31,7 +31,7 @@ def falling_piece struct
     type piece_type;
 }
 
-var piece_type_colors rgba32[piece_type.count] = 
+var piece_type_colors rgba32[] = // piece_type.count
 {
     { 1.0; 0.0; 0.0; 1.0 };
     { 0.0; 1.0; 0.0; 1.0 };

@@ -52,14 +52,14 @@ def GLsync      type u8;
 def _cl_context type u8;
 def _cl_event   type u8;
 
+// def HGLRDC               type u8;
 def HPBUFFERARB          type u8;
 def HPBUFFEREXT          type u8;
 def HGPUNV               type u8;
 def PGPU_DEVICE          type u8;
 def HVIDEOOUTPUTDEVICENV type u8;
 def HVIDEOINPUTDEVICENV  type u8;
-def HPVIDEODEV  type u8;
-    
+def HPVIDEODEV           type u8;
 
 // file: C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/gl/GL.h
 
@@ -14310,13 +14310,17 @@ def WGL_BACK_COLOR_BUFFER_BIT_ARB = 0x00000002;
 def WGL_DEPTH_BUFFER_BIT_ARB = 0x00000004;
 def WGL_STENCIL_BUFFER_BIT_ARB = 0x00000008;
 
-def wglCreateBufferRegionARB func(hDC HDC; iLayerPlane s32; uType UINT) (result HANDLE) extern_binding("opengl32", true);
+def wglCreateBufferRegionARB_signature func(hDC HDC; iLayerPlane s32; uType UINT) (result HANDLE);
+var global wglCreateBufferRegionARB wglCreateBufferRegionARB_signature;
 
-def wglDeleteBufferRegionARB func(hRegion HANDLE) extern_binding("opengl32", true);
+def wglDeleteBufferRegionARB_signature func(hRegion HANDLE);
+var global wglDeleteBufferRegionARB wglDeleteBufferRegionARB_signature;
 
-def wglSaveBufferRegionARB func(hRegion HANDLE; x s32; y s32; width s32; height s32) (result BOOL) extern_binding("opengl32", true);
+def wglSaveBufferRegionARB_signature func(hRegion HANDLE; x s32; y s32; width s32; height s32) (result BOOL);
+var global wglSaveBufferRegionARB wglSaveBufferRegionARB_signature;
 
-def wglRestoreBufferRegionARB func(hRegion HANDLE; x s32; y s32; width s32; height s32; xSrc s32; ySrc s32) (result BOOL) extern_binding("opengl32", true);
+def wglRestoreBufferRegionARB_signature func(hRegion HANDLE; x s32; y s32; width s32; height s32; xSrc s32; ySrc s32) (result BOOL);
+var global wglRestoreBufferRegionARB wglRestoreBufferRegionARB_signature;
 def WGL_ARB_context_flush_control = 1;
 def WGL_CONTEXT_RELEASE_BEHAVIOR_ARB = 0x2097;
 def WGL_CONTEXT_RELEASE_BEHAVIOR_NONE_ARB = 0;
@@ -14329,7 +14333,8 @@ def WGL_CONTEXT_MINOR_VERSION_ARB = 0x2092;
 def WGL_CONTEXT_LAYER_PLANE_ARB = 0x2093;
 def WGL_CONTEXT_FLAGS_ARB = 0x2094;
 
-def wglCreateContextAttribsARB func(hDC HDC; hShareContext HGLRC; attribList s32 ref) (result HGLRC) extern_binding("opengl32", true);
+def wglCreateContextAttribsARB_signature func(hDC HDC; hShareContext HGLRC; attribList s32 ref) (result HGLRC);
+var global wglCreateContextAttribsARB wglCreateContextAttribsARB_signature;
 def WGL_ARB_create_context_no_error = 1;
 def WGL_CONTEXT_OPENGL_NO_ERROR_ARB = 0x31B3;
 def WGL_ARB_create_context_profile = 1;
@@ -14343,14 +14348,17 @@ def WGL_CONTEXT_RESET_NOTIFICATION_STRATEGY_ARB = 0x8256;
 def WGL_NO_RESET_NOTIFICATION_ARB = 0x8261;
 def WGL_ARB_extensions_string = 1;
 
-def wglGetExtensionsStringARB func(hdc HDC) (result u8 ref) extern_binding("opengl32", true);
+def wglGetExtensionsStringARB_signature func(hdc HDC) (result u8 ref);
+var global wglGetExtensionsStringARB wglGetExtensionsStringARB_signature;
 def WGL_ARB_framebuffer_sRGB = 1;
 def WGL_FRAMEBUFFER_SRGB_CAPABLE_ARB = 0x20A9;
 def WGL_ARB_make_current_read = 1;
 
-def wglMakeContextCurrentARB func(hDrawDC HDC; hReadDC HDC; hglrc HGLRC) (result BOOL) extern_binding("opengl32", true);
+def wglMakeContextCurrentARB_signature func(hDrawDC HDC; hReadDC HDC; hglrc HGLRC) (result BOOL);
+var global wglMakeContextCurrentARB wglMakeContextCurrentARB_signature;
 
-def wglGetCurrentReadDCARB func() (result HDC) extern_binding("opengl32", true);
+def wglGetCurrentReadDCARB_signature func() (result HDC);
+var global wglGetCurrentReadDCARB wglGetCurrentReadDCARB_signature;
 def WGL_ARB_multisample = 1;
 def WGL_SAMPLE_BUFFERS_ARB = 0x2041;
 def WGL_SAMPLES_ARB = 0x2042;
@@ -14364,15 +14372,20 @@ def WGL_PBUFFER_WIDTH_ARB = 0x2034;
 def WGL_PBUFFER_HEIGHT_ARB = 0x2035;
 def WGL_PBUFFER_LOST_ARB = 0x2036;
 
-def wglCreatePbufferARB func(hDC HDC; iPixelFormat s32; iWidth s32; iHeight s32; piAttribList s32 ref) (result HPBUFFERARB) extern_binding("opengl32", true);
+def wglCreatePbufferARB_signature func(hDC HDC; iPixelFormat s32; iWidth s32; iHeight s32; piAttribList s32 ref) (result HPBUFFERARB);
+var global wglCreatePbufferARB wglCreatePbufferARB_signature;
 
-def wglGetPbufferDCARB func(hPbuffer HPBUFFERARB) (result HDC) extern_binding("opengl32", true);
+def wglGetPbufferDCARB_signature func(hPbuffer HPBUFFERARB) (result HDC);
+var global wglGetPbufferDCARB wglGetPbufferDCARB_signature;
 
-def wglReleasePbufferDCARB func(hPbuffer HPBUFFERARB; hDC HDC) (result s32) extern_binding("opengl32", true);
+def wglReleasePbufferDCARB_signature func(hPbuffer HPBUFFERARB; hDC HDC) (result s32);
+var global wglReleasePbufferDCARB wglReleasePbufferDCARB_signature;
 
-def wglDestroyPbufferARB func(hPbuffer HPBUFFERARB) (result BOOL) extern_binding("opengl32", true);
+def wglDestroyPbufferARB_signature func(hPbuffer HPBUFFERARB) (result BOOL);
+var global wglDestroyPbufferARB wglDestroyPbufferARB_signature;
 
-def wglQueryPbufferARB func(hPbuffer HPBUFFERARB; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryPbufferARB_signature func(hPbuffer HPBUFFERARB; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglQueryPbufferARB wglQueryPbufferARB_signature;
 def WGL_ARB_pixel_format = 1;
 def WGL_NUMBER_PIXEL_FORMATS_ARB = 0x2000;
 def WGL_DRAW_TO_WINDOW_ARB = 0x2001;
@@ -14424,11 +14437,14 @@ def WGL_SWAP_UNDEFINED_ARB = 0x202A;
 def WGL_TYPE_RGBA_ARB = 0x202B;
 def WGL_TYPE_COLORINDEX_ARB = 0x202C;
 
-def wglGetPixelFormatAttribivARB func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; piValues s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetPixelFormatAttribivARB_signature func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; piValues s32 ref) (result BOOL);
+var global wglGetPixelFormatAttribivARB wglGetPixelFormatAttribivARB_signature;
 
-def wglGetPixelFormatAttribfvARB func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; pfValues FLOAT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetPixelFormatAttribfvARB_signature func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; pfValues FLOAT ref) (result BOOL);
+var global wglGetPixelFormatAttribfvARB wglGetPixelFormatAttribfvARB_signature;
 
-def wglChoosePixelFormatARB func(hdc HDC; piAttribIList s32 ref; pfAttribFList FLOAT ref; nMaxFormats UINT; piFormats s32 ref; nNumFormats UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglChoosePixelFormatARB_signature func(hdc HDC; piAttribIList s32 ref; pfAttribFList FLOAT ref; nMaxFormats UINT; piFormats s32 ref; nNumFormats UINT ref) (result BOOL);
+var global wglChoosePixelFormatARB wglChoosePixelFormatARB_signature;
 def WGL_ARB_pixel_format_float = 1;
 def WGL_TYPE_RGBA_FLOAT_ARB = 0x21A0;
 def WGL_ARB_render_texture = 1;
@@ -14466,11 +14482,14 @@ def WGL_AUX7_ARB = 0x208E;
 def WGL_AUX8_ARB = 0x208F;
 def WGL_AUX9_ARB = 0x2090;
 
-def wglBindTexImageARB func(hPbuffer HPBUFFERARB; iBuffer s32) (result BOOL) extern_binding("opengl32", true);
+def wglBindTexImageARB_signature func(hPbuffer HPBUFFERARB; iBuffer s32) (result BOOL);
+var global wglBindTexImageARB wglBindTexImageARB_signature;
 
-def wglReleaseTexImageARB func(hPbuffer HPBUFFERARB; iBuffer s32) (result BOOL) extern_binding("opengl32", true);
+def wglReleaseTexImageARB_signature func(hPbuffer HPBUFFERARB; iBuffer s32) (result BOOL);
+var global wglReleaseTexImageARB wglReleaseTexImageARB_signature;
 
-def wglSetPbufferAttribARB func(hPbuffer HPBUFFERARB; piAttribList s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglSetPbufferAttribARB_signature func(hPbuffer HPBUFFERARB; piAttribList s32 ref) (result BOOL);
+var global wglSetPbufferAttribARB wglSetPbufferAttribARB_signature;
 def WGL_ARB_robustness_application_isolation = 1;
 def WGL_CONTEXT_RESET_ISOLATION_BIT_ARB = 0x00000008;
 def WGL_ARB_robustness_share_group_isolation = 1;
@@ -14483,7 +14502,8 @@ def WGL_STEREO_EMITTER_DISABLE_3DL = 0x2056;
 def WGL_STEREO_POLARITY_NORMAL_3DL = 0x2057;
 def WGL_STEREO_POLARITY_INVERT_3DL = 0x2058;
 
-def wglSetStereoEmitterState3DL func(hDC HDC; uState UINT) (result BOOL) extern_binding("opengl32", true);
+def wglSetStereoEmitterState3DL_signature func(hDC HDC; uState UINT) (result BOOL);
+var global wglSetStereoEmitterState3DL wglSetStereoEmitterState3DL_signature;
 def WGL_AMD_gpu_association = 1;
 def WGL_GPU_VENDOR_AMD = 0x1F00;
 def WGL_GPU_RENDERER_STRING_AMD = 0x1F01;
@@ -14496,23 +14516,32 @@ def WGL_GPU_NUM_SIMD_AMD = 0x21A6;
 def WGL_GPU_NUM_RB_AMD = 0x21A7;
 def WGL_GPU_NUM_SPI_AMD = 0x21A8;
 
-def wglGetGPUIDsAMD func(maxCount UINT; ids UINT ref) (result UINT) extern_binding("opengl32", true);
+def wglGetGPUIDsAMD_signature func(maxCount UINT; ids UINT ref) (result UINT);
+var global wglGetGPUIDsAMD wglGetGPUIDsAMD_signature;
 
-def wglGetGPUInfoAMD func(id UINT; property INT; dataType GLenum; size UINT; data u8 ref) (result INT) extern_binding("opengl32", true);
+def wglGetGPUInfoAMD_signature func(id UINT; property INT; dataType GLenum; size UINT; data u8 ref) (result INT);
+var global wglGetGPUInfoAMD wglGetGPUInfoAMD_signature;
 
-def wglGetContextGPUIDAMD func(hglrc HGLRC) (result UINT) extern_binding("opengl32", true);
+def wglGetContextGPUIDAMD_signature func(hglrc HGLRC) (result UINT);
+var global wglGetContextGPUIDAMD wglGetContextGPUIDAMD_signature;
 
-def wglCreateAssociatedContextAMD func(id UINT) (result HGLRC) extern_binding("opengl32", true);
+def wglCreateAssociatedContextAMD_signature func(id UINT) (result HGLRC);
+var global wglCreateAssociatedContextAMD wglCreateAssociatedContextAMD_signature;
 
-def wglCreateAssociatedContextAttribsAMD func(id UINT; hShareContext HGLRC; attribList s32 ref) (result HGLRC) extern_binding("opengl32", true);
+def wglCreateAssociatedContextAttribsAMD_signature func(id UINT; hShareContext HGLRC; attribList s32 ref) (result HGLRC);
+var global wglCreateAssociatedContextAttribsAMD wglCreateAssociatedContextAttribsAMD_signature;
 
-def wglDeleteAssociatedContextAMD func(hglrc HGLRC) (result BOOL) extern_binding("opengl32", true);
+def wglDeleteAssociatedContextAMD_signature func(hglrc HGLRC) (result BOOL);
+var global wglDeleteAssociatedContextAMD wglDeleteAssociatedContextAMD_signature;
 
-def wglMakeAssociatedContextCurrentAMD func(hglrc HGLRC) (result BOOL) extern_binding("opengl32", true);
+def wglMakeAssociatedContextCurrentAMD_signature func(hglrc HGLRC) (result BOOL);
+var global wglMakeAssociatedContextCurrentAMD wglMakeAssociatedContextCurrentAMD_signature;
 
-def wglGetCurrentAssociatedContextAMD func() (result HGLRC) extern_binding("opengl32", true);
+def wglGetCurrentAssociatedContextAMD_signature func() (result HGLRC);
+var global wglGetCurrentAssociatedContextAMD wglGetCurrentAssociatedContextAMD_signature;
 
-def wglBlitContextFramebufferAMD func(dstCtx HGLRC; srcX0 GLint; srcY0 GLint; srcX1 GLint; srcY1 GLint; dstX0 GLint; dstY0 GLint; dstX1 GLint; dstY1 GLint; mask GLbitfield; filter GLenum) extern_binding("opengl32", true);
+def wglBlitContextFramebufferAMD_signature func(dstCtx HGLRC; srcX0 GLint; srcY0 GLint; srcX1 GLint; srcY1 GLint; dstX0 GLint; dstY0 GLint; dstX1 GLint; dstY1 GLint; mask GLbitfield; filter GLenum);
+var global wglBlitContextFramebufferAMD wglBlitContextFramebufferAMD_signature;
 def WGL_ATI_pixel_format_float = 1;
 def WGL_TYPE_RGBA_FLOAT_ATI = 0x21A0;
 def WGL_ATI_render_texture_rectangle = 1;
@@ -14529,23 +14558,30 @@ def WGL_EXT_depth_float = 1;
 def WGL_DEPTH_FLOAT_EXT = 0x2040;
 def WGL_EXT_display_color_table = 1;
 
-def wglCreateDisplayColorTableEXT func(id GLushort) (result GLboolean) extern_binding("opengl32", true);
+def wglCreateDisplayColorTableEXT_signature func(id GLushort) (result GLboolean);
+var global wglCreateDisplayColorTableEXT wglCreateDisplayColorTableEXT_signature;
 
-def wglLoadDisplayColorTableEXT func(table GLushort ref; length GLuint) (result GLboolean) extern_binding("opengl32", true);
+def wglLoadDisplayColorTableEXT_signature func(table GLushort ref; length GLuint) (result GLboolean);
+var global wglLoadDisplayColorTableEXT wglLoadDisplayColorTableEXT_signature;
 
-def wglBindDisplayColorTableEXT func(id GLushort) (result GLboolean) extern_binding("opengl32", true);
+def wglBindDisplayColorTableEXT_signature func(id GLushort) (result GLboolean);
+var global wglBindDisplayColorTableEXT wglBindDisplayColorTableEXT_signature;
 
-def wglDestroyDisplayColorTableEXT func(id GLushort) extern_binding("opengl32", true);
+def wglDestroyDisplayColorTableEXT_signature func(id GLushort);
+var global wglDestroyDisplayColorTableEXT wglDestroyDisplayColorTableEXT_signature;
 def WGL_EXT_extensions_string = 1;
 
-def wglGetExtensionsStringEXT func() (result u8 ref) extern_binding("opengl32", true);
+def wglGetExtensionsStringEXT_signature func() (result u8 ref);
+var global wglGetExtensionsStringEXT wglGetExtensionsStringEXT_signature;
 def WGL_EXT_framebuffer_sRGB = 1;
 def WGL_FRAMEBUFFER_SRGB_CAPABLE_EXT = 0x20A9;
 def WGL_EXT_make_current_read = 1;
 
-def wglMakeContextCurrentEXT func(hDrawDC HDC; hReadDC HDC; hglrc HGLRC) (result BOOL) extern_binding("opengl32", true);
+def wglMakeContextCurrentEXT_signature func(hDrawDC HDC; hReadDC HDC; hglrc HGLRC) (result BOOL);
+var global wglMakeContextCurrentEXT wglMakeContextCurrentEXT_signature;
 
-def wglGetCurrentReadDCEXT func() (result HDC) extern_binding("opengl32", true);
+def wglGetCurrentReadDCEXT_signature func() (result HDC);
+var global wglGetCurrentReadDCEXT wglGetCurrentReadDCEXT_signature;
 def WGL_EXT_multisample = 1;
 def WGL_SAMPLE_BUFFERS_EXT = 0x2041;
 def WGL_SAMPLES_EXT = 0x2042;
@@ -14560,15 +14596,20 @@ def WGL_PBUFFER_LARGEST_EXT = 0x2033;
 def WGL_PBUFFER_WIDTH_EXT = 0x2034;
 def WGL_PBUFFER_HEIGHT_EXT = 0x2035;
 
-def wglCreatePbufferEXT func(hDC HDC; iPixelFormat s32; iWidth s32; iHeight s32; piAttribList s32 ref) (result HPBUFFEREXT) extern_binding("opengl32", true);
+def wglCreatePbufferEXT_signature func(hDC HDC; iPixelFormat s32; iWidth s32; iHeight s32; piAttribList s32 ref) (result HPBUFFEREXT);
+var global wglCreatePbufferEXT wglCreatePbufferEXT_signature;
 
-def wglGetPbufferDCEXT func(hPbuffer HPBUFFEREXT) (result HDC) extern_binding("opengl32", true);
+def wglGetPbufferDCEXT_signature func(hPbuffer HPBUFFEREXT) (result HDC);
+var global wglGetPbufferDCEXT wglGetPbufferDCEXT_signature;
 
-def wglReleasePbufferDCEXT func(hPbuffer HPBUFFEREXT; hDC HDC) (result s32) extern_binding("opengl32", true);
+def wglReleasePbufferDCEXT_signature func(hPbuffer HPBUFFEREXT; hDC HDC) (result s32);
+var global wglReleasePbufferDCEXT wglReleasePbufferDCEXT_signature;
 
-def wglDestroyPbufferEXT func(hPbuffer HPBUFFEREXT) (result BOOL) extern_binding("opengl32", true);
+def wglDestroyPbufferEXT_signature func(hPbuffer HPBUFFEREXT) (result BOOL);
+var global wglDestroyPbufferEXT wglDestroyPbufferEXT_signature;
 
-def wglQueryPbufferEXT func(hPbuffer HPBUFFEREXT; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryPbufferEXT_signature func(hPbuffer HPBUFFEREXT; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglQueryPbufferEXT wglQueryPbufferEXT_signature;
 def WGL_EXT_pixel_format = 1;
 def WGL_NUMBER_PIXEL_FORMATS_EXT = 0x2000;
 def WGL_DRAW_TO_WINDOW_EXT = 0x2001;
@@ -14616,18 +14657,23 @@ def WGL_SWAP_UNDEFINED_EXT = 0x202A;
 def WGL_TYPE_RGBA_EXT = 0x202B;
 def WGL_TYPE_COLORINDEX_EXT = 0x202C;
 
-def wglGetPixelFormatAttribivEXT func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; piValues s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetPixelFormatAttribivEXT_signature func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; piValues s32 ref) (result BOOL);
+var global wglGetPixelFormatAttribivEXT wglGetPixelFormatAttribivEXT_signature;
 
-def wglGetPixelFormatAttribfvEXT func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; pfValues FLOAT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetPixelFormatAttribfvEXT_signature func(hdc HDC; iPixelFormat s32; iLayerPlane s32; nAttributes UINT; piAttributes s32 ref; pfValues FLOAT ref) (result BOOL);
+var global wglGetPixelFormatAttribfvEXT wglGetPixelFormatAttribfvEXT_signature;
 
-def wglChoosePixelFormatEXT func(hdc HDC; piAttribIList s32 ref; pfAttribFList FLOAT ref; nMaxFormats UINT; piFormats s32 ref; nNumFormats UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglChoosePixelFormatEXT_signature func(hdc HDC; piAttribIList s32 ref; pfAttribFList FLOAT ref; nMaxFormats UINT; piFormats s32 ref; nNumFormats UINT ref) (result BOOL);
+var global wglChoosePixelFormatEXT wglChoosePixelFormatEXT_signature;
 def WGL_EXT_pixel_format_packed_float = 1;
 def WGL_TYPE_RGBA_UNSIGNED_FLOAT_EXT = 0x20A8;
 def WGL_EXT_swap_control = 1;
 
-def wglSwapIntervalEXT func(interval s32) (result BOOL) extern_binding("opengl32", true);
+def wglSwapIntervalEXT_signature func(interval s32) (result BOOL);
+var global wglSwapIntervalEXT wglSwapIntervalEXT_signature;
 
-def wglGetSwapIntervalEXT func() (result s32) extern_binding("opengl32", true);
+def wglGetSwapIntervalEXT_signature func() (result s32);
+var global wglGetSwapIntervalEXT wglGetSwapIntervalEXT_signature;
 def WGL_EXT_swap_control_tear = 1;
 def WGL_I3D_digital_video_control = 1;
 def WGL_DIGITAL_VIDEO_CURSOR_ALPHA_FRAMEBUFFER_I3D = 0x2050;
@@ -14635,20 +14681,26 @@ def WGL_DIGITAL_VIDEO_CURSOR_ALPHA_VALUE_I3D = 0x2051;
 def WGL_DIGITAL_VIDEO_CURSOR_INCLUDED_I3D = 0x2052;
 def WGL_DIGITAL_VIDEO_GAMMA_CORRECTED_I3D = 0x2053;
 
-def wglGetDigitalVideoParametersI3D func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetDigitalVideoParametersI3D_signature func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglGetDigitalVideoParametersI3D wglGetDigitalVideoParametersI3D_signature;
 
-def wglSetDigitalVideoParametersI3D func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglSetDigitalVideoParametersI3D_signature func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglSetDigitalVideoParametersI3D wglSetDigitalVideoParametersI3D_signature;
 def WGL_I3D_gamma = 1;
 def WGL_GAMMA_TABLE_SIZE_I3D = 0x204E;
 def WGL_GAMMA_EXCLUDE_DESKTOP_I3D = 0x204F;
 
-def wglGetGammaTableParametersI3D func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGammaTableParametersI3D_signature func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglGetGammaTableParametersI3D wglGetGammaTableParametersI3D_signature;
 
-def wglSetGammaTableParametersI3D func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglSetGammaTableParametersI3D_signature func(hDC HDC; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglSetGammaTableParametersI3D wglSetGammaTableParametersI3D_signature;
 
-def wglGetGammaTableI3D func(hDC HDC; iEntries s32; puRed USHORT ref; puGreen USHORT ref; puBlue USHORT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGammaTableI3D_signature func(hDC HDC; iEntries s32; puRed USHORT ref; puGreen USHORT ref; puBlue USHORT ref) (result BOOL);
+var global wglGetGammaTableI3D wglGetGammaTableI3D_signature;
 
-def wglSetGammaTableI3D func(hDC HDC; iEntries s32; puRed USHORT ref; puGreen USHORT ref; puBlue USHORT ref) (result BOOL) extern_binding("opengl32", true);
+def wglSetGammaTableI3D_signature func(hDC HDC; iEntries s32; puRed USHORT ref; puGreen USHORT ref; puBlue USHORT ref) (result BOOL);
+var global wglSetGammaTableI3D wglSetGammaTableI3D_signature;
 def WGL_I3D_genlock = 1;
 def WGL_GENLOCK_SOURCE_MULTIVIEW_I3D = 0x2044;
 def WGL_GENLOCK_SOURCE_EXTERNAL_SYNC_I3D = 0x2045;
@@ -14660,85 +14712,119 @@ def WGL_GENLOCK_SOURCE_EDGE_FALLING_I3D = 0x204A;
 def WGL_GENLOCK_SOURCE_EDGE_RISING_I3D = 0x204B;
 def WGL_GENLOCK_SOURCE_EDGE_BOTH_I3D = 0x204C;
 
-def wglEnableGenlockI3D func(hDC HDC) (result BOOL) extern_binding("opengl32", true);
+def wglEnableGenlockI3D_signature func(hDC HDC) (result BOOL);
+var global wglEnableGenlockI3D wglEnableGenlockI3D_signature;
 
-def wglDisableGenlockI3D func(hDC HDC) (result BOOL) extern_binding("opengl32", true);
+def wglDisableGenlockI3D_signature func(hDC HDC) (result BOOL);
+var global wglDisableGenlockI3D wglDisableGenlockI3D_signature;
 
-def wglIsEnabledGenlockI3D func(hDC HDC; pFlag BOOL ref) (result BOOL) extern_binding("opengl32", true);
+def wglIsEnabledGenlockI3D_signature func(hDC HDC; pFlag BOOL ref) (result BOOL);
+var global wglIsEnabledGenlockI3D wglIsEnabledGenlockI3D_signature;
 
-def wglGenlockSourceI3D func(hDC HDC; uSource UINT) (result BOOL) extern_binding("opengl32", true);
+def wglGenlockSourceI3D_signature func(hDC HDC; uSource UINT) (result BOOL);
+var global wglGenlockSourceI3D wglGenlockSourceI3D_signature;
 
-def wglGetGenlockSourceI3D func(hDC HDC; uSource UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGenlockSourceI3D_signature func(hDC HDC; uSource UINT ref) (result BOOL);
+var global wglGetGenlockSourceI3D wglGetGenlockSourceI3D_signature;
 
-def wglGenlockSourceEdgeI3D func(hDC HDC; uEdge UINT) (result BOOL) extern_binding("opengl32", true);
+def wglGenlockSourceEdgeI3D_signature func(hDC HDC; uEdge UINT) (result BOOL);
+var global wglGenlockSourceEdgeI3D wglGenlockSourceEdgeI3D_signature;
 
-def wglGetGenlockSourceEdgeI3D func(hDC HDC; uEdge UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGenlockSourceEdgeI3D_signature func(hDC HDC; uEdge UINT ref) (result BOOL);
+var global wglGetGenlockSourceEdgeI3D wglGetGenlockSourceEdgeI3D_signature;
 
-def wglGenlockSampleRateI3D func(hDC HDC; uRate UINT) (result BOOL) extern_binding("opengl32", true);
+def wglGenlockSampleRateI3D_signature func(hDC HDC; uRate UINT) (result BOOL);
+var global wglGenlockSampleRateI3D wglGenlockSampleRateI3D_signature;
 
-def wglGetGenlockSampleRateI3D func(hDC HDC; uRate UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGenlockSampleRateI3D_signature func(hDC HDC; uRate UINT ref) (result BOOL);
+var global wglGetGenlockSampleRateI3D wglGetGenlockSampleRateI3D_signature;
 
-def wglGenlockSourceDelayI3D func(hDC HDC; uDelay UINT) (result BOOL) extern_binding("opengl32", true);
+def wglGenlockSourceDelayI3D_signature func(hDC HDC; uDelay UINT) (result BOOL);
+var global wglGenlockSourceDelayI3D wglGenlockSourceDelayI3D_signature;
 
-def wglGetGenlockSourceDelayI3D func(hDC HDC; uDelay UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetGenlockSourceDelayI3D_signature func(hDC HDC; uDelay UINT ref) (result BOOL);
+var global wglGetGenlockSourceDelayI3D wglGetGenlockSourceDelayI3D_signature;
 
-def wglQueryGenlockMaxSourceDelayI3D func(hDC HDC; uMaxLineDelay UINT ref; uMaxPixelDelay UINT ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryGenlockMaxSourceDelayI3D_signature func(hDC HDC; uMaxLineDelay UINT ref; uMaxPixelDelay UINT ref) (result BOOL);
+var global wglQueryGenlockMaxSourceDelayI3D wglQueryGenlockMaxSourceDelayI3D_signature;
 def WGL_I3D_image_buffer = 1;
 def WGL_IMAGE_BUFFER_MIN_ACCESS_I3D = 0x00000001;
 def WGL_IMAGE_BUFFER_LOCK_I3D = 0x00000002;
 
-def wglCreateImageBufferI3D func(hDC HDC; dwSize DWORD; uFlags UINT) (result LPVOID) extern_binding("opengl32", true);
+def wglCreateImageBufferI3D_signature func(hDC HDC; dwSize DWORD; uFlags UINT) (result LPVOID);
+var global wglCreateImageBufferI3D wglCreateImageBufferI3D_signature;
 
-def wglDestroyImageBufferI3D func(hDC HDC; pAddress LPVOID) (result BOOL) extern_binding("opengl32", true);
+def wglDestroyImageBufferI3D_signature func(hDC HDC; pAddress LPVOID) (result BOOL);
+var global wglDestroyImageBufferI3D wglDestroyImageBufferI3D_signature;
 
-def wglAssociateImageBufferEventsI3D func(hDC HDC; pEvent HANDLE ref; pAddress LPVOID ref; pSize DWORD ref; count UINT) (result BOOL) extern_binding("opengl32", true);
+def wglAssociateImageBufferEventsI3D_signature func(hDC HDC; pEvent HANDLE ref; pAddress LPVOID ref; pSize DWORD ref; count UINT) (result BOOL);
+var global wglAssociateImageBufferEventsI3D wglAssociateImageBufferEventsI3D_signature;
 
-def wglReleaseImageBufferEventsI3D func(hDC HDC; pAddress LPVOID ref; count UINT) (result BOOL) extern_binding("opengl32", true);
+def wglReleaseImageBufferEventsI3D_signature func(hDC HDC; pAddress LPVOID ref; count UINT) (result BOOL);
+var global wglReleaseImageBufferEventsI3D wglReleaseImageBufferEventsI3D_signature;
 def WGL_I3D_swap_frame_lock = 1;
 
-def wglEnableFrameLockI3D func() (result BOOL) extern_binding("opengl32", true);
+def wglEnableFrameLockI3D_signature func() (result BOOL);
+var global wglEnableFrameLockI3D wglEnableFrameLockI3D_signature;
 
-def wglDisableFrameLockI3D func() (result BOOL) extern_binding("opengl32", true);
+def wglDisableFrameLockI3D_signature func() (result BOOL);
+var global wglDisableFrameLockI3D wglDisableFrameLockI3D_signature;
 
-def wglIsEnabledFrameLockI3D func(pFlag BOOL ref) (result BOOL) extern_binding("opengl32", true);
+def wglIsEnabledFrameLockI3D_signature func(pFlag BOOL ref) (result BOOL);
+var global wglIsEnabledFrameLockI3D wglIsEnabledFrameLockI3D_signature;
 
-def wglQueryFrameLockMasterI3D func(pFlag BOOL ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryFrameLockMasterI3D_signature func(pFlag BOOL ref) (result BOOL);
+var global wglQueryFrameLockMasterI3D wglQueryFrameLockMasterI3D_signature;
 def WGL_I3D_swap_frame_usage = 1;
 
-def wglGetFrameUsageI3D func(pUsage f32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetFrameUsageI3D_signature func(pUsage f32 ref) (result BOOL);
+var global wglGetFrameUsageI3D wglGetFrameUsageI3D_signature;
 
-def wglBeginFrameTrackingI3D func() (result BOOL) extern_binding("opengl32", true);
+def wglBeginFrameTrackingI3D_signature func() (result BOOL);
+var global wglBeginFrameTrackingI3D wglBeginFrameTrackingI3D_signature;
 
-def wglEndFrameTrackingI3D func() (result BOOL) extern_binding("opengl32", true);
+def wglEndFrameTrackingI3D_signature func() (result BOOL);
+var global wglEndFrameTrackingI3D wglEndFrameTrackingI3D_signature;
 
-def wglQueryFrameTrackingI3D func(pFrameCount DWORD ref; pMissedFrames DWORD ref; pLastMissedUsage f32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryFrameTrackingI3D_signature func(pFrameCount DWORD ref; pMissedFrames DWORD ref; pLastMissedUsage f32 ref) (result BOOL);
+var global wglQueryFrameTrackingI3D wglQueryFrameTrackingI3D_signature;
 def WGL_NV_DX_interop = 1;
 def WGL_ACCESS_READ_ONLY_NV = 0x00000000;
 def WGL_ACCESS_READ_WRITE_NV = 0x00000001;
 def WGL_ACCESS_WRITE_DISCARD_NV = 0x00000002;
 
-def wglDXSetResourceShareHandleNV func(dxObject u8 ref; shareHandle HANDLE) (result BOOL) extern_binding("opengl32", true);
+def wglDXSetResourceShareHandleNV_signature func(dxObject u8 ref; shareHandle HANDLE) (result BOOL);
+var global wglDXSetResourceShareHandleNV wglDXSetResourceShareHandleNV_signature;
 
-def wglDXOpenDeviceNV func(dxDevice u8 ref) (result HANDLE) extern_binding("opengl32", true);
+def wglDXOpenDeviceNV_signature func(dxDevice u8 ref) (result HANDLE);
+var global wglDXOpenDeviceNV wglDXOpenDeviceNV_signature;
 
-def wglDXCloseDeviceNV func(hDevice HANDLE) (result BOOL) extern_binding("opengl32", true);
+def wglDXCloseDeviceNV_signature func(hDevice HANDLE) (result BOOL);
+var global wglDXCloseDeviceNV wglDXCloseDeviceNV_signature;
 
-def wglDXRegisterObjectNV func(hDevice HANDLE; dxObject u8 ref; name GLuint; type GLenum; access GLenum) (result HANDLE) extern_binding("opengl32", true);
+def wglDXRegisterObjectNV_signature func(hDevice HANDLE; dxObject u8 ref; name GLuint; type GLenum; access GLenum) (result HANDLE);
+var global wglDXRegisterObjectNV wglDXRegisterObjectNV_signature;
 
-def wglDXUnregisterObjectNV func(hDevice HANDLE; hObject HANDLE) (result BOOL) extern_binding("opengl32", true);
+def wglDXUnregisterObjectNV_signature func(hDevice HANDLE; hObject HANDLE) (result BOOL);
+var global wglDXUnregisterObjectNV wglDXUnregisterObjectNV_signature;
 
-def wglDXObjectAccessNV func(hObject HANDLE; access GLenum) (result BOOL) extern_binding("opengl32", true);
+def wglDXObjectAccessNV_signature func(hObject HANDLE; access GLenum) (result BOOL);
+var global wglDXObjectAccessNV wglDXObjectAccessNV_signature;
 
-def wglDXLockObjectsNV func(hDevice HANDLE; count GLint; hObjects HANDLE ref) (result BOOL) extern_binding("opengl32", true);
+def wglDXLockObjectsNV_signature func(hDevice HANDLE; count GLint; hObjects HANDLE ref) (result BOOL);
+var global wglDXLockObjectsNV wglDXLockObjectsNV_signature;
 
-def wglDXUnlockObjectsNV func(hDevice HANDLE; count GLint; hObjects HANDLE ref) (result BOOL) extern_binding("opengl32", true);
+def wglDXUnlockObjectsNV_signature func(hDevice HANDLE; count GLint; hObjects HANDLE ref) (result BOOL);
+var global wglDXUnlockObjectsNV wglDXUnlockObjectsNV_signature;
 def WGL_NV_DX_interop2 = 1;
 def WGL_NV_copy_image = 1;
 
-def wglCopyImageSubDataNV func(hSrcRC HGLRC; srcName GLuint; srcTarget GLenum; srcLevel GLint; srcX GLint; srcY GLint; srcZ GLint; hDstRC HGLRC; dstName GLuint; dstTarget GLenum; dstLevel GLint; dstX GLint; dstY GLint; dstZ GLint; width GLsizei; height GLsizei; depth GLsizei) (result BOOL) extern_binding("opengl32", true);
+def wglCopyImageSubDataNV_signature func(hSrcRC HGLRC; srcName GLuint; srcTarget GLenum; srcLevel GLint; srcX GLint; srcY GLint; srcZ GLint; hDstRC HGLRC; dstName GLuint; dstTarget GLenum; dstLevel GLint; dstX GLint; dstY GLint; dstZ GLint; width GLsizei; height GLsizei; depth GLsizei) (result BOOL);
+var global wglCopyImageSubDataNV wglCopyImageSubDataNV_signature;
 def WGL_NV_delay_before_swap = 1;
 
-def wglDelayBeforeSwapNV func(hDC HDC; seconds GLfloat) (result BOOL) extern_binding("opengl32", true);
+def wglDelayBeforeSwapNV_signature func(hDC HDC; seconds GLfloat) (result BOOL);
+var global wglDelayBeforeSwapNV wglDelayBeforeSwapNV_signature;
 def WGL_NV_float_buffer = 1;
 def WGL_FLOAT_COMPONENTS_NV = 0x20B0;
 def WGL_BIND_TO_TEXTURE_RECTANGLE_FLOAT_R_NV = 0x20B1;
@@ -14751,15 +14837,20 @@ def WGL_TEXTURE_FLOAT_RGB_NV = 0x20B7;
 def WGL_TEXTURE_FLOAT_RGBA_NV = 0x20B8;
 def WGL_NV_gpu_affinity = 1;
 
-def wglEnumGpusNV func(iGpuIndex UINT; phGpu HGPUNV ref) (result BOOL) extern_binding("opengl32", true);
+def wglEnumGpusNV_signature func(iGpuIndex UINT; phGpu HGPUNV ref) (result BOOL);
+var global wglEnumGpusNV wglEnumGpusNV_signature;
 
-def wglEnumGpuDevicesNV func(hGpu HGPUNV; iDeviceIndex UINT; lpGpuDevice PGPU_DEVICE) (result BOOL) extern_binding("opengl32", true);
+def wglEnumGpuDevicesNV_signature func(hGpu HGPUNV; iDeviceIndex UINT; lpGpuDevice PGPU_DEVICE) (result BOOL);
+var global wglEnumGpuDevicesNV wglEnumGpuDevicesNV_signature;
 
-def wglCreateAffinityDCNV func(phGpuList HGPUNV ref) (result HDC) extern_binding("opengl32", true);
+def wglCreateAffinityDCNV_signature func(phGpuList HGPUNV ref) (result HDC);
+var global wglCreateAffinityDCNV wglCreateAffinityDCNV_signature;
 
-def wglEnumGpusFromAffinityDCNV func(hAffinityDC HDC; iGpuIndex UINT; hGpu HGPUNV ref) (result BOOL) extern_binding("opengl32", true);
+def wglEnumGpusFromAffinityDCNV_signature func(hAffinityDC HDC; iGpuIndex UINT; hGpu HGPUNV ref) (result BOOL);
+var global wglEnumGpusFromAffinityDCNV wglEnumGpusFromAffinityDCNV_signature;
 
-def wglDeleteDCNV func(hdc HDC) (result BOOL) extern_binding("opengl32", true);
+def wglDeleteDCNV_signature func(hdc HDC) (result BOOL);
+var global wglDeleteDCNV wglDeleteDCNV_signature;
 def WGL_NV_multigpu_context = 1;
 def WGL_CONTEXT_MULTIGPU_ATTRIB_NV = 0x20AA;
 def WGL_CONTEXT_MULTIGPU_ATTRIB_SINGLE_NV = 0x20AB;
@@ -14772,11 +14863,14 @@ def WGL_COLOR_SAMPLES_NV = 0x20B9;
 def WGL_NV_present_video = 1;
 def WGL_NUM_VIDEO_SLOTS_NV = 0x20F0;
 
-def wglEnumerateVideoDevicesNV func(hDc HDC; phDeviceList HVIDEOOUTPUTDEVICENV ref) (result s32) extern_binding("opengl32", true);
+def wglEnumerateVideoDevicesNV_signature func(hDc HDC; phDeviceList HVIDEOOUTPUTDEVICENV ref) (result s32);
+var global wglEnumerateVideoDevicesNV wglEnumerateVideoDevicesNV_signature;
 
-def wglBindVideoDeviceNV func(hDc HDC; uVideoSlot u32; hVideoDevice HVIDEOOUTPUTDEVICENV; piAttribList s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglBindVideoDeviceNV_signature func(hDc HDC; uVideoSlot u32; hVideoDevice HVIDEOOUTPUTDEVICENV; piAttribList s32 ref) (result BOOL);
+var global wglBindVideoDeviceNV wglBindVideoDeviceNV_signature;
 
-def wglQueryCurrentContextNV func(iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryCurrentContextNV_signature func(iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglQueryCurrentContextNV wglQueryCurrentContextNV_signature;
 def WGL_NV_render_depth_texture = 1;
 def WGL_BIND_TO_TEXTURE_DEPTH_NV = 0x20A3;
 def WGL_BIND_TO_TEXTURE_RECTANGLE_DEPTH_NV = 0x20A4;
@@ -14789,35 +14883,48 @@ def WGL_BIND_TO_TEXTURE_RECTANGLE_RGBA_NV = 0x20A1;
 def WGL_TEXTURE_RECTANGLE_NV = 0x20A2;
 def WGL_NV_swap_group = 1;
 
-def wglJoinSwapGroupNV func(hDC HDC; group GLuint) (result BOOL) extern_binding("opengl32", true);
+def wglJoinSwapGroupNV_signature func(hDC HDC; group GLuint) (result BOOL);
+var global wglJoinSwapGroupNV wglJoinSwapGroupNV_signature;
 
-def wglBindSwapBarrierNV func(group GLuint; barrier GLuint) (result BOOL) extern_binding("opengl32", true);
+def wglBindSwapBarrierNV_signature func(group GLuint; barrier GLuint) (result BOOL);
+var global wglBindSwapBarrierNV wglBindSwapBarrierNV_signature;
 
-def wglQuerySwapGroupNV func(hDC HDC; group GLuint ref; barrier GLuint ref) (result BOOL) extern_binding("opengl32", true);
+def wglQuerySwapGroupNV_signature func(hDC HDC; group GLuint ref; barrier GLuint ref) (result BOOL);
+var global wglQuerySwapGroupNV wglQuerySwapGroupNV_signature;
 
-def wglQueryMaxSwapGroupsNV func(hDC HDC; maxGroups GLuint ref; maxBarriers GLuint ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryMaxSwapGroupsNV_signature func(hDC HDC; maxGroups GLuint ref; maxBarriers GLuint ref) (result BOOL);
+var global wglQueryMaxSwapGroupsNV wglQueryMaxSwapGroupsNV_signature;
 
-def wglQueryFrameCountNV func(hDC HDC; count GLuint ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryFrameCountNV_signature func(hDC HDC; count GLuint ref) (result BOOL);
+var global wglQueryFrameCountNV wglQueryFrameCountNV_signature;
 
-def wglResetFrameCountNV func(hDC HDC) (result BOOL) extern_binding("opengl32", true);
+def wglResetFrameCountNV_signature func(hDC HDC) (result BOOL);
+var global wglResetFrameCountNV wglResetFrameCountNV_signature;
 def WGL_NV_vertex_array_range = 1;
 
-def wglAllocateMemoryNV func(size GLsizei; readfreq GLfloat; writefreq GLfloat; priority GLfloat) (result u8 ref) extern_binding("opengl32", true);
+def wglAllocateMemoryNV_signature func(size GLsizei; readfreq GLfloat; writefreq GLfloat; priority GLfloat) (result u8 ref);
+var global wglAllocateMemoryNV wglAllocateMemoryNV_signature;
 
-def wglFreeMemoryNV func(pointer u8 ref) extern_binding("opengl32", true);
+def wglFreeMemoryNV_signature func(pointer u8 ref);
+var global wglFreeMemoryNV wglFreeMemoryNV_signature;
 def WGL_NV_video_capture = 1;
 def WGL_UNIQUE_ID_NV = 0x20CE;
 def WGL_NUM_VIDEO_CAPTURE_SLOTS_NV = 0x20CF;
 
-def wglBindVideoCaptureDeviceNV func(uVideoSlot UINT; hDevice HVIDEOINPUTDEVICENV) (result BOOL) extern_binding("opengl32", true);
+def wglBindVideoCaptureDeviceNV_signature func(uVideoSlot UINT; hDevice HVIDEOINPUTDEVICENV) (result BOOL);
+var global wglBindVideoCaptureDeviceNV wglBindVideoCaptureDeviceNV_signature;
 
-def wglEnumerateVideoCaptureDevicesNV func(hDc HDC; phDeviceList HVIDEOINPUTDEVICENV ref) (result UINT) extern_binding("opengl32", true);
+def wglEnumerateVideoCaptureDevicesNV_signature func(hDc HDC; phDeviceList HVIDEOINPUTDEVICENV ref) (result UINT);
+var global wglEnumerateVideoCaptureDevicesNV wglEnumerateVideoCaptureDevicesNV_signature;
 
-def wglLockVideoCaptureDeviceNV func(hDc HDC; hDevice HVIDEOINPUTDEVICENV) (result BOOL) extern_binding("opengl32", true);
+def wglLockVideoCaptureDeviceNV_signature func(hDc HDC; hDevice HVIDEOINPUTDEVICENV) (result BOOL);
+var global wglLockVideoCaptureDeviceNV wglLockVideoCaptureDeviceNV_signature;
 
-def wglQueryVideoCaptureDeviceNV func(hDc HDC; hDevice HVIDEOINPUTDEVICENV; iAttribute s32; piValue s32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglQueryVideoCaptureDeviceNV_signature func(hDc HDC; hDevice HVIDEOINPUTDEVICENV; iAttribute s32; piValue s32 ref) (result BOOL);
+var global wglQueryVideoCaptureDeviceNV wglQueryVideoCaptureDeviceNV_signature;
 
-def wglReleaseVideoCaptureDeviceNV func(hDc HDC; hDevice HVIDEOINPUTDEVICENV) (result BOOL) extern_binding("opengl32", true);
+def wglReleaseVideoCaptureDeviceNV_signature func(hDc HDC; hDevice HVIDEOINPUTDEVICENV) (result BOOL);
+var global wglReleaseVideoCaptureDeviceNV wglReleaseVideoCaptureDeviceNV_signature;
 def WGL_NV_video_output = 1;
 def WGL_BIND_TO_VIDEO_RGB_NV = 0x20C0;
 def WGL_BIND_TO_VIDEO_RGBA_NV = 0x20C1;
@@ -14833,27 +14940,39 @@ def WGL_VIDEO_OUT_FIELD_2 = 0x20CA;
 def WGL_VIDEO_OUT_STACKED_FIELDS_1_2 = 0x20CB;
 def WGL_VIDEO_OUT_STACKED_FIELDS_2_1 = 0x20CC;
 
-def wglGetVideoDeviceNV func(hDC HDC; numDevices s32; hVideoDevice HPVIDEODEV ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetVideoDeviceNV_signature func(hDC HDC; numDevices s32; hVideoDevice HPVIDEODEV ref) (result BOOL);
+var global wglGetVideoDeviceNV wglGetVideoDeviceNV_signature;
 
-def wglReleaseVideoDeviceNV func(hVideoDevice HPVIDEODEV) (result BOOL) extern_binding("opengl32", true);
+def wglReleaseVideoDeviceNV_signature func(hVideoDevice HPVIDEODEV) (result BOOL);
+var global wglReleaseVideoDeviceNV wglReleaseVideoDeviceNV_signature;
 
-def wglBindVideoImageNV func(hVideoDevice HPVIDEODEV; hPbuffer HPBUFFERARB; iVideoBuffer s32) (result BOOL) extern_binding("opengl32", true);
+def wglBindVideoImageNV_signature func(hVideoDevice HPVIDEODEV; hPbuffer HPBUFFERARB; iVideoBuffer s32) (result BOOL);
+var global wglBindVideoImageNV wglBindVideoImageNV_signature;
 
-def wglReleaseVideoImageNV func(hPbuffer HPBUFFERARB; iVideoBuffer s32) (result BOOL) extern_binding("opengl32", true);
+def wglReleaseVideoImageNV_signature func(hPbuffer HPBUFFERARB; iVideoBuffer s32) (result BOOL);
+var global wglReleaseVideoImageNV wglReleaseVideoImageNV_signature;
 
-def wglSendPbufferToVideoNV func(hPbuffer HPBUFFERARB; iBufferType s32; pulCounterPbuffer u32 ref; bBlock BOOL) (result BOOL) extern_binding("opengl32", true);
+def wglSendPbufferToVideoNV_signature func(hPbuffer HPBUFFERARB; iBufferType s32; pulCounterPbuffer u32 ref; bBlock BOOL) (result BOOL);
+var global wglSendPbufferToVideoNV wglSendPbufferToVideoNV_signature;
 
-def wglGetVideoInfoNV func(hpVideoDevice HPVIDEODEV; pulCounterOutputPbuffer u32 ref; pulCounterOutputVideo u32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetVideoInfoNV_signature func(hpVideoDevice HPVIDEODEV; pulCounterOutputPbuffer u32 ref; pulCounterOutputVideo u32 ref) (result BOOL);
+var global wglGetVideoInfoNV wglGetVideoInfoNV_signature;
 def WGL_OML_sync_control = 1;
 
-def wglGetSyncValuesOML func(hdc HDC; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetSyncValuesOML_signature func(hdc HDC; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL);
+var global wglGetSyncValuesOML wglGetSyncValuesOML_signature;
 
-def wglGetMscRateOML func(hdc HDC; numerator INT32 ref; denominator INT32 ref) (result BOOL) extern_binding("opengl32", true);
+def wglGetMscRateOML_signature func(hdc HDC; numerator INT32 ref; denominator INT32 ref) (result BOOL);
+var global wglGetMscRateOML wglGetMscRateOML_signature;
 
-def wglSwapBuffersMscOML func(hdc HDC; target_msc INT64; divisor INT64; remainder INT64) (result INT64) extern_binding("opengl32", true);
+def wglSwapBuffersMscOML_signature func(hdc HDC; target_msc INT64; divisor INT64; remainder INT64) (result INT64);
+var global wglSwapBuffersMscOML wglSwapBuffersMscOML_signature;
 
-def wglSwapLayerBuffersMscOML func(hdc HDC; fuPlanes INT; target_msc INT64; divisor INT64; remainder INT64) (result INT64) extern_binding("opengl32", true);
+def wglSwapLayerBuffersMscOML_signature func(hdc HDC; fuPlanes INT; target_msc INT64; divisor INT64; remainder INT64) (result INT64);
+var global wglSwapLayerBuffersMscOML wglSwapLayerBuffersMscOML_signature;
 
-def wglWaitForMscOML func(hdc HDC; target_msc INT64; divisor INT64; remainder INT64; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL) extern_binding("opengl32", true);
+def wglWaitForMscOML_signature func(hdc HDC; target_msc INT64; divisor INT64; remainder INT64; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL);
+var global wglWaitForMscOML wglWaitForMscOML_signature;
 
-def wglWaitForSbcOML func(hdc HDC; target_sbc INT64; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL) extern_binding("opengl32", true);
+def wglWaitForSbcOML_signature func(hdc HDC; target_sbc INT64; ust INT64 ref; msc INT64 ref; sbc INT64 ref) (result BOOL);
+var global wglWaitForSbcOML wglWaitForSbcOML_signature;

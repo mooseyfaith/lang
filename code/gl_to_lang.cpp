@@ -215,13 +215,14 @@ s32 main(s32 argument_count, cstring arguments[])
     
     struct {
         cstring path;
-        bool exclude_wgl_constants;
+        //bool exclude_wgl_constants;
+        bool dont_define_functions;
     } files[] =
     {
         //{ "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/wingdi.h", true },
         { "C:/Program Files (x86)/Windows Kits/10/Include/10.0.19041.0/um/gl/GL.h", },
-        { "gl/glext.h", },
-        { "gl/wglext.h", },
+        { "gl/glext.h", true },
+        { "gl/wglext.h", true },
     };
     
     string_buffer constants = {};
@@ -284,14 +285,14 @@ def GLsync      type u8;
 def _cl_context type u8;
 def _cl_event   type u8;
 
+// def HGLRDC               type u8;
 def HPBUFFERARB          type u8;
 def HPBUFFEREXT          type u8;
 def HGPUNV               type u8;
 def PGPU_DEVICE          type u8;
 def HVIDEOOUTPUTDEVICENV type u8;
 def HVIDEOINPUTDEVICENV  type u8;
-def HPVIDEODEV  type u8;
-    
+def HPVIDEODEV           type u8;
 )CODE");
     
     for (u32 i = 0; i < carray_count(files); i++)
@@ -300,7 +301,8 @@ def HPVIDEODEV  type u8;
         if (!platform_allocate_and_read_entire_file(&source, files[i].path))
             printf("couldn't open file %s\n", files[i].path);
             
-        bool exclude_wgl_constants = files[i].exclude_wgl_constants;
+        //bool exclude_wgl_constants = files[i].exclude_wgl_constants;
+        bool define_function = !files[i].dont_define_functions;
         
         //source = s("GLAPI void APIENTRY glUniformSubroutinesuiv (GLenum shadertype, GLsizei count, const GLuint *indices);");
         //source = s("WINGDIAPI BOOL  WINAPI wglCopyContext(HGLRC, HGLRC, UINT);");
@@ -334,7 +336,8 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 
                 auto name = skip_name(&line);
             
-                if (!starts_with(name, s("GL_")) && (exclude_wgl_constants || !starts_with(name, s("WGL_"))))
+                //if (!starts_with(name, s("GL_")) && (exclude_wgl_constants || !starts_with(name, s("WGL_"))))
+                if (!starts_with(name, s("GL_")) && !starts_with(name, s("WGL_")))
                     continue;
                 
                 string value;
@@ -407,7 +410,8 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 continue;
             }
             
-            bool define_function = !try_skip_keyword(&line, s("GLAPI"));
+            //bool define_function = !try_skip_keyword(&line, s("GLAPI"));
+            try_skip_keyword(&line, s("GLAPI"));
             
             try_skip_keyword(&line, s("WINGDIAPI"));
             
