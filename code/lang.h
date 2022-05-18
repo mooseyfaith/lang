@@ -861,7 +861,7 @@ ast_number * parse_number(lang_parser *parser)
             if (!is_hex)
                 break;
                 
-            u8 digit = head - 'a';
+            digit = head - 'a';
             if (digit >= 6)
                 digit = head - 'A';
              

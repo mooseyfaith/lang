@@ -1,7 +1,4 @@
 
-#include <stdio.h>
-
-#include "hash_string.h"
 #include "utf8_string.h"
 
 struct parsed_type
@@ -142,23 +139,25 @@ parsed_type skip_type(string *iterator)
     return result;
 }
 
-void print_type(FILE *output, parsed_type type)
+void print_type(string_builder *builder, parsed_type type)
 {
     assert(type.name.count);
-    fprintf(output, "%.*s", fs(type.name));
+    print(builder, "%.*s", fs(type.name));
     
     for (u32 i = 0; i < type.indirection_count; i++)
-        fprintf(output, " ref");
+        print(builder, " ref");
 }
 
-void parse_and_print_function_arguments(FILE *output, string *iterator, string name, parsed_type return_type, bool define_function)
+void parse_and_print_function_arguments(string_builder *builder, string *iterator, string name, parsed_type return_type, bool define_function)
 {
     skip(iterator, s("(")); skip_white(iterator);
     
+    print_newline(builder);
+    
     if (define_function)
-        fprintf(output, "\ndef %.*s func(", fs(name));
+        print(builder, "def %.*s func(", fs(name));
     else
-        fprintf(output, "\ndef %.*s_signature func(", fs(name));
+        print(builder, "def %.*s_signature func(", fs(name));
     
     u32 argument_count = 0;
     while (true)
@@ -172,14 +171,14 @@ void parse_and_print_function_arguments(FILE *output, string *iterator, string n
         auto name = skip_name(iterator);
         
         if (argument_count)
-            fprintf(output, "; ");
+            print(builder, "; ");
             
         if (name.count)
-            fprintf(output, "%.*s ", fs(name));
+            print(builder, "%.*s ", fs(name));
         else
-            fprintf(output, "argument%i ", argument_count);
+            print(builder, "argument%i ", argument_count);
             
-        print_type(output, type);
+        print_type(builder, type);
         
         argument_count++;
         
@@ -193,26 +192,18 @@ void parse_and_print_function_arguments(FILE *output, string *iterator, string n
     skip_white(iterator);
     skip(iterator, s(";"));
     
-    fprintf(output, ")");
+    print(builder, ")");
     
     if (return_type.name.count)
     {
-        fprintf(output, " (result ");
-        print_type(output, return_type);
-        fprintf(output, ")");
+        print(builder, " (result ");
+        print_type(builder, return_type);
+        print(builder, ")");
     }
 }
 
 s32 main(s32 argument_count, cstring arguments[])
 {
-    crc32_init();
-
-    string_hash_table table = {};
-    table.count = 1024;
-    table.keys  = (string *) malloc(sizeof(string) * table.count);
-    for (u32 i = 0; i < table.count; i++)
-        table.keys[i] = {};
-    
     struct {
         cstring path;
         //bool exclude_wgl_constants;
@@ -226,13 +217,14 @@ s32 main(s32 argument_count, cstring arguments[])
     };
     
     string_buffer constants = {};
+    string_buffer dll_functions = {};
     
-    auto output = fopen("modules/gl_win32.t", "w");
+    string_builder builder = {};
     
-    fprintf(output, "module gl;\n");
+    print_line(&builder, "module gl;");
     
     // some GL types
-    fprintf(output, R"CODE(
+    print_raw(&builder, R"CODE(
 // types are manually added, since these are a mess to generate from the headers
 def GLenum type u32;
 
@@ -316,7 +308,10 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
         auto it = source;
         skip_white(&it);
         
-        fprintf(output, "\n// file: %s\n\n", files[i].path);
+        print_newline(&builder);
+        
+        print_line(&builder, "// file: %s", files[i].path);
+        print_newline(&builder);
         
         while (it.count)
         {
@@ -345,7 +340,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 it = line;
                 
                 if (add_unique(&constants, name))
-                    fprintf(output, "def %.*s = %.*s;\n", fs(name), fs(value));
+                    print_line(&builder, "def %.*s = %.*s cast(s32);", fs(name), fs(value));
                 continue;
             }
         #if 0
@@ -356,7 +351,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     continue;
                 
                 // forward declared structs will only be passed by pointer, so treat them as u8
-                fprintf(output, "def %.*s type u8;\n", fs(name));
+                print_line(&builder, "def %.*s type u8;", fs(name));
                 it = line;
             }
         #endif
@@ -380,8 +375,8 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     
                     skip(&line, s(")"));
                     
-                    parse_and_print_function_arguments(output, &line, name, type, true);
-                    fprintf(output, ";\n");
+                    parse_and_print_function_arguments(&builder, &line, name, type, true);
+                    print_line(&builder, ";");
                     
                     it = line;
                 }
@@ -398,13 +393,13 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                     try_skip_until_set(&ignored, &line, s(";"), true);
                     it = line;
                     
-                    fprintf(output, "def %.*s type ", fs(name));
+                    print(&builder, "def %.*s type ", fs(name));
                     if (type.name.count)
-                        print_type(output, type);
+                        print_type(&builder, type);
                     else
-                        fprintf(output, "u8"); // replacing void
+                        print(&builder, "u8"); // replacing void
                         
-                    fprintf(output, ";\n");
+                    print_line(&builder, ";");
                 #endif
                 }
                 continue;
@@ -430,23 +425,37 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
             if (!starts_with(name, s("gl")) && !starts_with(name, s("wgl")))
                 continue;
                 
-            parse_and_print_function_arguments(output, &line, name, return_type, define_function);
+            parse_and_print_function_arguments(&builder, &line, name, return_type, define_function);
             
             if (define_function)
             {
-                fprintf(output, " extern_binding(\"opengl32\", true);\n");
+                print_line(&builder, " extern_binding(\"opengl32\", true);");
             }
             else
             {
-                fprintf(output, ";\n");
-                fprintf(output, "var global %.*s %.*s_signature;\n", fs(name), fs(name));
+                print_line(&builder, ";");
+                print_line(&builder, "var global %.*s %.*s_signature;", fs(name), fs(name));
+                
+                add_unique(&dll_functions, name);
             }
     
             it = line;
         }
     }
     
-    fclose(output);
+    print_newline(&builder);
+    print_line(&builder, "def gl_init_functions func()");
+    print_scope_open(&builder);
+    
+    for (u32 i = 0; i < dll_functions.count; i++)
+    {
+        auto function = dll_functions.base[i];
+        print_line(&builder, "%.*s = wglGetProcAddress(\"%.*s\") cast(%.*s_signature);", fs(function), fs(function), fs(function));
+    }
+    
+    print_scope_close(&builder);
+    
+    platform_write_entire_file("modules/gl_win32.t", buffer_to_array(builder.memory));
 
     return 0;
 }

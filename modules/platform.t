@@ -186,9 +186,22 @@ def platform_require func(condition bool; location code_location = get_call_loca
         printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
         printf("\tCondition '%s' is false.\n\n", condition_text);
         printf("\tGetLastError() = 0x%x\n", GetLastError());
+        __debugbreak();
         exit(0);
     }
 }
+
+def require func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+{
+    if not condition
+    {
+        printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
+        printf("\tCondition '%s' is false.\n\n", condition_text);
+        __debugbreak();
+        exit(0);
+    }
+}
+
 
 def assert func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
 {

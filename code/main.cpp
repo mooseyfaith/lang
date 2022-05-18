@@ -6,22 +6,7 @@
 
 s32 main(s32 argument_count, cstring arguments[])
 {
-    u8_buffer console_input = {};
-    
-    if (0)
-    {
-        char line[1024];
-        while(fgets(line, 1000, stdin) != null)
-        {
-            u32 count = strlen(line);
-            resize_buffer(&console_input, console_input.count + count + 1);
-            sprintf_s((char *) console_input.base + console_input.count - count - 1, count + 1, line);
-            
-            resize_buffer(&console_input, console_input.count - 1); // remove 0 terminal
-        }
-    }
-    
-    if (!console_input.count && (argument_count < 2))
+    if (argument_count < 2)
     {
         printf("requires source file or std input");
         return -1;
@@ -88,14 +73,12 @@ s32 main(s32 argument_count, cstring arguments[])
         }
     }
     
-    if (console_input.count && !parse(&parser, buffer_to_array(console_input), s("console input")))
-        return -1;        
-    
     resolve(&parser);
     
     lang_c_compile_settings settings = {};
     //settings.prefix = s("tk_");
-    compile(&parser, settings);
+    cstring output_file_path = "lang_output.cpp";
+    compile(&parser, output_file_path, settings);
     
     printf("done\n");
 

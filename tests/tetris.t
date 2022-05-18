@@ -8,10 +8,9 @@ var window platform_api_window;
 platform_window(platform ref, window ref, "tetris");
 
 var gl gl_api;
-gl_init(gl ref, platform ref);
+gl_init(gl ref, platform ref, true);
 
-gl_win32_window_init_1(window.device_context);
-platform_require(wglMakeCurrent(window.device_context, gl.win32_context));
+gl_window_init(platform ref, gl ref, window ref);
 
 def piece_type enum 
 {

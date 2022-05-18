@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <stdio.h>
+
 typedef signed __int8  s8;
 typedef signed __int16 s16;
 typedef signed __int32 s32;

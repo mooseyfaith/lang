@@ -12,18 +12,18 @@ def gl_api struct
     win32_init_device_context HDC;
 }
 
-def gl_init func(gl gl_api ref; platform platform_api ref)
+def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible b8 = false)
 {
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
     window_class.lpfnWndProc   = DefWindowProc;
     window_class.hbrBackground = COLOR_BACKGROUND cast(HBRUSH);
-    window_class.lpszClassName = "gl init dummy window class";
+    window_class.lpszClassName = "gl dummy window class";
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
-    platform_require(RegisterClass(window_class ref));
+    platform_require(RegisterClassA(window_class ref));
 
-    var window_handle HWND = CreateWindow(platform.window_class_name, "gl init dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, null, null, platform.win32_instance, 0);
+    var window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
     platform_require(window_handle is_not INVALID_HANDLE_VALUE);
 
     var device_context HDC = GetDC(window_handle);
@@ -43,7 +43,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref)
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_33_window_handle HWND = CreateWindow(platform.window_class_name, "gl init dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 100, 100, null, null, platform.win32_instance, 0);
+        var gl_33_window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
         platform_require(gl_33_window_handle is_not INVALID_HANDLE_VALUE);
 
         var gl_33_device_context HDC = GetDC(gl_33_window_handle);
@@ -51,19 +51,47 @@ def gl_init func(gl gl_api ref; platform platform_api ref)
         
         gl_win32_window_init_33(gl_33_device_context);
         
-        var context_attributes s32[] = {
-            WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
-            WGL_CONTEXT_MINOR_VERSION_ARB; 3;
-            WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
-            WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
-            0
-        };
+        // HACK;
+        var gl_33_context HGLRC;
+        if backwards_compatible
+        {
+            var context_attributes s32[] = {
+                WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
+                WGL_CONTEXT_MINOR_VERSION_ARB; 3;
+                WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
+                WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
+                0
+            };
+            
+            gl_33_context = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+        }
+        else
+        {
+            // HACK: same name does not work, somehow scopes are not properly accounted for
+            var context_attributes2 s32[] = {
+                WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
+                WGL_CONTEXT_MINOR_VERSION_ARB; 3;
+                WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
+                WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
+                0
+            };
+            
+            gl_33_context = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes2.base);
+        }
         
-        var gl_33_context HGLRC = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+        // this does not work yet
+        //var context_attributes s32[] = {
+                //WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
+                //WGL_CONTEXT_MINOR_VERSION_ARB; 3;
+                //WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
+                //WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
+                //0
+            //};
+        //if backwards_compatible { context_attributes[9] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
+        //var gl_33_context HGLRC = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+        
         if gl_33_context
         {
-            platform_require(wglMakeCurrent(gl_33_device_context, gl_33_context));
-            
             platform_require(wglDeleteContext(gl_context));
             platform_require(ReleaseDC(window_handle, device_context));
             platform_require(DestroyWindow(window_handle));
@@ -83,7 +111,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref)
         platform_require(wglMakeCurrent(device_context, gl_context));
     }
     
-    glDebugMessageCallback = wglGetProcAddress("glDebugMessageCallback") cast(glDebugMessageCallback_signature);
+    gl_init_functions();
     
     gl.win32_context             = gl_context;
     gl.win32_init_window_handle  = window_handle;
@@ -107,6 +135,8 @@ def gl_window_init func(platform platform_api ref; gl gl_api ref; window platfor
     {
         gl_win32_window_init_1(window.device_context);
     }
+    
+    platform_require(wglMakeCurrent(window.device_context, gl.win32_context));
 }
 
 def gl_debug_message_callback func GLDEBUGPROC
