@@ -43,16 +43,16 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_33_window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
-        platform_require(gl_33_window_handle is_not INVALID_HANDLE_VALUE);
+        var gl_3_3_window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+        platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
-        var gl_33_device_context HDC = GetDC(gl_33_window_handle);
-        platform_require(gl_33_device_context);
+        var gl_3_3_device_context HDC = GetDC(gl_3_3_window_handle);
+        platform_require(gl_3_3_device_context);
         
-        gl_win32_window_init_33(gl_33_device_context);
+        gl_win32_window_init_3_3(gl_3_3_device_context);
         
         // HACK;
-        var gl_33_context HGLRC;
+        var gl_3_3_context HGLRC;
         if backwards_compatible
         {
             var context_attributes s32[] = {
@@ -63,7 +63,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
                 0
             };
             
-            gl_33_context = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+            gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes.base);
         }
         else
         {
@@ -76,7 +76,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
                 0
             };
             
-            gl_33_context = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes2.base);
+            gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes2.base);
         }
         
         // this does not work yet
@@ -88,24 +88,24 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
                 //0
             //};
         //if backwards_compatible { context_attributes[9] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
-        //var gl_33_context HGLRC = wglCreateContextAttribsARB(gl_33_device_context, null, context_attributes.base);
+        //var gl_3_3_context HGLRC = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes.base);
         
-        if gl_33_context
+        if gl_3_3_context
         {
             platform_require(wglDeleteContext(gl_context));
             platform_require(ReleaseDC(window_handle, device_context));
             platform_require(DestroyWindow(window_handle));
             
-            gl_context     = gl_33_context;
-            device_context = gl_33_device_context;
-            window_handle  = gl_33_window_handle;
+            gl_context     = gl_3_3_context;
+            device_context = gl_3_3_device_context;
+            window_handle  = gl_3_3_window_handle;
             
             gl.is_version_3_3 = true;
         }
         else
         {
-            platform_require(ReleaseDC(gl_33_window_handle, gl_33_device_context));
-            platform_require(DestroyWindow(gl_33_window_handle));
+            platform_require(ReleaseDC(gl_3_3_window_handle, gl_3_3_device_context));
+            platform_require(DestroyWindow(gl_3_3_window_handle));
         }
         
         platform_require(wglMakeCurrent(device_context, gl_context));
@@ -129,7 +129,7 @@ def gl_window_init func(platform platform_api ref; gl gl_api ref; window platfor
 {
     if gl.is_version_3_3
     {
-        gl_win32_window_init_33(window.device_context);
+        gl_win32_window_init_3_3(window.device_context);
     }
     else
     {
@@ -162,7 +162,7 @@ def gl_win32_window_init_1 func(device_context HDC)
     platform_require(SetPixelFormat(device_context, pixel_format, pixel_format_descriptor ref));
 }
 
-def gl_win32_window_init_33 func(device_context HDC)
+def gl_win32_window_init_3_3 func(device_context HDC)
 {
     var pixel_format_attributes s32[] =
     {
