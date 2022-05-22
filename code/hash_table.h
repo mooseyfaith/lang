@@ -1,6 +1,6 @@
 #pragma once
 
-#include "basic.h"
+#include <basic.h>
 
 struct hash_table_pointers_result
 {
@@ -70,7 +70,7 @@ do { \
         (slot) = -1; \
 } while(false)
 
-u32 get_slot(hash_table_pointers *table, u8 *key)
+u32 try_get_slot(hash_table_pointers *table, u8 *key)
 {
     assert(key);
     assert(((table->count - 1) & table->count) == 0, "table count must be a power of 2");
@@ -88,21 +88,12 @@ u32 get_slot(hash_table_pointers *table, u8 *key)
     return -1;
 }
 
-u8 * try_get(hash_table_pointers *table, u8 *key)
+u32 get_slot(hash_table_pointers *table, u8 *key)
 {
-    u32 slot = get_slot(table, key);
+    u32 slot = try_get_slot(table, key);
     assert(slot != -1);
     
-    return table->keys[slot];
-}
-
-
-u8 * get(hash_table_pointers *table, u8 *key)
-{
-    auto result = try_get(table, key);
-    assert(result);
-    
-    return result;
+    return slot;
 }
 
 hash_table_pointers_result get_or_add(hash_table_pointers *table, u8 *key)
@@ -110,7 +101,6 @@ hash_table_pointers_result get_or_add(hash_table_pointers *table, u8 *key)
     hash_table_pointers_result result = {};
     
     result.slot = get_slot(table, key);
-    assert(result.slot != -1);
     
     if (!table->keys[result.slot])
     {

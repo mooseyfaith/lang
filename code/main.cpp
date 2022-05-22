@@ -77,8 +77,28 @@ s32 main(s32 argument_count, cstring arguments[])
     
     lang_c_compile_settings settings = {};
     //settings.prefix = s("tk_");
+    auto output = compile(&parser, settings);
+    
     cstring output_file_path = "lang_output.cpp";
-    compile(&parser, output_file_path, settings);
+    platform_write_entire_file(output_file_path, output);
+    platform_free_bytes(output.base);
+    
+#if defined _DEBUG
+
+    {
+        auto table = &global_debug_platform_allocation_table;
+        
+        byte_count_info info;
+        info.value = table->byte_count;
+        printf("\nMemory: %llugb %llumb %llukb %llub (in %llu different allocations)\n", info.giga, info.mega, info.kilo, info.bytes, table->count);
+        for (usize i = 0; i < table->count; i++)
+        {
+            auto location = table->locations[i];
+            printf("Allocation: %s,%s(%i) 0x%08p %llu bytes\n", location.file, location.function, location.line, table->bases[i], table->byte_counts[i]);
+        }
+    }
+
+#endif
     
     printf("done\n");
 

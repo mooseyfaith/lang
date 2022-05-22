@@ -1,5 +1,8 @@
+// version 0 - 21.05.2022
+
 #pragma once
 
+// version 0
 #include "basic.h"
 
 bool try_skip(string *iterator, string pattern)
@@ -28,7 +31,7 @@ void skip(string *iterator, string pattern)
     assert(ok);
 }
 
-bool contains(string set, u8 code)
+bool contains(string set, u32 code)
 {
     for (usize i = 0; i < set.count; i++)
     {
@@ -87,6 +90,12 @@ bool try_skip_until_set(string *result, string *iterator, string set, bool do_sk
     return false;
 }
 
+bool try_skip_until_set(string *iterator, string set, bool do_skip_set = false)
+{
+    string ignored;
+    return try_skip_until_set(&ignored, iterator, set, do_skip_set);
+}
+
 string skip_until_set(string *iterator, string set, bool do_skip_set = false)
 {
     string result;
@@ -110,9 +119,9 @@ bool skip_white(string *iterator)
     return try_skip_set(iterator, s(" \t\n\r"));
 }
 
-bool is_digit(u8 code)
+bool is_digit(u32 code)
 {
-    return (u8) (code - '0') <= 9;
+    return (code - '0') <= 9;
 }
 
 bool is_letter(u8 code)
@@ -150,6 +159,76 @@ bool starts_with(string text, string prefix)
     return (text == prefix);
 }
 
+string print_va(string *output, memory_arena *memory, bool zero_terminated, cstring format, va_list va_arguments)
+{
+    if (output->count && zero_terminated)
+        output->count--;
+    
+    auto offset = output->count;
+    usize count = _vscprintf_p(format, va_arguments);
+    
+    reallocate_array(memory, output, output->count + count + 1);
+    _vsprintf_p((char *) output->base + offset, count + 1, format, va_arguments);
+    
+    if (!zero_terminated)
+        reallocate_array(memory, output, output->count - 1);
+    
+    return { count, output->base + offset };
+}
+
+string print_zero_terminated(string *output, memory_arena *memory, cstring format, ...)
+{
+    va_list va_arguments;
+    va_start(va_arguments, format);
+    
+    auto zero_terminated = true;
+    auto text = print_va(output, memory, zero_terminated, format, va_arguments);
+    
+    va_end(va_arguments);
+    
+    return text;
+}
+
+string print(string *output, memory_arena *memory, cstring format, ...)
+{
+    va_list va_arguments;
+    va_start(va_arguments, format);
+    
+    bool zero_terminated = false;
+    auto text = print_va(output, memory, zero_terminated, format, va_arguments);
+    
+    va_end(va_arguments);
+    
+    return text;
+}
+
+string print_zero_terminated(memory_arena *memory, cstring format, ...)
+{
+    va_list va_arguments;
+    va_start(va_arguments, format);
+    
+    auto zero_terminated = true;
+    string text = {};
+    print_va(&text, memory, zero_terminated, format, va_arguments);
+    
+    va_end(va_arguments);
+    
+    return text;
+}
+
+string print(memory_arena *memory, cstring format, ...)
+{
+    va_list va_arguments;
+    va_start(va_arguments, format);
+    
+    bool zero_terminated = false;
+    string text = {};
+    print_va(&text, memory, zero_terminated, format, va_arguments);
+    
+    va_end(va_arguments);
+    
+    return text;
+}
 
 struct string_builder
 {

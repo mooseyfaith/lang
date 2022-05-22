@@ -13,7 +13,7 @@ struct unique_type_info
     ast_node *node;
 };
 
-buffer_type(unique_type_buffer, unique_type_info);
+buffer_type(unique_type_buffer, unique_type_array, unique_type_info);
 
 struct lang_c_buffer
 {
@@ -92,7 +92,7 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 if (array_type->count_expression)
                 {
                     auto item_type = array_type->item_type;
-                    while (is_node_type(item_type.base_type.node, array_type))
+                    while (item_type.base_type.node && is_node_type(item_type.base_type.node, array_type))
                     {
                         local_node_type(array_type, item_type.base_type.node);
                         item_type = array_type->item_type;
@@ -100,7 +100,7 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 
                     print_type(buffer, item_type, variable_name);
                 
-                    while (is_node_type(type.base_type.node, array_type))
+                    while (type.base_type.node && is_node_type(type.base_type.node, array_type))
                     {
                         local_node_type(array_type, type.base_type.node);
                         
@@ -466,7 +466,7 @@ print_statements_declaration
 {
     auto builder = &buffer->builder;
 
-    local_ast_queue(queue);
+    local_buffer(queue, ast_queue);
     
     enqueue(&queue, &first_statement);
     
@@ -476,13 +476,17 @@ print_statements_declaration
         //print_buffer(buffer, "#line %i",
         
         {
-            auto comment = buffer->parser->comment_buffer.base[node->index];
+            auto comment = buffer->parser->node_comment_buffer.base[node->index];
             auto lines = comment;
             
             while (lines.count)
             {
                 auto line = skip_until_set_or_all(&lines, s("\r\n"));
-                try_skip(&lines, s("\r\n"));
+                bool ok = try_skip(&lines, s("\r"));
+                try_skip(&lines, s("\n"));
+                if (!ok)
+                    try_skip(&lines, s("\r"));
+                    
                 try_skip_set(&lines, s(" \t"));
                 
                 print_line(builder, "// %.*s", fs(line));
@@ -846,16 +850,14 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
     print(builder, ")");
 }
 
-buffer_type(index_buffer, u32);
-
 struct node_dependency
 {
-    index_buffer children; // dependencies
+    u32_buffer children; // dependencies
     ast_node     *node;
     bool is_root;
 };
 
-buffer_type(node_dependency_buffer, node_dependency);
+buffer_type(node_dependency_buffer, node_dependency_array, node_dependency);
 
 u32 insert(node_dependency_buffer *buffer, ast_node *node)
 {
@@ -866,7 +868,6 @@ u32 insert(node_dependency_buffer *buffer, ast_node *node)
     }
     
     resize_buffer(buffer, buffer->count + 1);
-    buffer_type(node_dependency_buffer, node_dependency);
     buffer->base[buffer->count - 1] = {};
     buffer->base[buffer->count - 1].node = node;
     buffer->base[buffer->count - 1].is_root = true;
@@ -1010,9 +1011,9 @@ ast_compound_type_field * add_unique_declarations(lang_c_buffer *buffer, ast_com
         auto variable = field->variable;
         auto field_type = get_unique_type(buffer, variable->type);
     
-        auto unique_field = new_node(compound_type_field);
+        auto unique_field = new_leaf_node(compound_type_field);
     
-        auto unique_variable = new_node(variable);
+        auto unique_variable = new_leaf_node(variable);
         unique_variable->name = variable->name;
         unique_variable->type = field_type;
         
@@ -1083,7 +1084,7 @@ get_unique_type_declaration
             
             if (!found)
             {
-                auto unique_array_type = new_node(array_type);
+                auto unique_array_type = new_leaf_node(array_type);
                 unique_array_type->item_type = item_type;
             
                 resize_buffer(unique_types, unique_types->count + 1);
@@ -1122,7 +1123,7 @@ get_unique_type_declaration
             if (found)
                 break;
             
-            auto unique_compound_type = new_node(compound_type);
+            auto unique_compound_type = new_leaf_node(compound_type);
             
             unique_compound_type->first_field = add_unique_declarations(buffer, compound_type->first_field);
             
@@ -1162,7 +1163,7 @@ get_unique_type_declaration
             if (found)
                 break;
             
-            auto unique_function_type = new_node(function_type);
+            auto unique_function_type = new_leaf_node(function_type);
             
             unique_function_type->input  = unique_input;
             unique_function_type->output = unique_output;
@@ -1285,7 +1286,7 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
     }
 }
 
-void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_settings settings = {})
+string compile(lang_parser *parser, lang_c_compile_settings settings = {})
 {
     lang_c_buffer buffer = {};
     buffer.settings = settings;
@@ -1362,7 +1363,7 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
     {
         maybe_print_blank_line(builder);
         
-        local_ast_queue(queue);
+        local_buffer(queue, ast_queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -1405,21 +1406,18 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
         }
     }
     
-    unique_type_buffer unique_types = {};
-    defer { resize_buffer(&unique_types, 0); };
+    local_buffer(unique_types, unique_type_buffer);
     
     // declare typedefs, structs and functions in order of dependency
     {
-        node_dependency_buffer dependencies = {};
+        local_buffer(dependencies, node_dependency_buffer);
         defer
         {
             for (u32 i = 0; i < dependencies.count; i++)
-                resize_buffer(&dependencies.base[i].children, 0);
-        
-            resize_buffer(&dependencies, 0);
+                free_buffer(&dependencies.base[i].children);
         };
     
-        local_ast_queue(queue);
+        local_buffer(queue, ast_queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -1428,12 +1426,10 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
             add_dependencies(&buffer, &dependencies, node);
         }
         
-        index_buffer stack = {};
-        defer { resize_buffer(&stack, 0); };
+        local_buffer(stack, u32_buffer);
         
-        u8_buffer node_depths = {};
+        local_buffer(node_depths, u8_buffer);
         resize_buffer(&node_depths, dependencies.count);
-        defer { resize_buffer(&node_depths, 0); };
         
         // set all depths to 0
         memset(node_depths.base, 0, sizeof(node_depths.base[0]) * node_depths.count);
@@ -1477,8 +1473,7 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
             }
         }
         
-        ast_node_buffer ordered_dependencies = {};
-        defer { resize_buffer(&ordered_dependencies, 0); };
+        local_buffer(ordered_dependencies, ast_node_buffer);
         
         for (u32 depth = 0; depth <= max_depth; depth++)
         {
@@ -1787,7 +1782,7 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
     {
         maybe_print_blank_line(builder);
     
-        local_ast_queue(queue);
+        local_buffer(queue, ast_queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -1807,7 +1802,7 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
 
     // declare all functions
     {
-        local_ast_queue(queue);
+        local_buffer(queue, ast_queue);
         enqueue(&queue, &root);
         
         ast_node *node;
@@ -1854,6 +1849,6 @@ void compile(lang_parser *parser, cstring output_file_path, lang_c_compile_setti
     
     print_scope_close(builder);
     
-    u8_array data = buffer_to_array(builder->memory);
-    platform_write_entire_file(output_file_path, data);
+    string data = builder->memory.array;
+    return data;
 }

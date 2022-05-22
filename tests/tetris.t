@@ -30,7 +30,7 @@ def falling_piece struct
     type piece_type;
 }
 
-var piece_type_colors rgba32[] = // piece_type.count
+def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
 {
     { 1.0; 0.0; 0.0; 1.0 };
     { 0.0; 1.0; 0.0; 1.0 };
@@ -177,8 +177,7 @@ while true
     
     glBegin(GL_TRIANGLES);
     
-    var i = 0;
-    while i < quad_count
+    loop var i; quad_count
     {
         var q quad = quads[i];        
         var box box2 = q.box;
@@ -192,8 +191,6 @@ while true
         glVertex2f(box.min.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);
         glVertex2f(box.max.x * viewport_scale.x - 1, box.max.y * viewport_scale.y - 1);
         glVertex2f(box.min.x * viewport_scale.x - 1, box.max.y * viewport_scale.y - 1);
-        
-        i = i + 1;
     }
     
     glEnd();

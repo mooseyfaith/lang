@@ -1,14 +1,19 @@
 @echo off
 
+rem version 0 - 21.05.2022
+
 set name=
 if "%name%"=="" (
     rem find directory name and use it as exe name
     for %%I in (.) do set name=%%~nxI
 )
 
+rem set includes=/I %cd%/code /I %cd%/common
+set includes=/I %cd%/code /I D:/work/common
+
 set source=%cd%\code\main.cpp
-set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
-rem set options=/MT /O2 /EHsc /nologo /I %cd%/code
+set options=/MTd /Od /DEBUG /Zi /EHsc /nologo %includes%
+rem set options=/MT /O2 /EHsc /nologo %includes%
 
 if not exist build mkdir build
 pushd build
