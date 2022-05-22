@@ -114,6 +114,45 @@ string skip_until_set_or_all(string *iterator, string set, bool do_skip_set = fa
         return result;
 }
 
+bool try_skip_until(string *result, string *iterator, string pattern, bool do_skip_pattern = true)
+{
+    auto backup = *iterator;
+    result->base = iterator->base;
+    
+    while (iterator->count)
+    {
+        auto unskipped = *iterator;
+        if (try_skip(iterator, pattern))
+        {
+            if (!do_skip_pattern)
+                *iterator = unskipped;
+            
+            result->count = (usize) (unskipped.base - result->base);
+            return true;
+        }
+        
+        advance(iterator);
+    }
+    
+    *iterator = backup;
+    return false;
+}
+
+bool try_skip_until(string *iterator, string pattern, bool do_skip_pattern = true)
+{
+    string ignored;
+    return try_skip_until(&ignored, iterator, pattern, do_skip_pattern);
+}
+
+string skip_until_or_all(string *iterator, string pattern, bool do_skip_set = true)
+{
+    string result;
+    if (!try_skip_until(&result, iterator, pattern, do_skip_set))
+        return skip(iterator, iterator->count);
+    else
+        return result;
+}
+
 bool skip_white(string *iterator)
 {
     return try_skip_set(iterator, s(" \t\n\r"));

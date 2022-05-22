@@ -146,15 +146,15 @@ struct code_location
 
 union byte_count_info
 {
+    usize value;
+    
     struct
     {
-        usize bytes : 10;
-        usize kilo  : 10;
-        usize mega  : 10;
-        usize giga  : 34;
+        usize byte : 10;
+        usize kilo : 10;
+        usize mega : 10;
+        usize giga : 34;
     };
-    
-    usize value;
 };
 
 #define _get_call_location() code_location { __FILE__, __FUNCTION__, __LINE__ }
