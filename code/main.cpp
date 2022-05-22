@@ -12,8 +12,8 @@ s32 main(s32 argument_count, cstring arguments[])
         return -1;
     }
     
-    lang_parser parser;
-    begin(&parser);
+    lang_parser parser = {};
+    reset(&parser);
     
     for (u32 i = 1; i < argument_count; i++)
     {
@@ -90,7 +90,7 @@ s32 main(s32 argument_count, cstring arguments[])
         
         byte_count_info info;
         info.value = table->byte_count;
-        printf("\nMemory: %llugb %llumb %llukb %llub (in %llu different allocations)\n", info.giga, info.mega, info.kilo, info.bytes, table->count);
+        printf("\nMemory: %llugb %llumb %llukb %llub (in %llu different allocations)\n", info.giga, info.mega, info.kilo, info.byte, table->count);
         for (usize i = 0; i < table->count; i++)
         {
             auto location = table->locations[i];
