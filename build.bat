@@ -9,7 +9,6 @@ if "%name%"=="" (
 )
 
 set includes=/I %cd%/code /I %cd%/common
-rem set includes=/I %cd%/code /I D:/work/common
 
 set source=%cd%\code\main.cpp
 set options=/MTd /Od /DEBUG /Zi /EHsc /nologo %includes%

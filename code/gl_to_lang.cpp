@@ -455,7 +455,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
     
     print_scope_close(&builder);
     
-    platform_write_entire_file("modules/gl_win32.t", buffer_to_array(builder.memory));
+    platform_write_entire_file("modules/gl_win32.t", builder.memory.array);
 
     return 0;
 }

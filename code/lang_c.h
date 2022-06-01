@@ -1286,7 +1286,7 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
     }
 }
 
-string compile(lang_parser *parser, lang_c_compile_settings settings = {})
+lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {})
 {
     lang_c_buffer buffer = {};
     buffer.settings = settings;
@@ -1849,6 +1849,11 @@ string compile(lang_parser *parser, lang_c_compile_settings settings = {})
     
     print_scope_close(builder);
     
-    string data = builder->memory.array;
-    return data;
+    return buffer;
+}
+
+void clear(lang_c_buffer *buffer)
+{
+    free_buffer(&buffer->builder.memory);
+    free_buffer(&buffer->unique_types);
 }

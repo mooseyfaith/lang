@@ -734,11 +734,6 @@ ast_node * begin_node(lang_parser *parser, ast_node *node, ast_node_type node_ty
     assert(parser->node_location_buffer.count == parser->next_node_index);
     resize_buffer(&parser->node_location_buffer, parser->node_location_buffer.count + 1);
     
-    //auto location = &parser->node_location_buffer.base[parser->node_location_buffer.count - 1];
-    //location->text.base = parser->node_source_base;
-    //location->text.count = parser->iterator.base - location->text.base;
-    //parser->node_source_base = parser->iterator.base;
-    
     assert(parser->node_comment_buffer.count == parser->next_node_index);
     resize_buffer(&parser->node_comment_buffer, parser->node_comment_buffer.count + 1);
     auto comment = &parser->node_comment_buffer.base[parser->node_comment_buffer.count - 1];
@@ -752,20 +747,31 @@ ast_node * begin_node(lang_parser *parser, ast_node *node, ast_node_type node_ty
     parser->current_parent = node;
     
     auto location = &parser->node_location_buffer.base[node->index];
-    location->text = parser->iterator;
+    location->text.base = parser->node_source_base;
+    location->text.count = 0;
     
     return node;
 }
 
 ast_node * end_node(lang_parser *parser, ast_node *node)
 {
-    assert(node == parser->current_parent, "call end_node on parent");
+    assert(parser->error || node == parser->current_parent, "call end_node on parent");
     
     parser->current_parent = parser->current_parent->parent;
     
     auto location = &parser->node_location_buffer.base[node->index];
-    location->text.base = parser->node_source_base;
     location->text.count = parser->iterator.base - location->text.base;
+    
+    // remove trailing white space
+    while (location->text.count)
+    {
+        u8 tail = location->text.base[location->text.count - 1];
+        if (!contains(s(" \t\n\r"), tail))
+            break;
+        
+        --location->text.count;
+    }
+    
     parser->node_source_base = parser->iterator.base;
     
     return node;
@@ -844,7 +850,7 @@ void consume_white_or_comment(lang_parser *parser)
     {
         if (try_consume(parser, s("//")))
         {
-            auto comment = skip_until_set_or_all(&parser->iterator, s("\n\r"), true);
+            auto comment = skip_until_or_all(&parser->iterator, s("\n"), true);
             skip_white(&parser->iterator);
             
             if (parser->pending_comment.count)
@@ -3026,20 +3032,20 @@ struct ast_list_entry
 
 bool parse(lang_parser *parser, string source, string source_name)
 {
-    new_local_node(file);
-    file->path = source_name;
-    file->text = source;
-
     parser->source_name = source_name;
     parser->source = source;
     parser->iterator = parser->source;
-    parser->current_file = file;
-    
-    append_list(&parser->file_list, file);
     
     consume_white_or_comment(parser);
     parser->node_source_base = parser->iterator.base;
-    file->first_statement = parse_statements(parser);
+    
+    new_local_node(file);
+    file->path = source_name;
+    file->text = source;
+    parser->current_file = file;
+    append_list(&parser->file_list, file);
+    
+    file->first_statement = lang_require_call_return_value(parse_statements(parser), false);
     
     lang_require_return_value(parser->iterator.count == 0, false, parser->iterator, "expected statements, unexpected '%c'", parser->iterator.base[0]);
     
@@ -3152,33 +3158,34 @@ void reset(lang_parser *parser)
     }
 #endif
     
-    string source = s(R"CODE(
-module lang;
+    
+// def null = 0 cast(u8 ref);\r
 
-def usize type u64;
-def ssize type s64;
+// def false = 0 cast(b8);\r
+// def true  = 1 cast(b8);\r
 
-def b8 type u8;
-def b32 type u32;
+//def string type u8[];\r
 
-// def null = 0 cast(u8 ref);
+// def cstring type u8 ref; // since C++ does not like unsigned char or signned char instead of plain char\r
 
-// def false = 0 cast(b8);
-// def true  = 1 cast(b8);
-
-//def string type u8[];
-
-// def cstring type u8 ref; // since C++ does not like unsigned char or signned char instead of plain char
-
-def code_location struct
-{
-    module   cstring;
-    file     cstring;
-    function cstring;
-    line     u32;
-    column   u32;
-}
-)CODE");
+    string source = s(
+"module lang;" "\r\n"
+"\r\n"
+"def usize type u64;" "\r\n"
+"def ssize type s64;" "\r\n"
+"\r\n"
+"def b8 type u8;" "\r\n"
+"def b32 type u32;" "\r\n"
+"\r\n"
+"def code_location struct" "\r\n"
+"{" "\r\n"
+"    module   cstring;" "\r\n"
+"    file     cstring;" "\r\n"
+"    function cstring;" "\r\n"
+"    line     u32;" "\r\n"
+"    column   u32;" "\r\n"
+"}" "\r\n"
+);
 
     lang_require_return_value(parse(parser, source, s("lang_internal")), , source, "internal compiler error");
     

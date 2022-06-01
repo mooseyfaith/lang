@@ -80,8 +80,8 @@ s32 main(s32 argument_count, cstring arguments[])
     auto output = compile(&parser, settings);
     
     cstring output_file_path = "lang_output.cpp";
-    platform_write_entire_file(output_file_path, output);
-    platform_free_bytes(output.base);
+    platform_write_entire_file(output_file_path, output.builder.memory.array);
+    //platform_free_bytes(output.base);
     
 #if defined _DEBUG
 

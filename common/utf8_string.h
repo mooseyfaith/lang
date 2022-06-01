@@ -1,8 +1,6 @@
-// version 0 - 21.05.2022
 
 #pragma once
 
-// version 0
 #include "basic.h"
 
 bool try_skip(string *iterator, string pattern)

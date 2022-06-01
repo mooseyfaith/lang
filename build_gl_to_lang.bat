@@ -2,8 +2,8 @@
 
 set name=gl_to_lang
 
-set source=%cd%\code\gl_to_lang.cpp
-set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
+set source=%cd%\code\gl_to_lang.cpp 
+set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code /I %cd%\common
 
 if not exist build mkdir build
 pushd build

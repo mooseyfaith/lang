@@ -1,4 +1,3 @@
-// version 0 - 22.05.2022
 
 #pragma once
 
@@ -237,6 +236,15 @@ auto mchain(_defer_, __LINE__) = ++[&]()
 
 #define mswap(a, b) { auto temp = a; a = b; b = temp; }
 
+#define mlist_enum(entry, prefix) \
+    prefix ## entry,
+
+#define mlist_name(entry, ...) \
+    s(# entry),
+    
+#define mlist_byte_count(entry, prefix) \
+    sizeof(prefix ## entry),
+
 #define using(struct, field)      auto field = &(struct)->field
 #define local_copy(struct, field) auto field = (struct).field
 
@@ -249,7 +257,9 @@ auto mchain(_defer_, __LINE__) = ++[&]()
 #define scope_push(var, value) \
     scope_save(var); \
     var = value;
-    
+
+#define value_to_u8_array(value) u8_array{ sizeof(value), (u8 *) &value }
+
 #define values_are_equal(a_value, b_value) bytes_are_equal(sizeof(a_value), (u8 *) &(a_value), (u8 *) &(b_value))
 
 static bool bytes_are_equal(usize byte_count, u8 *a, u8 *b)
