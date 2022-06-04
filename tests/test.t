@@ -18,10 +18,12 @@ platform_window(platform ref, window ref, "hello");
 
 while true
 {
+    assert(window.handle);
     if not platform_handle_messages(platform ref)
     {
         break;
     }
+    
     
 }
 

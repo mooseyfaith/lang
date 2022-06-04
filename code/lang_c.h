@@ -415,7 +415,7 @@ print_expression_declaration
         
         default:
         {
-            if (is_prefix_operator(node))
+            if (is_unary_operator(node))
             {
             }
             else if (is_binary_operator(node))
@@ -476,7 +476,7 @@ print_statements_declaration
         //print_buffer(buffer, "#line %i",
         
         {
-            auto comment = buffer->parser->node_comment_buffer.base[node->index];
+            auto comment = buffer->parser->node_comments.base[node->index];
             auto lines = comment;
             
             while (lines.count)
@@ -723,10 +723,12 @@ string lang_c_base_type_names[] =
     s("unsigned short"),
     s("unsigned int"),
     s("unsigned long long"),
+    s("unsigned long long"),
     
     s("signed char"),
     s("signed short"),
     s("signed int"),
+    s("signed long long"),
     s("signed long long"),
     
     s("float"),
@@ -1011,9 +1013,9 @@ ast_compound_type_field * add_unique_declarations(lang_c_buffer *buffer, ast_com
         auto variable = field->variable;
         auto field_type = get_unique_type(buffer, variable->type);
     
-        auto unique_field = new_leaf_node(compound_type_field);
+        auto unique_field = new_leaf_node(compound_type_field, parser->node_locations.base[field->node.index].text);
     
-        auto unique_variable = new_leaf_node(variable);
+        auto unique_variable = new_leaf_node(variable, parser->node_locations.base[variable->node.index].text);
         unique_variable->name = variable->name;
         unique_variable->type = field_type;
         
@@ -1084,7 +1086,7 @@ get_unique_type_declaration
             
             if (!found)
             {
-                auto unique_array_type = new_leaf_node(array_type);
+                auto unique_array_type = new_leaf_node(array_type, parser->node_locations.base[array_type->node.index].text);
                 unique_array_type->item_type = item_type;
             
                 resize_buffer(unique_types, unique_types->count + 1);
@@ -1123,7 +1125,7 @@ get_unique_type_declaration
             if (found)
                 break;
             
-            auto unique_compound_type = new_leaf_node(compound_type);
+            auto unique_compound_type = new_leaf_node(compound_type, parser->node_locations.base[compound_type->node.index].text);
             
             unique_compound_type->first_field = add_unique_declarations(buffer, compound_type->first_field);
             
@@ -1163,7 +1165,7 @@ get_unique_type_declaration
             if (found)
                 break;
             
-            auto unique_function_type = new_leaf_node(function_type);
+            auto unique_function_type = new_leaf_node(function_type, parser->node_locations.base[function_type->node.index].text);
             
             unique_function_type->input  = unique_input;
             unique_function_type->output = unique_output;

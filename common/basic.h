@@ -212,7 +212,7 @@ platform_fatal_error_location_declaration;
 }
 
 #define platform_require_location(condition, location, ...) \
-        platform_conditional_fatal_error_location(condition, location, "Error", "Requirement:\n    " # condition "\nfailed.\n\nGetLastError(): 0x%8x" __VA_ARGS__, GetLastError())
+        platform_conditional_fatal_error_location(condition, location, "Error", "Requirement:\n    " # condition "\nfailed.\n\nGetLastError(): 0x%08x" __VA_ARGS__, GetLastError())
 
 #define platform_require(condition, ...) platform_require_location(condition, get_call_location(), __VA_ARGS__)
 
