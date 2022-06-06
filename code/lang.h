@@ -3191,6 +3191,11 @@ struct ast_list_entry
 
 bool parse(lang_parser *parser, string source, string source_name)
 {
+    for (auto it = parser->file_list.first; it; it = (ast_file *) it->node.next)
+    {
+        assert(it->path != source_name);
+    }
+
     parser->source_name = source_name;
     parser->source = source;
     parser->iterator = parser->source;
