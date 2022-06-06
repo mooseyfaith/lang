@@ -9,12 +9,11 @@ a simple c like language experiment
 # state
 
 Work in Progress.<br/>
-The language has a very selective feature implementation to make tests\tetris.t work.<br/>
+The language has a very selective feature set implementation to make tests\tetris.t work.<br/>
 Even simple math expressions and most operators are NOT supported.<br/>
 
-Not Stable, there is no release or stable branch this early in development.
-There are successful commits every now and then, but there is still lots of refactoring going on and git is only used minimally for backup purposes.
-Commits with comments marked with WIP are typically not working.
+Checkout tetris branch for the latest stable version to build tetris.t.
+Checkout main branch for latest version, which might be unstable or work in progress.
 
 gl_to_lang is a sub project to generate gl bindings for this language from gl header files.
 
