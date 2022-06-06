@@ -219,40 +219,20 @@ print_expression_declaration
             print(builder, "}");
         } break;
         
-        /*
-        case ast_node_type_node_reference:
-        {
-            local_node_type(node_reference, node);
-            
-            switch (node_reference->reference->node_type)
-            {
-                cases_complete;
-                
-                case ast_node_type_variable:
-                {
-                    local_node_type(variable, node_reference->reference);
-                    print(builder, "%.*s", fs(variable->name));
-                } break;
-                
-                case ast_node_type_function:
-                {
-                    local_node_type(function, node_reference->reference);
-                    print(builder, "%.*s", fs(function->name));
-                } break;
-            }
-        } break;
-        */
-        
         case ast_node_type_name_reference:
         {
             local_node_type(name_reference, node);
+            
+            if (!name_reference->reference)
+                print(builder, "/* not resolved */ ");
+                
             print(builder, "%.*s", fs(name_reference->name));
         } break;
                     
         case ast_node_type_function_call:
         {
             local_node_type(function_call, node);
-        
+
             print_expression(buffer, function_call->expression);
             print(builder, "(");
             
@@ -1189,6 +1169,12 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
 {
     switch (node->node_type)
     {
+        default:
+        {
+            // so we don't add anything to parent
+            return;
+        } break;
+        
         case ast_node_type_type_alias:
         {
             local_node_type(type_alias, node);
@@ -1206,7 +1192,7 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
         case ast_node_type_array_literal:
         {
             local_node_type(array_literal, node);
-            insert_type_child(buffer, dependencies, array_literal->type, node);
+            add_dependencies(buffer, dependencies, array_literal->type.name_type.node, node);
             
             for (auto it = array_literal->first_expression; it; it = it->next)
             {
@@ -1276,6 +1262,8 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
             
             if (parent)
                 insert_child(dependencies, name_reference->reference, parent);
+            
+            parent = null;
         } break;
     
         case ast_node_type_constant:
@@ -1286,6 +1274,10 @@ void add_dependencies(lang_c_buffer *buffer, node_dependency_buffer *dependencie
             add_dependencies(buffer, dependencies, constant->expression, node);
         } break;
     }
+    
+    // node is not a type
+    if (parent && node->node_type > ast_node_type_type_alias)
+        insert_child(dependencies, node, parent);
 }
 
 lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {})
@@ -1344,16 +1336,12 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print_line(builder, "typedef float  %.*sf32;", fs(buffer.settings.prefix));
         print_line(builder, "typedef double %.*sf64;", fs(buffer.settings.prefix));
         
+        // since char and unsgined char and signed char are not the same according to C ...
+        print_newline(builder);
+        print_line(builder, "typedef char *%.*scstring;", fs(buffer.settings.prefix));
+        
         print_newline(builder);
         print_line(builder, "#define %.*snull 0", fs(buffer.settings.prefix));
-        
-        // since unsigned char, signed char and char are different for c++, IDIOTS!
-        print_newline(builder);
-        print_line(builder, "typedef char * %.*scstring;", fs(buffer.settings.prefix));
-        
-        // HACK: compiler should resolve this call internally an generate proper expressions
-        print_newline(builder);
-        print_line(builder, "#define get_call_location() code_location{ \"\", __FILE__, __FUNCTION__, __LINE__, 0 }");
     }
     
     auto root = get_base_node(parser->file_list.first);
@@ -1425,7 +1413,23 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         ast_node *node;
         while (next(&node, &queue))
         {
-            add_dependencies(&buffer, &dependencies, node);
+            bool do_add = true;
+            if (is_node_type(node, constant))
+            {
+                local_node_type(constant, node);
+                
+                for (u32 i = 0; i < lang_base_constant_count; i++)
+                {
+                    if (constant == parser->base_constants[i])
+                    {
+                        do_add = false;
+                        break;
+                    }
+                }
+            }
+        
+            if (do_add)
+                add_dependencies(&buffer, &dependencies, node);
         }
         
         local_buffer(stack, u32_buffer);
@@ -1549,12 +1553,44 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
             //printf("unique type [0x%p] %x %.*s '%.*s'\n", node, node->index, fnode_type_name(node), fs(get_name(node)));
         }
         
+        // printf("ordered dependencies\n");
+        
         for (u32 i = 0; i < ordered_dependencies.count; i++)
         {
             auto node = ordered_dependencies.base[i]; //ordered_dependencies.count - 1 - i];
 
-            //printf("dependency [0x%p] '%.*s' %.*s\n", node, fs(get_name(node)), fs(ast_node_type_names[node->node_type]));
+        #if 0
+            printf("dependency [0x%p] '%.*s' %.*s", node, fnode_name(node), fnode_type_name(node));
+            if (node->parent)
+                printf(" ,parent [0x%p] '%.*s' %.*s\n", node->parent, fnode_name(node->parent), fnode_type_name(node->parent));
+        #endif
+            
+            // filter some declarations that would clash with C
+            {
+                bool do_skip = false;
                 
+                string skip_list[] =
+                {
+                    lang_base_type_names[lang_base_type_cstring],
+                    lang_base_constant_names[lang_base_constant_null],
+                    lang_base_constant_names[lang_base_constant_false],
+                    lang_base_constant_names[lang_base_constant_true],
+                };
+                
+                auto node_name = get_name(node);
+                for (u32 i = 0; i < carray_count(skip_list); i++)
+                {
+                    if (node_name == skip_list[i])
+                    {
+                        do_skip = true;
+                        break;
+                    }
+                }
+                
+                if (do_skip)
+                    continue;
+            }
+            
             switch (node->node_type)
             {
                 cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));

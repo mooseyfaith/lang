@@ -2,6 +2,7 @@
 #include <stdio.h>
 
 #include "hash_string.h"
+#define LANG_ASSERT_ON_ERROR
 #include "lang_c.h"
 
 s32 main(s32 argument_count, cstring arguments[])
@@ -85,6 +86,7 @@ s32 main(s32 argument_count, cstring arguments[])
     
 #if defined _DEBUG
 
+    if (0)
     {
         auto table = &global_debug_platform_allocation_table;
         

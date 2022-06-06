@@ -99,7 +99,7 @@ def platform_window func(platform platform_api ref; window platform_api_window r
     platform_require(window.handle is_not INVALID_HANDLE_VALUE);
 
     window.device_context = GetDC(window.handle);
-    platform_require(window.device_context);
+    platform_require(window.device_context is_not null);
     ShowWindow(window.handle, SW_SHOW);
 }
 
@@ -179,7 +179,7 @@ def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param
     return DefWindowProc(window, msg, w_param, l_param);
 }
 
-def platform_require func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def platform_require func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
 {
     if not condition
     {
@@ -191,7 +191,7 @@ def platform_require func(condition bool; location code_location = get_call_loca
     }
 }
 
-def require func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def require func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
 {
     if not condition
     {
@@ -203,11 +203,11 @@ def require func(condition bool; location code_location = get_call_location(); c
 }
 
 
-def assert func(condition bool; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def assert func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
 {
     if not condition
     {
-        printf("\n%s,%s(%i,%i): Assertion Failed\n\n", location.file, location.function, location.line, location.column);
+        printf("\n[%s] %s,%s(%i, %i): Assertion Failed\n\n", location.module, location.file, location.function, location.line, location.column);
         printf("\tCondition '%s' is false.\n\n", condition_text);
         __debugbreak();
         exit(0);

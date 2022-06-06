@@ -27,12 +27,12 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     platform_require(window_handle is_not INVALID_HANDLE_VALUE);
 
     var device_context HDC = GetDC(window_handle);
-    platform_require(device_context);
+    platform_require(device_context is_not null);
     
     gl_win32_window_init_1(device_context);
     
     var gl_context HGLRC = wglCreateContext(device_context);
-    platform_require(gl_context);
+    platform_require(gl_context is_not null);
     
     platform_require(wglMakeCurrent(device_context, gl_context));
     
@@ -47,7 +47,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
         var gl_3_3_device_context HDC = GetDC(gl_3_3_window_handle);
-        platform_require(gl_3_3_device_context);
+        platform_require(gl_3_3_device_context is_not null);
         
         gl_win32_window_init_3_3(gl_3_3_device_context);
         
@@ -157,7 +157,7 @@ def gl_win32_window_init_1 func(device_context HDC)
     pixel_format_descriptor.iLayerType   = PFD_MAIN_PLANE;
     
     var pixel_format = ChoosePixelFormat(device_context, pixel_format_descriptor ref);
-    platform_require(pixel_format);
+    platform_require(pixel_format is_not 0);
     
     platform_require(SetPixelFormat(device_context, pixel_format, pixel_format_descriptor ref));
 }

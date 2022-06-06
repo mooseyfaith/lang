@@ -286,12 +286,6 @@ bool operator!=(string a, string b)
     return !(a == b);
 }
 
-u32 get_bit_count(u64 value)
-{
-    u32 result = (u32) __popcnt64(value);
-    return result;
-}
-
 // returns 0 on 0
 u32 get_highest_bit_index(u64 value)
 {
@@ -517,6 +511,7 @@ struct memory_arena
 
 #define allocate_array(memory, type, count)    { (usize) (count), allocate_items(memory, type, count) }
 #define reallocate_array(memory, array, count) reallocate_base_array(memory, (base_array *) (array), count, sizeof(*(array)->base), alignof(decltype(*(array)->base)))
+#define free_array(memory, array) free_bytes(memory, (u8 *) (array)->base)
 
 u8 * allocate_bytes(memory_arena *memory, usize byte_count, u32 byte_alignment)
 {
@@ -720,4 +715,29 @@ void append_base_list(base_single_list_entry ***tail_next, base_single_list_entr
     assert(!entry->next);
     **tail_next = entry;
     *tail_next = &entry->next;
+}
+
+union vec2s
+{
+    struct
+    {
+        s32 x, y;
+    };
+    
+    s32 values[2];
+};
+
+union box2s
+{
+    struct
+    {
+        vec2s min, max;
+    };
+    
+    vec2s extends[2];
+};
+
+box2s box2_size(s32 x, s32 y, s32 width, s32 height)
+{
+    return { x, y, x + width, y + height };
 }

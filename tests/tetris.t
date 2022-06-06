@@ -30,7 +30,8 @@ def falling_piece struct
     type piece_type;
 }
 
-def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
+//def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
+def piece_type_colors = type(rgba32[]) // piece_type.count
 {
     { 1.0; 0.0; 0.0; 1.0 };
     { 0.0; 1.0; 0.0; 1.0 };

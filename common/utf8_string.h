@@ -226,7 +226,7 @@ string print_zero_terminated(string *output, memory_arena *memory, cstring forma
     return text;
 }
 
-string print(string *output, memory_arena *memory, cstring format, ...)
+string print(memory_arena *memory, string *output, cstring format, ...)
 {
     va_list va_arguments;
     va_start(va_arguments, format);
