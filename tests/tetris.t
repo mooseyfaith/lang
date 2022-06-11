@@ -1,11 +1,12 @@
 import platform;
+import platform_win32;
 import gl;
 
 var platform platform_api;
 platform_init(platform ref);
 
-var window platform_api_window;
-platform_window(platform ref, window ref, "tetris");
+var window platform_window;
+platform_window_init(platform ref, window ref, "tetris");
 
 var gl gl_api;
 gl_init(gl ref, platform ref, true);

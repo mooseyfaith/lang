@@ -1,5 +1,7 @@
 module platform;
 
+// import platform_win32;
+
 def platform_api struct
 {
     keys platform_button[256];
@@ -12,7 +14,7 @@ def platform_api struct
     ticks_per_second  u64;
 }
 
-def platform_api_window struct
+def platform_window struct
 {
     handle         HWND;
     device_context HDC;
@@ -72,17 +74,17 @@ def platform_button_update func(button platform_button ref; is_active b8)
 
 def platform_init func(platform platform_api ref)
 {
-    platform.win32_instance = GetModuleHandle(NULL) cast(HINSTANCE);
+    platform.win32_instance = GetModuleHandleA(null) cast(HINSTANCE);
     platform.window_class_name = "My Window Class";
     
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
     window_class.lpfnWndProc   = platform_window_callback;
-    window_class.hbrBackground = COLOR_BACKGROUND cast(HBRUSH);
+    window_class.hbrBackground = COLOR_BACKGROUND cast(ssize) cast(HBRUSH);
     window_class.lpszClassName = platform.window_class_name;
-    window_class.style         = CS_OWNDC;
-    window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
-    platform_require(RegisterClass(window_class ref));
+    //window_class.style         = CS_OWNDC;
+    window_class.hCursor       = LoadCursorA(null, IDC_ARROW);
+    platform_require(RegisterClassA(window_class ref));
     
     var ticks_per_second LARGE_INTEGER;
     platform_require(QueryPerformanceFrequency(ticks_per_second ref));
@@ -93,10 +95,10 @@ def platform_init func(platform platform_api ref)
     platform.time_ticks = time_ticks.QuadPart;
 }
 
-def platform_window func(platform platform_api ref; window platform_api_window ref; title cstring)
+def platform_window_init func(platform platform_api ref; window platform_window ref; title cstring)
 {
-    window.handle = CreateWindow(platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, 0, 0, platform.win32_instance, 0);
-    platform_require(window.handle is_not INVALID_HANDLE_VALUE);
+    window.handle = CreateWindowA(platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, null, null, platform.win32_instance, 0);
+    platform_require(window.handle is_not null);
 
     window.device_context = GetDC(window.handle);
     platform_require(window.device_context is_not null);
@@ -109,7 +111,7 @@ def vec2s struct
     y s32;
 }
 
-def platform_window_frame func(platform platform_api ref; window platform_api_window ref) (result vec2s)
+def platform_window_frame func(platform platform_api ref; window platform_window ref) (result vec2s)
 {
     var rect RECT;
     platform_require(GetClientRect(window.handle, rect ref));
@@ -131,7 +133,7 @@ def platform_handle_messages func(platform platform_api ref) (result b8)
     }
 
     var msg MSG;
-    while PeekMessage(msg ref, null, 0, 0, PM_REMOVE)
+    while PeekMessageA(msg ref, null, 0, 0, PM_REMOVE)
     {
         switch msg.message
         case WM_QUIT
@@ -148,7 +150,7 @@ def platform_handle_messages func(platform platform_api ref) (result b8)
         }
     
         TranslateMessage(msg ref);
-        DispatchMessage(msg ref);
+        DispatchMessageA(msg ref);
     }
     
     platform_update_time(platform);
@@ -167,7 +169,8 @@ def platform_update_time func(platform platform_api ref)
     platform.time_ticks = time_ticks.QuadPart;
 }
 
-def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param LPARAM) (result LRESULT)
+//def platform_window_callback func WNDPROC
+def platform_window_callback func(window HWND; msg u32; w_param WPARAM; l_param LPARAM) (result LRESULT)
 {
     switch msg
     case WM_DESTROY
@@ -176,7 +179,7 @@ def platform_window_callback func(window HWND; msg UINT; w_param WPARAM; l_param
         return 0;
     }
     
-    return DefWindowProc(window, msg, w_param, l_param);
+    return DefWindowProcA(window, msg, w_param, l_param);
 }
 
 def platform_require func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
@@ -187,7 +190,7 @@ def platform_require func(condition b8; location code_location = get_call_locati
         printf("\tCondition '%s' is false.\n\n", condition_text);
         printf("\tGetLastError() = 0x%x\n", GetLastError());
         __debugbreak();
-        exit(0);
+        ExitProcess(0);
     }
 }
 
@@ -198,7 +201,7 @@ def require func(condition b8; location code_location = get_call_location(); con
         printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
         printf("\tCondition '%s' is false.\n\n", condition_text);
         __debugbreak();
-        exit(0);
+        ExitProcess(0);
     }
 }
 
@@ -210,6 +213,6 @@ def assert func(condition b8; location code_location = get_call_location(); cond
         printf("\n[%s] %s,%s(%i, %i): Assertion Failed\n\n", location.module, location.file, location.function, location.line, location.column);
         printf("\tCondition '%s' is false.\n\n", condition_text);
         __debugbreak();
-        exit(0);
+        ExitProcess(0);
     }
 }

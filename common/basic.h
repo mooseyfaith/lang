@@ -203,8 +203,8 @@ platform_fatal_error_location_declaration;
 
 #define unreachable_codepath  assert(false, "unreachable codepath")
 
-#define cases_complete_message(format, ...) default: assert(false, "unhandled case: " format, __VA_ARGS__);
-#define cases_complete                      default: assert(false, "unhandled case");
+#define cases_complete_message(format, ...) default: { assert(false, "unhandled case: " format, __VA_ARGS__); } break;
+#define cases_complete                      default: { assert(false, "unhandled case"); } break;
 
 #define require_result(expression, result, format) { \
     auto value = (expression); \

@@ -7,7 +7,7 @@ set source=%cd%\lang_output.cpp
 set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
 rem set options=/MT /O2 /EHsc /nologo /I %cd%/code
 
-lang tests\tetris.t modules
+lang tests\tetris.t modules\platform.t modules\gl.t modules\gl_win32.t
 
 if not exist build mkdir build
 pushd build

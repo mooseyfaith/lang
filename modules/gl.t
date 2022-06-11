@@ -1,6 +1,8 @@
 module gl;
 
 import platform;
+import platform_win32;
+import gl_win32;
 
 def gl_api struct
 {
@@ -24,7 +26,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     platform_require(RegisterClassA(window_class ref));
 
     var window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
-    platform_require(window_handle is_not INVALID_HANDLE_VALUE);
+    platform_require(window_handle is_not null);
 
     var device_context HDC = GetDC(window_handle);
     platform_require(device_context is_not null);
@@ -51,44 +53,18 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         
         gl_win32_window_init_3_3(gl_3_3_device_context);
         
-        // HACK;
-        var gl_3_3_context HGLRC;
-        if backwards_compatible
-        {
-            var context_attributes s32[] = {
-                WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
-                WGL_CONTEXT_MINOR_VERSION_ARB; 3;
-                WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
-                WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB;
-                0
-            };
-            
-            gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes.base);
-        }
-        else
-        {
-            // HACK: same name does not work, somehow scopes are not properly accounted for
-            var context_attributes2 s32[] = {
+        var context_attributes s32[] = {
                 WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
                 WGL_CONTEXT_MINOR_VERSION_ARB; 3;
                 WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
                 WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
                 0
             };
-            
-            gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes2.base);
-        }
         
-        // this does not work yet
-        //var context_attributes s32[] = {
-                //WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
-                //WGL_CONTEXT_MINOR_VERSION_ARB; 3;
-                //WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
-                //WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
-                //0
-            //};
-        //if backwards_compatible { context_attributes[9] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
-        //var gl_3_3_context HGLRC = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes.base);
+        if backwards_compatible
+            { context_attributes[7] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
+            
+        var gl_3_3_context HGLRC = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes[0] ref);
         
         if gl_3_3_context
         {
@@ -125,7 +101,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     }
 }
 
-def gl_window_init func(platform platform_api ref; gl gl_api ref; window platform_api_window ref)
+def gl_window_init func(platform platform_api ref; gl gl_api ref; window platform_window ref)
 {
     if gl.is_version_3_3
     {
@@ -156,7 +132,7 @@ def gl_win32_window_init_1 func(device_context HDC)
     pixel_format_descriptor.cStencilBits = 8;
     pixel_format_descriptor.iLayerType   = PFD_MAIN_PLANE;
     
-    var pixel_format = ChoosePixelFormat(device_context, pixel_format_descriptor ref);
+    var pixel_format s32 = ChoosePixelFormat(device_context, pixel_format_descriptor ref);
     platform_require(pixel_format is_not 0);
     
     platform_require(SetPixelFormat(device_context, pixel_format, pixel_format_descriptor ref));
@@ -183,6 +159,6 @@ def gl_win32_window_init_3_3 func(device_context HDC)
     
     var pixel_format s32;
     var pixel_format_count u32;
-    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes.base, null, 1, pixel_format ref, pixel_format_count ref));
+    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes[0] ref, null, 1, pixel_format ref, pixel_format_count ref));
     platform_require(SetPixelFormat(device_context, pixel_format, null));
 }
