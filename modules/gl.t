@@ -18,22 +18,22 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
 {
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
-    window_class.lpfnWndProc   = DefWindowProc;
-    window_class.hbrBackground = COLOR_BACKGROUND cast(HBRUSH);
+    window_class.lpfnWndProc   = DefWindowProcA;
+    window_class.hbrBackground = COLOR_BACKGROUND cast(usize) cast(HBRUSH);
     window_class.lpszClassName = "gl dummy window class";
     window_class.style         = CS_OWNDC;
-    window_class.hCursor       = LoadCursor(NULL, IDC_ARROW);
+    window_class.hCursor       = LoadCursorA(NULL, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
 
-    var window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
     platform_require(window_handle is_not null);
 
-    var device_context HDC = GetDC(window_handle);
+    var device_context = GetDC(window_handle);
     platform_require(device_context is_not null);
     
     gl_win32_window_init_1(device_context);
     
-    var gl_context HGLRC = wglCreateContext(device_context);
+    var gl_context = wglCreateContext(device_context);
     platform_require(gl_context is_not null);
     
     platform_require(wglMakeCurrent(device_context, gl_context));
@@ -45,10 +45,10 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_3_3_window_handle HWND = CreateWindowA(window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
         platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
-        var gl_3_3_device_context HDC = GetDC(gl_3_3_window_handle);
+        var gl_3_3_device_context = GetDC(gl_3_3_window_handle);
         platform_require(gl_3_3_device_context is_not null);
         
         gl_win32_window_init_3_3(gl_3_3_device_context);
@@ -64,7 +64,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         if backwards_compatible
             { context_attributes[7] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
             
-        var gl_3_3_context HGLRC = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes[0] ref);
+        var gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes[0] ref);
         
         if gl_3_3_context
         {
@@ -132,9 +132,8 @@ def gl_win32_window_init_1 func(device_context HDC)
     pixel_format_descriptor.cStencilBits = 8;
     pixel_format_descriptor.iLayerType   = PFD_MAIN_PLANE;
     
-    var pixel_format s32 = ChoosePixelFormat(device_context, pixel_format_descriptor ref);
+    var pixel_format = ChoosePixelFormat(device_context, pixel_format_descriptor ref);
     platform_require(pixel_format is_not 0);
-    
     platform_require(SetPixelFormat(device_context, pixel_format, pixel_format_descriptor ref));
 }
 

@@ -1,6 +1,6 @@
 module platform;
 
-// import platform_win32;
+import platform_win32;
 
 def platform_api struct
 {
@@ -72,6 +72,14 @@ def platform_button_update func(button platform_button ref; is_active b8)
 //    half_transition_count_over_flow u1;
 //}
 
+def print_value func(value u64; text cstring = get_call_argument_text(value); in_hex b8 = false)
+{
+    if in_hex 
+        { printf("%s = 0x%llX\n", text, value); }
+    else
+        { printf("%s = %llu\n", text, value); }
+}
+
 def platform_init func(platform platform_api ref)
 {
     platform.win32_instance = GetModuleHandleA(null) cast(HINSTANCE);
@@ -82,7 +90,7 @@ def platform_init func(platform platform_api ref)
     window_class.lpfnWndProc   = platform_window_callback;
     window_class.hbrBackground = COLOR_BACKGROUND cast(ssize) cast(HBRUSH);
     window_class.lpszClassName = platform.window_class_name;
-    //window_class.style         = CS_OWNDC;
+    window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursorA(null, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
     
@@ -95,9 +103,9 @@ def platform_init func(platform platform_api ref)
     platform.time_ticks = time_ticks.QuadPart;
 }
 
-def platform_window_init func(platform platform_api ref; window platform_window ref; title cstring)
+def platform_window_init func(platform platform_api ref; window platform_window ref; title cstring; width s32; height s32)
 {
-    window.handle = CreateWindowA(platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 640, 480, null, null, platform.win32_instance, 0);
+    window.handle = CreateWindowExA(0, platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, 0);
     platform_require(window.handle is_not null);
 
     window.device_context = GetDC(window.handle);

@@ -73,6 +73,17 @@ parsed_type skip_type(string *iterator)
         { s("unsigned long long"), s("u64") },
         //{ s("size_t"),             s("usize") },
         
+        { s("LPVOID"),             s("u8 ref") },
+        { s("USHORT"),             s("u16") },
+        { s("SHORT"),              s("s16") },
+        { s("UINT"),               s("u32") },
+        { s("INT"),                s("s32") },
+        { s("BOOL"),               s("s32") },
+        { s("DWORD"),              s("u32") },
+        { s("FLOAT"),              s("f32") },
+        { s("INT32"),              s("s32") },
+        { s("INT64"),              s("s64") },
+        
         { s("signed char"),      s("s8") },
         { s("signed short"),     s("s16") },
         { s("signed int"),       s("s32") },
@@ -220,11 +231,12 @@ s32 main(s32 argument_count, cstring arguments[])
     string_buffer dll_functions = {};
     
     string_builder builder = {};
-    
-    print_line(&builder, "module gl;");
-    
     // some GL types
     print_raw(&builder, R"CODE(
+module gl;
+    
+import platform_win32;
+    
 // types are manually added, since these are a mess to generate from the headers
 def GLenum type u32;
 
@@ -277,14 +289,20 @@ def GLsync      type u8;
 def _cl_context type u8;
 def _cl_event   type u8;
 
-// def HGLRDC               type u8;
-def HPBUFFERARB          type u8;
-def HPBUFFEREXT          type u8;
-def HGPUNV               type u8;
-def PGPU_DEVICE          type u8;
-def HVIDEOOUTPUTDEVICENV type u8;
-def HVIDEOINPUTDEVICENV  type u8;
-def HPVIDEODEV           type u8;
+def HGLRC                type u8 ref;
+def HPBUFFERARB          type u8 ref;
+def HPBUFFEREXT          type u8 ref;
+def HGPUNV               type u8 ref;
+def PGPU_DEVICE          type u8 ref;
+def HVIDEOOUTPUTDEVICENV type u8 ref;
+def HVIDEOINPUTDEVICENV  type u8 ref;
+def HPVIDEODEV           type u8 ref;
+
+def wglGetProcAddress func(name cstring) (address u8 ref)                     calling_convention "__stdcall" extern_binding("opengl32", true);
+def wglCreateContext  func(device_context HDC) (gl_context HGLRC)             calling_convention "__stdcall" extern_binding("opengl32", true);
+def wglDeleteContext  func( gl_context HGLRC) (resukt u32)                    calling_convention "__stdcall" extern_binding("opengl32", true);
+def wglMakeCurrent    func(device_context HDC; gl_context HGLRC) (resukt u32) calling_convention "__stdcall" extern_binding("opengl32", true);
+
 )CODE");
     
     for (u32 i = 0; i < carray_count(files); i++)

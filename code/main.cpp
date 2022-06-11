@@ -48,7 +48,10 @@ s32 main(s32 argument_count, cstring arguments[])
                     require(platform_allocate_and_read_entire_file(&source, path));
                     
                     if (!parse(&parser, source, source_name))
-                        return -1;        
+                    {
+                        i = argument_count;
+                        break;
+                    }
                 }
                 while (FindNextFileA(handle, &find_data));
         
@@ -70,18 +73,26 @@ s32 main(s32 argument_count, cstring arguments[])
             require(platform_allocate_and_read_entire_file(&source, path));
         
             if (!parse(&parser, source, source_name))
-                return -1;        
+                break;    
         }
     }
     
-    resolve(&parser);
+    if (!parser.error)
+        resolve(&parser);
     
-    lang_c_compile_settings settings = {};
-    //settings.prefix = s("tk_");
-    auto output = compile(&parser, settings);
+    if (!parser.error)
+    {
+        lang_c_compile_settings settings = {};
+        //settings.prefix = s("tk_");
+        auto output = compile(&parser, settings);
+        
+        cstring output_file_path = "lang_output.cpp";
+        platform_write_entire_file(output_file_path, output.builder.memory.array);
+    }
     
-    cstring output_file_path = "lang_output.cpp";
-    platform_write_entire_file(output_file_path, output.builder.memory.array);
+    if (parser.error)
+        printf("Error: %.*s\n", fs(parser.error_messages.memory.array));
+    
     //platform_free_bytes(output.base);
     
 #if defined _DEBUG

@@ -1602,10 +1602,13 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
     print_line(builder, "// generated with lang_c compiler");
     print_newline(builder);
     print_line(builder, "#include <stdio.h>");
+    
+#if 0
     print_line(builder, "#include <windows.h>");    
     print_newline(builder);
     print_line(builder, "#pragma comment(lib, \"user32\")");
     print_line(builder, "#pragma comment(lib, \"gdi32\")");
+#endif
     
     string name_buffer = { carray_count(_lang_c_base_type_name_buffer), _lang_c_base_type_name_buffer };
     

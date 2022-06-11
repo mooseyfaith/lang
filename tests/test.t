@@ -1,6 +1,6 @@
 
 import platform;
-//import platform_win32;
+import platform_win32;
 
 def foo struct
 {
@@ -27,10 +27,7 @@ var platform platform_api;
 platform_init(platform ref);
 
 var window platform_window;
-platform_window_init(platform ref, window ref, "hello");
-
-var pfd PIXELFORMATDESCRIPTOR;
-//var x = ChoosePixelFormat(window.device_context, pfd ref);
+platform_window_init(platform ref, window ref, "hello", 640, 480);
 
 while true
 {

@@ -547,8 +547,8 @@ bool is_binary_operator(ast_node *node)
     sizeof(ast_ ## entry),
 
 u32 ast_node_type_byte_counts[] = {
-    ast_node_list(menum_ast_type_byte_count)
     ast_type_list(menum_ast_type_byte_count)
+    ast_node_list(menum_ast_type_byte_count)
 };
 
 struct source_location
@@ -653,8 +653,8 @@ ast_node_list(menum_bucket_type);
 ast_type_list(menum_bucket_type);
 
 u32 ast_node_bucket_byte_counts[] = {
-    ast_node_list(menum_bucket_type_byte_count)
     ast_type_list(menum_bucket_type_byte_count)
+    ast_node_list(menum_bucket_type_byte_count)
 };
 
 struct lang_parser
@@ -665,8 +665,8 @@ struct lang_parser
     {
         struct
         {
-            ast_node_list(menum_bucket_array_field);
             ast_type_list(menum_bucket_array_field);
+            ast_node_list(menum_bucket_array_field);
         };
     
         ast_base_node_bucket *bucket_arrays[ast_node_type_count];
@@ -1547,7 +1547,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
             auto name = consume_name(parser);
             lang_require(name.count, parser->iterator, "expected field name after '.'");
             
-            new_local_node(field_reference);
+            new_local_node(field_reference, parser->node_locations.base[expression->index].text);
             field_reference->expression = expression;
             field_reference->name       = name;
             
@@ -1559,7 +1559,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         }
         else if (try_consume(parser, s("[")))
         {
-            new_local_node(array_index);
+            new_local_node(array_index, parser->node_locations.base[expression->index].text);
             array_index->array_expression = expression;
             array_index->index_expression = lang_require_call(parse_expression(parser, {}));
             lang_require(array_index->index_expression, parser->iterator, "expected array index expression after '['");
@@ -1583,7 +1583,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 auto type = lang_require_call(parse_type(parser, true));
                 lang_require(try_consume(parser, s(")")), parser->iterator, "expected ')' at the end of cast");
                 
-                new_local_node(cast);
+                new_local_node(cast, parser->node_locations.base[expression->index].text);
                 cast->type = type;
                 cast->expression = expression;
                 
@@ -1595,7 +1595,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
             }
             else if (keyword == s("ref"))
             {
-                new_local_node(take_reference);
+                new_local_node(take_reference, parser->node_locations.base[expression->index].text);
                 take_reference->expression = expression;
                 
                 take_reference->node.parent = expression->parent;
@@ -4424,7 +4424,7 @@ void resolve(lang_parser *parser)
                     
                     while (input)
                     {
-                        lang_require_return_value(input->default_expression, , parser->iterator, "expected argument '%.*s' in function call", fs(input->name));
+                        lang_require_return_value(input->default_expression, , parser->node_locations.base[function_call->node.index].text, "expected argument '%.*s' in function call", fs(input->name));
                         
                         bool ok = try_add_default_argument(parser, function_call, function_type, &argument_tail_next, &input);
                         assert(ok);
