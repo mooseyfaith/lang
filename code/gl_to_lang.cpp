@@ -468,7 +468,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
     for (u32 i = 0; i < dll_functions.count; i++)
     {
         auto function = dll_functions.base[i];
-        print_line(&builder, "%.*s = wglGetProcAddress(\"%.*s\") cast(%.*s_signature);", fs(function), fs(function), fs(function));
+        print_line(&builder, "%.*s = wglGetProcAddress(\"%.*s\\0\".base cast(cstring)) cast(%.*s_signature);", fs(function), fs(function), fs(function));
     }
     
     print_scope_close(&builder);

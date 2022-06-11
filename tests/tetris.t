@@ -1,12 +1,11 @@
 import platform;
-import platform_win32;
 import gl;
 
 var platform platform_api;
 platform_init(platform ref);
 
 var window platform_window;
-platform_window_init(platform ref, window ref, "tetris", 1280, 720);
+platform_window_init(platform ref, window ref, "tetris\0", 1280, 720);
 
 var gl gl_api;
 gl_init(gl ref, platform ref, true);
@@ -65,13 +64,15 @@ while true
     var delta_seconds f32 = platform.delta_seconds * 4;
     tick_timeout = tick_timeout - delta_seconds;
     
-    // 'D' - 'A'
-    // var move_x f32 = platform_key_is_active(platform, 0x44) - platform_key_is_active(platform, 0x41);
+    var move_x f32 = platform_key_is_active(platform, "D"[0]) - platform_key_is_active(platform, "A"[0]);
     // player_pos.x = move_x / 1000 + player_pos.x;
+    
+    if move_x is_not 0
+        { printf("move_x %f\n\0".base cast(cstring), move_x); }
     
     if game_over
     {
-        if platform_key_was_pressed(platform, 13) // enter
+        if platform_key_was_pressed(platform, platform_key.enter)
         {
             game_over = false;
             

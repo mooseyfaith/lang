@@ -2,7 +2,6 @@ module gl;
 
 import platform;
 import platform_win32;
-import gl_win32;
 
 def gl_api struct
 {
@@ -20,12 +19,12 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     window_class.hInstance     = platform.win32_instance;
     window_class.lpfnWndProc   = DefWindowProcA;
     window_class.hbrBackground = COLOR_BACKGROUND cast(usize) cast(HBRUSH);
-    window_class.lpszClassName = "gl dummy window class";
+    window_class.lpszClassName = "gl dummy window class".base cast(cstring);
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursorA(NULL, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
 
-    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
     platform_require(window_handle is_not null);
 
     var device_context = GetDC(window_handle);
@@ -38,14 +37,14 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     
     platform_require(wglMakeCurrent(device_context, gl_context));
     
-    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB")    cast(wglChoosePixelFormatARB_signature);
-    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB") cast(wglCreateContextAttribsARB_signature);
+    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB".base cast(cstring))    cast(wglChoosePixelFormatARB_signature);
+    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB".base cast(cstring)) cast(wglCreateContextAttribsARB_signature);
     
     if wglChoosePixelFormatARB and wglCreateContextAttribsARB
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
         platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
         var gl_3_3_device_context = GetDC(gl_3_3_window_handle);

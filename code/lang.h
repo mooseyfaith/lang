@@ -1758,6 +1758,7 @@ complete_type_info get_type(lang_parser *parser, lang_base_type type)
     complete_type_info result = {};
     
     result.name_type.node = parser->base_types[type];
+    
     switch (result.name_type.node->node_type)
     {
         cases_complete;
@@ -1765,17 +1766,18 @@ complete_type_info get_type(lang_parser *parser, lang_base_type type)
         case ast_node_type_number_type:
         {
             local_node_type(number_type, result.name_type.node);
+            result.base_type = result.name_type;
             result.name = number_type->name;
         } break;
         
         case ast_node_type_type_alias:
         {
             local_node_type(type_alias, result.name_type.node);
+            result.base_type                    = type_alias->type.base_type;
+            result.base_type.indirection_count += type_alias->type.name_type.indirection_count;
             result.name = type_alias->type.name;
         } break;
     }
-    
-    result.base_type = result.name_type;
     
     return result;
 }
@@ -3115,7 +3117,8 @@ get_expression_type_declaration
             if (!type.name_type.node)
                 return {};
             
-            local_node_type(array_type, type.name_type.node);
+            assert(!type.base_type.indirection_count);
+            local_node_type(array_type, type.base_type.node);
             
             return array_type->item_type;
         } break;
@@ -3325,9 +3328,9 @@ void reset(lang_parser *parser)
 "\r\n"
 "def code_location struct" "\r\n"
 "{" "\r\n"
-"    module   cstring;" "\r\n" // TODO: change cstring to string later
-"    file     cstring;" "\r\n"
-"    function cstring;" "\r\n"
+"    module   string;" "\r\n"
+"    file     string;" "\r\n"
+"    function string;" "\r\n"
 "    line     u32;" "\r\n"
 "    column   u32;" "\r\n"
 "}" "\r\n"

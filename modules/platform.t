@@ -20,6 +20,11 @@ def platform_window struct
     device_context HDC;
 }
 
+def platform_key enum u8
+{
+    enter = 13;
+}
+
 def platform_button struct
 {
     is_active             b8;
@@ -75,15 +80,15 @@ def platform_button_update func(button platform_button ref; is_active b8)
 def print_value func(value u64; text cstring = get_call_argument_text(value); in_hex b8 = false)
 {
     if in_hex 
-        { printf("%s = 0x%llX\n", text, value); }
+        { printf("%s = 0x%llX\n\0".base cast(cstring), text, value); }
     else
-        { printf("%s = %llu\n", text, value); }
+        { printf("%s = %llu\n\0".base cast(cstring), text, value); }
 }
 
 def platform_init func(platform platform_api ref)
 {
     platform.win32_instance = GetModuleHandleA(null) cast(HINSTANCE);
-    platform.window_class_name = "My Window Class";
+    platform.window_class_name = "My Window Class\0".base cast(cstring);
     
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
@@ -103,9 +108,10 @@ def platform_init func(platform platform_api ref)
     platform.time_ticks = time_ticks.QuadPart;
 }
 
-def platform_window_init func(platform platform_api ref; window platform_window ref; title cstring; width s32; height s32)
+def platform_window_init func(platform platform_api ref; window platform_window ref; title string; width s32; height s32)
 {
-    window.handle = CreateWindowExA(0, platform.window_class_name, title, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, 0);
+    assert(title[title.count - 1] is 0, "title needs to be 0-terminated");
+    window.handle = CreateWindowExA(0, platform.window_class_name, title.base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, 0);
     platform_require(window.handle is_not null);
 
     window.device_context = GetDC(window.handle);
@@ -177,8 +183,7 @@ def platform_update_time func(platform platform_api ref)
     platform.time_ticks = time_ticks.QuadPart;
 }
 
-//def platform_window_callback func WNDPROC
-def platform_window_callback func(window HWND; msg u32; w_param WPARAM; l_param LPARAM) (result LRESULT)
+def platform_window_callback func WNDPROC
 {
     switch msg
     case WM_DESTROY
@@ -190,36 +195,59 @@ def platform_window_callback func(window HWND; msg u32; w_param WPARAM; l_param 
     return DefWindowProcA(window, msg, w_param, l_param);
 }
 
-def platform_require func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def print_location func(location code_location)
+{
+    printf("[%.*s] %.*s,%.*s(%i,%i)\0".base cast(cstring), location.module.count cast(s32), location.module.base, location.file.count cast(s32), location.file.base, location.function.count cast(s32), location.function.base, location.line, location.column);
+}
+
+def platform_require func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
 {
     if not condition
     {
-        printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
-        printf("\tCondition '%s' is false.\n\n", condition_text);
-        printf("\tGetLastError() = 0x%x\n", GetLastError());
+        printf("\n\0".base cast(cstring));
+        print_location(location);
+        printf(": Platform Win32 Requirement Failed\n\n\0".base cast(cstring));
+        
+        if message.count
+            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+        
+        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
+        printf("\tGetLastError() = 0x%x\n\0".base cast(cstring), GetLastError());
         __debugbreak();
         ExitProcess(0);
     }
 }
 
-def require func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def require func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
 {
     if not condition
     {
-        printf("\n%s,%s(%i,%i): Requirement Failed\n\n", location.file, location.function, location.line, location.column);
-        printf("\tCondition '%s' is false.\n\n", condition_text);
+        printf("\n\0".base cast(cstring));
+        print_location(location);
+        printf(": Requirement Failed\n\n\0".base cast(cstring));
+        
+        if message.count
+            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+        
+        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
         __debugbreak();
         ExitProcess(0);
     }
 }
 
 
-def assert func(condition b8; location code_location = get_call_location(); condition_text cstring = get_call_argument_text(condition))
+def assert func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
 {
     if not condition
     {
-        printf("\n[%s] %s,%s(%i, %i): Assertion Failed\n\n", location.module, location.file, location.function, location.line, location.column);
-        printf("\tCondition '%s' is false.\n\n", condition_text);
+        printf("\n\0".base cast(cstring));
+        print_location(location);
+        printf(": Assertion Failed\n\n\0".base cast(cstring));
+        
+        if message.count
+            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+            
+        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
         __debugbreak();
         ExitProcess(0);
     }

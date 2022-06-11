@@ -219,6 +219,26 @@ void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
     print_type(buffer, variable->type, variable->name);
 }
 
+usize get_string_c_count(string text)
+{
+    usize count = 0;
+    while (text.count)
+    {
+        // skip escaped character
+        if (text.base[0] == '\\' && text.count > 1)
+        {
+            text.base++;
+            text.count--;
+        }
+        
+        text.base++;
+        text.count--;
+        count++;
+    }
+    
+    return count;
+}
+
 print_expression_declaration
 {
     auto parser = buffer->parser;
@@ -249,7 +269,7 @@ print_expression_declaration
         case ast_node_type_string:
         {
             local_node_type(string, node);
-            print(builder, "\"%.*s\"", fs(string->text));
+            print(builder, "string{ %llu, (u8 *) \"%.*s\" }", get_string_c_count(string->text), fs(string->text));
         } break;
         
         case ast_node_type_array_literal:
@@ -923,7 +943,7 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
         print(builder, " (");
         
         if (function_type->calling_convention.count)
-            print(builder, " %.*s", fs(function_type->calling_convention));
+            print(builder, "%.*s ", fs(function_type->calling_convention));
         
         print(builder, "*%.*s)(", fs(name));
     }
@@ -1337,7 +1357,7 @@ insert_type_dependency_declaration
         case ast_node_type_enumeration_type:
         {
             local_node_type(enumeration_type, name_type);
-            insert_type_dependency(graph, get_base_node(enumeration_type), enumeration_type->item_type);
+            insert_type_dependency(graph, child, enumeration_type->item_type);
             
             for (auto item = enumeration_type->first_item; item; item = (ast_enumeration_item *) item->node.next)
                 insert_expression_dependency(graph, child, item->expression);
