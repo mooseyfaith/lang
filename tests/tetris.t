@@ -1,5 +1,7 @@
 import platform;
+import platform_win32;
 import gl;
+import random;
 
 var platform platform_api;
 platform_init(platform ref);
@@ -33,24 +35,28 @@ def falling_piece struct
 //def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
 def piece_type_colors = type(rgba32[]) // piece_type.count
 {
+    { 0.0; 0.0; 0.0; 1.0 };
     { 1.0; 0.0; 0.0; 1.0 };
     { 0.0; 1.0; 0.0; 1.0 };
     { 0.0; 0.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 };
-    { 1.0; 1.0; 1.0; 1.0 }
+    { 1.0; 1.0; 0.0; 1.0 };
+    { 1.0; 0.0; 1.0; 1.0 };
+    { 0.0; 1.0; 1.0; 1.0 };
+    { 0.3; 0.3; 1.0; 1.0 };
+    { 0.3; 1.0; 0.3; 1.0 }
 };
 
-var board piece_type[10][24]; // or [24][10]piece_type ?
-var next_piece piece_type;
+platform_update_time(platform ref); // skip startup time
 
-var piece falling_piece = make_piece(piece_type.i, board[0].count, board.count);
+var random random_pcg;
+var filetime FILETIME;
+GetSystemTimeAsFileTime(filetime ref);
+random = filetime ref cast(u64 ref) . ;
 
 var tick_timeout f32 = 1;
-
-platform_update_time(platform ref); // skip startup time
+var board piece_type[10][24]; // or [24][10]piece_type ?
+var piece      = make_random_piece(random ref, board[0].count, board.count);
+var next_piece = make_random_piece(random ref, board[0].count, board.count);
 
 var game_over b32 = false;
 
@@ -61,22 +67,11 @@ while true
         break;
     }
     
-    var delta_seconds f32 = platform.delta_seconds * 4;
-    tick_timeout = tick_timeout - delta_seconds;
-    
-    var move_x f32 = platform_key_is_active(platform, "D"[0]) - platform_key_is_active(platform, "A"[0]);
-    // player_pos.x = move_x / 1000 + player_pos.x;
-    
-    if move_x is_not 0
-        { printf("move_x %f\n\0".base cast(cstring), move_x); }
-    
     if game_over
     {
         if platform_key_was_pressed(platform, platform_key.enter)
         {
             game_over = false;
-            
-            // board = piece_type.empty; like this?
             
             loop var y; board.count
             {
@@ -86,13 +81,49 @@ while true
                 }
             }
             
-            piece = make_piece(piece_type.i, board[0].count, board.count);
+            piece      = make_random_piece(random ref, board[0].count, board.count);
+            next_piece = make_random_piece(random ref, board[0].count, board.count);
             tick_timeout = 1;
             continue;
         }
     }
     else
     {
+        var delta_seconds f32 = platform.delta_seconds * 4;
+        tick_timeout = tick_timeout - delta_seconds;
+    
+        var move_x s32 = platform_key_was_pressed(platform, "D"[0]) - platform_key_was_pressed(platform, "A"[0]);
+        
+        if move_x is_not 0
+        {
+            var piece_can_move b32 = true;
+            loop var i; piece.bricks.count
+            {
+                var brick = piece.bricks[i];
+                brick.x = brick.x + move_x;
+                
+                if (brick.x < 0) or (brick.x >= board[0].count)
+                {
+                    piece_can_move = false;
+                    break;
+                }
+                
+                if board[brick.y][brick.x] is_not piece_type.empty
+                {
+                    piece_can_move = false;
+                    break;
+                }
+            }
+            
+            if piece_can_move
+            {
+                loop var i; piece.bricks.count
+                {
+                    piece.bricks[i].x = piece.bricks[i].x + move_x;
+                }
+            }
+        }
+        
         while tick_timeout <= 0
         {
             tick_timeout = tick_timeout + 1;
@@ -102,9 +133,7 @@ while true
             {
                 var y = piece.bricks[i].y - 1;
                 
-                var a b32 = y < 0;
-                var b b32 = board[y][piece.bricks[i].x] is_not piece_type.empty;
-                if a or b
+                if (y < 0) or (board[y][piece.bricks[i].x] is_not piece_type.empty)
                 {
                     piece_did_fall = true;
                     break;
@@ -116,19 +145,24 @@ while true
                 loop var i; piece.bricks.count
                 {
                     var brick vec2s = piece.bricks[i];
-                    
-                    if board[brick.y][brick.x] is_not piece_type.empty
+                    board[brick.y][brick.x] = piece.type;
+                }
+                
+                loop var i; piece.bricks.count
+                {
+                    var brick vec2s = piece.bricks[i];
+                    if brick.y >= (board.count - 4)
                     {
                         game_over = true;
                         break;
                     }
-                    
-                    board[brick.y][brick.x] = piece.type;
                 }
+                    
+                if game_over
+                    { break; }
                 
-                if game_over { break; }
-                
-                piece = make_piece(piece_type.i, board[0].count, board.count);
+                piece = next_piece;
+                next_piece = make_random_piece(random ref, board[0].count, board.count);
             }
             else
             {
@@ -144,12 +178,11 @@ while true
     var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
-    var viewport_scale vec2 = v2(2 / window_width_over_height, 2);
+    var viewport_scale = v2(2 / window_width_over_height, 2);
     
-    var quads quad[64];
-    var quad_count;
-    
-    var brick_size f32 = 0.025;
+    var quads quad_buffer;
+    quads.brick_size    = viewport_scale.x / (board.count + 5);
+    quads.camera_offset = v2(0, quads.brick_size * 2.5);
     
     loop var y; board.count
     {
@@ -157,11 +190,7 @@ while true
         {
             var type piece_type = board[y][x];
             if type is_not piece_type.empty
-            {
-                quads[quad_count].box   = box2_size(v2(x * brick_size, y * brick_size), v2(brick_size, brick_size));
-                quads[quad_count].color = piece_type_colors[type];
-                quad_count = quad_count + 1;
-            }
+                { push_brick(quads ref, x, y, piece_type_colors[type]); }
         }
     }
     
@@ -169,9 +198,18 @@ while true
     {
         var brick vec2s = piece.bricks[i];
         
-        quads[quad_count].box   = box2_size(v2(brick.x * brick_size, brick.y * brick_size), v2(brick_size, brick_size));
-        quads[quad_count].color = piece_type_colors[piece.type];
-        quad_count = quad_count + 1;
+        push_brick(quads ref, brick.x, brick.y, piece_type_colors[piece.type]);
+    }
+    
+    loop var i; board[0].count + 2
+    {
+        push_brick(quads ref, i - 1, -1, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
+    }
+    
+    loop var i; board.count
+    {
+        push_brick(quads ref, -1,             i, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
+        push_brick(quads ref, board[0].count, i, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
     }
     
     glViewport(0, 0, window_size.x, window_size.y);
@@ -180,20 +218,20 @@ while true
     
     glBegin(GL_TRIANGLES);
     
-    loop var i; quad_count
+    loop var i; quads.count
     {
-        var q quad = quads[i];        
+        var q quad = quads.quads[i];        
         var box box2 = q.box;
         
         glColor4f(q.color.values[0], q.color.values[1], q.color.values[2], q.color.values[3]);
         
-        glVertex2f(box.min.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);
-        glVertex2f(box.max.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);
-        glVertex2f(box.max.x * viewport_scale.x - 1, box.max.y * viewport_scale.y - 1);
+        glVertex2f(box.min.x * viewport_scale.x, box.min.y * viewport_scale.y);
+        glVertex2f(box.max.x * viewport_scale.x, box.min.y * viewport_scale.y);
+        glVertex2f(box.max.x * viewport_scale.x, box.max.y * viewport_scale.y);
         
-        glVertex2f(box.min.x * viewport_scale.x - 1, box.min.y * viewport_scale.y - 1);
-        glVertex2f(box.max.x * viewport_scale.x - 1, box.max.y * viewport_scale.y - 1);
-        glVertex2f(box.min.x * viewport_scale.x - 1, box.max.y * viewport_scale.y - 1);
+        glVertex2f(box.min.x * viewport_scale.x, box.min.y * viewport_scale.y);
+        glVertex2f(box.max.x * viewport_scale.x, box.max.y * viewport_scale.y);
+        glVertex2f(box.min.x * viewport_scale.x, box.max.y * viewport_scale.y);
     }
     
     glEnd();
@@ -207,9 +245,21 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
     piece.type = type;
     
     switch type
+    case piece_type.o
+    {
+        var x s32 = board_width / 2 - 1;
+        piece.bricks[0].x = x;
+        piece.bricks[0].y = board_height - 3;
+        piece.bricks[1].x = x + 1;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x + 1;
+        piece.bricks[3].y = board_height - 4;
+    }
     case piece_type.i
     {
-        var x s32 = board_width / 2;
+        var x s32 = board_width / 2 - 1;
         piece.bricks[0].x = x;
         piece.bricks[0].y = board_height - 1;
         piece.bricks[1].x = x;
@@ -219,12 +269,103 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[3].x = x;
         piece.bricks[3].y = board_height - 4;
     }
+    case piece_type.t
+    {
+        var x s32 = board_width / 2 - 1;
+        piece.bricks[0].x = x;
+        piece.bricks[0].y = board_height - 2;
+        piece.bricks[1].x = x;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x + 1;
+        piece.bricks[3].y = board_height - 3;
+    }
+    case piece_type.l
+    {
+        var x s32 = board_width / 2 - 1;
+        piece.bricks[0].x = x;
+        piece.bricks[0].y = board_height - 2;
+        piece.bricks[1].x = x;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x + 1;
+        piece.bricks[3].y = board_height - 4;
+    }
+    case piece_type.j
+    {
+        var x s32 = board_width / 2;
+        piece.bricks[0].x = x;
+        piece.bricks[0].y = board_height - 2;
+        piece.bricks[1].x = x;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x - 1;
+        piece.bricks[3].y = board_height - 4;
+    }
+    case piece_type.z
+    {
+        var x s32 = board_width / 2 - 1;
+        piece.bricks[0].x = x - 1;
+        piece.bricks[0].y = board_height - 3;
+        piece.bricks[1].x = x;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x + 1;
+        piece.bricks[3].y = board_height - 4;
+    }
+    case piece_type.n
+    {
+        var x s32 = board_width / 2 - 1;
+        piece.bricks[0].x = x + 1;
+        piece.bricks[0].y = board_height - 3;
+        piece.bricks[1].x = x;
+        piece.bricks[1].y = board_height - 3;
+        piece.bricks[2].x = x;
+        piece.bricks[2].y = board_height - 4;
+        piece.bricks[3].x = x - 1;
+        piece.bricks[3].y = board_height - 4;
+    }
     else
     {
         assert(false);
     }
     
     return piece;
+}
+
+def make_random_piece func(random random_pcg ref; board_width s32; board_height s32) (result falling_piece)
+{
+    var type = (random_index(random, piece_type.count - 1) + 1) cast(piece_type);
+    return make_piece(type, board_width, board_height);
+}
+
+def quad_buffer struct
+{
+    quads quad[1024];
+    count u32;
+    
+    brick_size    f32;
+    camera_offset vec2;
+}
+
+def push_brick func(buffer quad_buffer ref; x f32; y f32; color rgba32; location code_location = get_call_location())
+{
+    var margin = 0.1 * buffer.brick_size;
+    var size   = buffer.brick_size - margin;
+    
+    push_quad(buffer, box2_size(v2((x - 4.5) * buffer.brick_size + margin - buffer.camera_offset.x, (y - 9.5) * buffer.brick_size + margin - buffer.camera_offset.y), v2(size, size)), color, location);
+}
+
+def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code_location = get_call_location())
+{
+    assert(buffer.count < buffer.quads.count, location);
+    buffer.quads[buffer.count].box   = box;
+    buffer.quads[buffer.count].color = color;
+    buffer.count = buffer.count + 1;
 }
 
 def vec2 struct

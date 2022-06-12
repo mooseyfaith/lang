@@ -323,28 +323,36 @@ print_expression_declaration
             print(builder, ")");
         } break;
         
-        case ast_node_type_field_reference:
+        case ast_node_type_dereference:
         {
-            local_node_type(field_reference, node);
+            local_node_type(dereference, node);
             
-            auto type = get_expression_type(buffer->parser, field_reference->expression).base_type;
+            print(builder, "*");
+            print_expression(buffer, dereference->expression);
+        } break;
+        
+        case ast_node_type_field_dereference:
+        {
+            local_node_type(field_dereference, node);
+            
+            auto type = get_expression_type(buffer->parser, field_dereference->expression).base_type;
             
             if (!type.indirection_count && type.node)
             {
                 if (is_node_type(type.node, enumeration_type))
                 {
-                    if (field_reference->name == s("count"))
+                    if (field_dereference->name == s("count"))
                     {
                         local_node_type(enumeration_type, type.node);
                         
                         print(builder, "/* ");
-                        print_expression(buffer, field_reference->expression);
-                        print(builder, "_%.*s */ %i", fs(field_reference->name), enumeration_type->item_count);
+                        print_expression(buffer, field_dereference->expression);
+                        print(builder, "_%.*s */ %i", fs(field_dereference->name), enumeration_type->item_count);
                     }
                     else
                     {
-                        print_expression(buffer, field_reference->expression);
-                        print(builder, "_%.*s", fs(field_reference->name));
+                        print_expression(buffer, field_dereference->expression);
+                        print(builder, "_%.*s", fs(field_dereference->name));
                     }
                     
                     break;
@@ -354,38 +362,38 @@ print_expression_declaration
                     local_node_type(array_type, type.node);
                     
                 #if 0
-                    print_expression(buffer, field_reference->expression);
-                    print(builder, ".%.*s", fs(field_reference->name));
+                    print_expression(buffer, field_dereference->expression);
+                    print(builder, ".%.*s", fs(field_dereference->name));
                 #else
-                    if (field_reference->name == s("count"))
+                    if (field_dereference->name == s("count"))
                     {
                         if (array_type->count_expression)
                         {
                             print(builder, "/* ");
-                            print_expression(buffer, field_reference->expression);
+                            print_expression(buffer, field_dereference->expression);
                             print(builder, ".count */ ");
                             print_expression(buffer, array_type->count_expression);
                         }
                         else
                         {
-                            print_expression(buffer, field_reference->expression);
+                            print_expression(buffer, field_dereference->expression);
                             print(builder, ".count");
                         }
                     }
-                    else if (field_reference->name == s("base"))
+                    else if (field_dereference->name == s("base"))
                     {
-                        if (is_node_type(field_reference->expression, array_literal)) //array_type->count_expression)
+                        if (is_node_type(field_dereference->expression, array_literal)) //array_type->count_expression)
                         {
-                            local_node_type(array_literal, field_reference->expression);
+                            local_node_type(array_literal, field_dereference->expression);
                             
                             print(builder, "/* ");
-                            print_expression(buffer, field_reference->expression);
+                            print_expression(buffer, field_dereference->expression);
                             print(builder, ".base */ _array_literal_base_%x", array_literal->node.index);
                             //print_expression(buffer, array_type->count_expression);
                         }
                         else
                         {
-                            print_expression(buffer, field_reference->expression);
+                            print_expression(buffer, field_dereference->expression);
                             print(builder, ".base");
                         }
                     }
@@ -401,22 +409,22 @@ print_expression_declaration
             
             if (type.indirection_count == 1)
             {
-                print_expression(buffer, field_reference->expression);
+                print_expression(buffer, field_dereference->expression);
                 print(builder, "->");
-                print(builder, "%.*s", fs(field_reference->name));
+                print(builder, "%.*s", fs(field_dereference->name));
             }
             else if (type.indirection_count == 0)
             {
-                print_expression(buffer, field_reference->expression);
+                print_expression(buffer, field_dereference->expression);
                 print(builder, ".");
-                print(builder, "%.*s", fs(field_reference->name));
+                print(builder, "%.*s", fs(field_dereference->name));
             }
             else
             {
-                print(builder, "/* too many indirections %.*s */", fs(field_reference->name));
+                print(builder, "/* too many indirections %.*s */", fs(field_dereference->name));
             }
             
-            if (!field_reference->reference)
+            if (!field_dereference->reference)
             {
                 print(builder, " /* unresolved */");
             }
@@ -491,11 +499,15 @@ print_expression_declaration
                     s("~"),
                     s("|"),
                     s("&"),
+                    s("^"),
+                    s(">>"),
+                    s("<<"),
                     
                     s("+"),
                     s("-"),
                     s("*"),
                     s("/"),
+                    s("%"),
                 };
                 
                 u32 c_symbol_index = node->node_type - ast_node_type_binary_operator - 1;

@@ -33,14 +33,12 @@ def platform_button struct
 
 def platform_button_was_pressed func(button platform_button) (result b8)
 {
-    var x u32 = 2 - button.is_active;
-    return button.half_transition_count >= x;
+    return button.half_transition_count >= (2 - button.is_active);
 }
 
 def platform_button_was_released func(button platform_button) (result b8)
 {
-    var x u32 = 1 + button.is_active;
-    return button.half_transition_count >= x;
+    return button.half_transition_count >= (1 + button.is_active);
 }
 
 def platform_key_is_active func(platform platform_api; key u32) (result b8)
@@ -60,14 +58,13 @@ def platform_key_was_released func(platform platform_api; key u32) (result b8)
 
 def platform_button_update func(button platform_button ref; is_active b8)
 {
-    //assert(button.is_active is_not is_active);
+    // assert(button.is_active is_not is_active);
     
     button.is_active = is_active;
     
     // make sure overflow bit remains
     var overflow_mask = button.half_transition_count bit_and 0x80;
-    button.half_transition_count = button.half_transition_count + 1;
-    button.half_transition_count = button.half_transition_count bit_or overflow_mask;
+    button.half_transition_count = (button.half_transition_count + 1) bit_or overflow_mask;
 }
 
 //def platform_button mask u8
@@ -77,12 +74,12 @@ def platform_button_update func(button platform_button ref; is_active b8)
 //    half_transition_count_over_flow u1;
 //}
 
-def print_value func(value u64; text cstring = get_call_argument_text(value); in_hex b8 = false)
+def print_value func(value u64; text string = get_call_argument_text(value); in_hex b8 = false)
 {
     if in_hex 
-        { printf("%s = 0x%llX\n\0".base cast(cstring), text, value); }
+        { printf("%.*s = 0x%llX\n\0".base cast(cstring), text.count cast(s32), text.base, value); }
     else
-        { printf("%s = %llu\n\0".base cast(cstring), text, value); }
+        { printf("%.*s = %llu\n\0".base cast(cstring), text.count cast(s32), text.base, value); }
 }
 
 def platform_init func(platform platform_api ref)
@@ -139,11 +136,9 @@ def platform_window_frame func(platform platform_api ref; window platform_window
 
 def platform_handle_messages func(platform platform_api ref) (result b8)
 {
-    var key_index;
-    while key_index < 256
+    loop var key_index; 256
     {
         platform.keys[key_index].half_transition_count = 0;
-        key_index = key_index + 1;
     }
 
     var msg MSG;
@@ -156,7 +151,8 @@ def platform_handle_messages func(platform platform_api ref) (result b8)
         }
         case WM_KEYDOWN
         {
-            platform_button_update(platform.keys[msg.wParam] ref, true);
+            if msg.lParam bit_and 0x40000000 is 0
+                { platform_button_update(platform.keys[msg.wParam] ref, true); }
         }
         case WM_KEYUP
         {
@@ -177,9 +173,7 @@ def platform_update_time func(platform platform_api ref)
     var time_ticks LARGE_INTEGER;
     platform_require(QueryPerformanceCounter(time_ticks ref));
     
-    var delta_ticks u64 = time_ticks.QuadPart - platform.time_ticks;
-    platform.delta_seconds = delta_ticks cast(f32) / platform.ticks_per_second;
-    
+    platform.delta_seconds = (time_ticks.QuadPart - platform.time_ticks) cast(f32) / platform.ticks_per_second;
     platform.time_ticks = time_ticks.QuadPart;
 }
 
@@ -197,21 +191,26 @@ def platform_window_callback func WNDPROC
 
 def print_location func(location code_location)
 {
-    printf("[%.*s] %.*s,%.*s(%i,%i)\0".base cast(cstring), location.module.count cast(s32), location.module.base, location.file.count cast(s32), location.file.base, location.function.count cast(s32), location.function.base, location.line, location.column);
+    printf("%.*s/%.*s %.*s(%i,%i)\0".base cast(cstring), location.module.count cast(s32), location.module.base, location.function.count cast(s32), location.function.base, location.file.count cast(s32), location.file.base, location.line, location.column);
+}
+
+def platform_fatal_error_message func(label string; message string; location code_location; condition_text string)
+{
+    printf("\n\0".base cast(cstring));
+    print_location(location);
+    printf(": %.*s\n\n\0".base cast(cstring), label.count cast(s32), label.base);
+    
+    if message.count
+        { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+    
+    printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
 }
 
 def platform_require func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
 {
     if not condition
     {
-        printf("\n\0".base cast(cstring));
-        print_location(location);
-        printf(": Platform Win32 Requirement Failed\n\n\0".base cast(cstring));
-        
-        if message.count
-            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
-        
-        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
+        platform_fatal_error_message("Platform Win32 Requirement Failed", message, location, condition_text);
         printf("\tGetLastError() = 0x%x\n\0".base cast(cstring), GetLastError());
         __debugbreak();
         ExitProcess(0);
@@ -222,14 +221,7 @@ def require func(condition b8; message = ""; location code_location = get_call_l
 {
     if not condition
     {
-        printf("\n\0".base cast(cstring));
-        print_location(location);
-        printf(": Requirement Failed\n\n\0".base cast(cstring));
-        
-        if message.count
-            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
-        
-        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
+        platform_fatal_error_message("Requirement Failed", message, location, condition_text);
         __debugbreak();
         ExitProcess(0);
     }
@@ -240,14 +232,7 @@ def assert func(condition b8; message = ""; location code_location = get_call_lo
 {
     if not condition
     {
-        printf("\n\0".base cast(cstring));
-        print_location(location);
-        printf(": Assertion Failed\n\n\0".base cast(cstring));
-        
-        if message.count
-            { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
-            
-        printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
+        platform_fatal_error_message("Assertion Failed", message, location, condition_text);
         __debugbreak();
         ExitProcess(0);
     }
