@@ -69,6 +69,8 @@ while true
     
     if game_over
     {
+        tick_timeout = tick_timeout + (platform.delta_seconds * board.count * 2);
+    
         if platform_key_was_pressed(platform, platform_key.enter)
         {
             game_over = false;
@@ -89,8 +91,7 @@ while true
     }
     else
     {
-        var delta_seconds f32 = platform.delta_seconds * 4;
-        tick_timeout = tick_timeout - delta_seconds;
+        tick_timeout = tick_timeout - (platform.delta_seconds * 8);
     
         var move_x s32 = platform_key_was_pressed(platform, "D"[0]) - platform_key_was_pressed(platform, "A"[0]);
         
@@ -159,7 +160,10 @@ while true
                 }
                     
                 if game_over
-                    { break; }
+                { 
+                    tick_timeout = 0;
+                    break;
+                }
                 
                 piece = next_piece;
                 next_piece = make_random_piece(random ref, board[0].count, board.count);
@@ -181,8 +185,12 @@ while true
     var viewport_scale = v2(2 / window_width_over_height, 2);
     
     var quads quad_buffer;
-    quads.brick_size    = viewport_scale.x / (board.count + 5);
+    quads.brick_size    = viewport_scale.y / (2 * board.count + 10);
     quads.camera_offset = v2(0, quads.brick_size * 2.5);
+    
+    var stone_lines u32;
+    if game_over
+        { stone_lines = tick_timeout cast(u32); }
     
     loop var y; board.count
     {
@@ -190,26 +198,49 @@ while true
         {
             var type piece_type = board[y][x];
             if type is_not piece_type.empty
-                { push_brick(quads ref, x, y, piece_type_colors[type]); }
+            { 
+                var color = piece_type_colors[type];
+                if y < stone_lines
+                    { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
+            
+                push_brick(quads ref, x, y, color); 
+            }
         }
     }
     
-    loop var i; piece.bricks.count
+    if not game_over
     {
-        var brick vec2s = piece.bricks[i];
-        
-        push_brick(quads ref, brick.x, brick.y, piece_type_colors[piece.type]);
+        loop var i; piece.bricks.count
+        {
+            var brick vec2s = piece.bricks[i];
+            
+            push_brick(quads ref, brick.x, brick.y, piece_type_colors[piece.type]);
+        }
     }
+    
+    loop var i; next_piece.bricks.count
+    {
+        var brick vec2s = next_piece.bricks[i];
+        
+        push_brick(quads ref, brick.x - 10, brick.y, piece_type_colors[next_piece.type]);
+    }
+    
+    def frame_color = type(rgba32) { 0.8; 0.8; 0.8; 1.0 };
     
     loop var i; board[0].count + 2
     {
-        push_brick(quads ref, i - 1, -1, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
+        push_brick(quads ref, i - 1, -1, frame_color);
     }
     
     loop var i; board.count
     {
-        push_brick(quads ref, -1,             i, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
-        push_brick(quads ref, board[0].count, i, type(rgba32) { 0.8; 0.8; 0.8; 1.0 });
+        var color = frame_color;
+        
+        if i >= (board.count - 4)
+            { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
+        
+        push_brick(quads ref, -1,             i, color);
+        push_brick(quads ref, board[0].count, i, color);
     }
     
     glViewport(0, 0, window_size.x, window_size.y);
