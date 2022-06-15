@@ -15,7 +15,7 @@ gl_init(gl ref, platform ref, true);
 
 gl_window_init(platform ref, gl ref, window ref);
 
-def piece_type enum 
+def piece_type enum u32
 {
     empty;
     o;

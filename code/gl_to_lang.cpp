@@ -358,7 +358,7 @@ WINGDIAPI int   WINAPI wglGetLayerPaletteEntries(HDC, int, int, int,
                 it = line;
                 
                 if (add_unique(&constants, name))
-                    print_line(&builder, "def %.*s = %.*s cast(s32);", fs(name), fs(value));
+                    print_line(&builder, "def %.*s = %.*s cast(u32);", fs(name), fs(value));
                 continue;
             }
         #if 0

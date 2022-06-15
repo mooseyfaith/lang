@@ -29,6 +29,17 @@ def vec4 type f32[4];
 //    }
 //}
 
+def add func(a vec2; b vec2) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] + b[i];
+    }
+    
+    return result;
+}
+
 
 def add func(a vec4; b vec4) (result vec4)
 {

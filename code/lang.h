@@ -1179,11 +1179,13 @@ ast_number * parse_number(lang_parser *parser)
         {
             number->value.f64_value = f64_value;
             
-            f32 f32_value = (f32) f64_value;
-            if ((f64) f32_value == f64_value)
-                bit_count = 32;
-            else
-                bit_count = 64;
+            // TODO: make clear when we use f64
+            
+            //f32 f32_value = (f32) f64_value;
+            //if ((f64) f32_value == f64_value)
+            bit_count = 32;
+            //else
+                //bit_count = 64;
         }
         else if (is_signed)
         {
@@ -2916,12 +2918,34 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
 
 bool types_are_compatible(lang_parser *parser, complete_type_info to, complete_type_info from)
 {
+    // implicit cast to b8 (default bool)
+    if (to.base_type.node == get_type(parser, lang_base_type_b8).base_type.node)
+        return true;
+
     if (to.base_type.indirection_count != from.base_type.indirection_count)
         return false;
         
-    // implicit cast to u8 pointer
-    if (to.base_type.indirection_count && to.base_type.node == get_type(parser, lang_base_type_u8).base_type.node)
+    // implicit cast to and from u8 pointer
+    if (to.base_type.indirection_count && to.base_type.node == get_type(parser, lang_base_type_u8).base_type.node ||  from.base_type.node == get_type(parser, lang_base_type_u8).base_type.node)
         return true;
+
+    if (is_node_type(to.base_type.node, enumeration_type))
+    {
+        local_node_type(enumeration_type, to.base_type.node);
+        
+        // enum is not strict
+        if (enumeration_type->item_type.name.count)
+            to = enumeration_type->item_type;
+    }
+    
+    if (is_node_type(from.base_type.node, enumeration_type))
+    {
+        local_node_type(enumeration_type, from.base_type.node);
+        
+        // enum is not strict
+        if (enumeration_type->item_type.name.count)
+            from = enumeration_type->item_type;
+    }
 
     if (is_node_type(to.base_type.node, number_type) && is_node_type(from.base_type.node, number_type))
     {
@@ -3098,9 +3122,12 @@ get_expression_type_declaration
                 case ast_node_type_enumeration_item:
                 {
                     local_node_type(enumeration_item, field_dereference->reference);
+                    
+                    local_node_type(type_alias, enumeration_item->enumeration_type->node.parent);
+                    
                     complete_type_info type = {};
-                    type.base_type.node = get_base_node(enumeration_item->enumeration_type);
-                    type.name_type = type.base_type;
+                    type.base_type.node = type_alias->type.base_type.node;
+                    type.name_type.node = get_base_node(type_alias);
                     return type;
                 } break;
             }
@@ -4093,8 +4120,8 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                         bool does_match = true;
                         for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
                         {
-                            // overloads are not completely resolved
-                            if (!function_argument->type.base_type.node)
+                            // overloads are not completely resolved, or to many arguments
+                            if (!function_argument || !function_argument->type.base_type.node)
                             {
                                 function_reference = null;
                                 break;
@@ -4107,8 +4134,25 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                             }
                         
                             auto call_argument_type = get_expression_type(parser, call_argument);
+                            if (!call_argument_type.base_type.node)
+                            {
+                                does_match = false;
+                                break;
+                            }
                             
-                            if (!call_argument_type.base_type.node || !types_are_compatible(parser, function_argument->type, call_argument_type))
+                            while (function_argument && !types_are_compatible(parser, function_argument->type, call_argument_type) && function_argument->default_expression)
+                            {
+                                function_argument = (ast_variable *) function_argument->node.next;
+                                
+                                // overloads are not completely resolved
+                                if (!function_argument->type.base_type.node)
+                                {
+                                    function_reference = null;
+                                    break;
+                                }
+                            }
+                            
+                            if (!function_argument || !types_are_compatible(parser, function_argument->type, call_argument_type))
                             {
                                 does_match = false;
                                 break;
@@ -4116,6 +4160,13 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                             
                             function_argument = (ast_variable *) function_argument->node.next;
                         }
+                        
+                        while (function_argument && function_argument->default_expression)
+                            function_argument = (ast_variable *) function_argument->node.next;
+                        
+                        // too few arguments
+                        if (function_argument)
+                            does_match = false;
                         
                         if (!function_reference)
                             break;
@@ -4135,56 +4186,6 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                         resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
                         did_resolve_entry = true;
                         i--; // repeat index
-                    }
-                    else
-                    {
-                        parser->error = true;
-                        parser_message(parser, parser->node_locations.base[function_call->node.index].text, "ERROR: no matching function overload found"); \
-                        
-                        auto error_messages = &parser->error_messages;
-                        
-                        print_newline(error_messages);
-                        print_line(error_messages, "for function call:");
-                        error_messages->indent++;
-                        
-                        print_line(error_messages, "%.*s", fs(parser->node_locations.base[function_call->node.index].text));
-                        error_messages->indent--;
-                        
-                        print_newline(error_messages);
-                        print_line(error_messages, "with types:");
-                        error_messages->indent++;
-                        print(error_messages, "(");
-                        
-                        bool is_first = true;
-                        for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
-                        {
-                            if (!is_first)
-                                print(error_messages, ", ");
-                                
-                            print_type(parser, error_messages, get_expression_type(parser, call_argument));
-                            is_first = false;
-                        }
-                        print_line(error_messages, ")");
-                        print_newline(error_messages);
-                        error_messages->indent--;
-                        
-                        print_newline(error_messages);
-                        print_line(error_messages, "possible functions are:");
-                        error_messages->indent++;
-                        
-                        for (auto function_reference = function_overloads->first_function_reference; function_reference; function_reference = (ast_function_reference *) function_reference->node.next)
-                        {
-                            auto function = function_reference->function;
-                            local_node_type(function_type, function->type.base_type.node);
-                            
-                            auto function_input    = get_node_type(compound_type, function_type->input.base_type.node);
-                            // print whole token
-                            print(error_messages, "%.*s func%.*s", fs(function->name), fs(parser->node_locations.base[function_type->node.index].text));
-                        }
-                        error_messages->indent--;
-                        lang_maybe_assert_on_error();
-                        
-                        return;
                     }
                 }
             }
@@ -4264,78 +4265,85 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             }
         }
     }
-    
-    // TEMP
-    // resolve complete type
-    if (0)
+ 
     {
-        local_buffer(scope_stack, ast_node_buffer);
-        local_buffer(queue, ast_queue);
-        
-        if (root)
-            enqueue(&queue, &root);
-            
-        ast_queue_entry entry;
-        while (next(&entry, &queue))
+        for (u32 i = 0; i < unresolved_function_calls.count; i++)
         {
-            auto node = *entry.node_field;
+            auto node = unresolved_function_calls.base[i];
+            local_node_type(function_call, node);
             
-            update(&scope_stack, entry.scope);
+            local_node_type(name_reference, function_call->expression);
             
-            switch (node->node_type)
+            if (!name_reference->reference || !is_node_type(name_reference->reference, function_overloads))
+                continue;
+            
+            bool is_incomplete = false;
+            for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
             {
-                case ast_node_type_enumeration_type:
+                auto type = get_expression_type(parser, call_argument);
+                if (!type.base_type.node)
                 {
-                    local_node_type(enumeration_type, node);
-                    
-                    resolve_complete_type(parser, &enumeration_type->item_type);
-                } break;
-                
-                case ast_node_type_array_type:
-                {
-                    local_node_type(array_type, node);
-                    
-                    resolve_complete_type(parser, &array_type->item_type);
-                } break;
-                
-                case ast_node_type_type_alias:
-                {
-                    local_node_type(type_alias, node);
-                    
-                    resolve_complete_type(parser, &type_alias->type);
-                } break;
-                
-                case ast_node_type_cast:
-                {
-                    local_node_type(cast, node);
-                    
-                    resolve_complete_type(parser, &cast->type);
-                } break;
-                
-                case ast_node_type_take_reference:
-                {
-                    local_node_type(take_reference, node);
-                    
-                    resolve_complete_type(parser, &take_reference->type);
-                } break;
-            
-                case ast_node_type_variable:
-                {
-                    local_node_type(variable, node);
-                    
-                    resolve_complete_type(parser, &variable->type);
-                } break;
-                
-                case ast_node_type_function:
-                {
-                    local_node_type(function, node);
-                    
-                    resolve_complete_type(parser, &function->type);
-                } break;
+                    is_incomplete = true;
+                    break;
+                }
             }
+            
+            // only error on function with complete types
+            if (is_incomplete)
+                continue;
+            
+            local_node_type(function_overloads, name_reference->reference);
+                
+            parser->error = true;
+            parser_message(parser, parser->node_locations.base[function_call->node.index].text, "ERROR: no matching function overload found"); \
+            
+            auto error_messages = &parser->error_messages;
+            
+            print_newline(error_messages);
+            print_line(error_messages, "for function call:");
+            error_messages->indent++;
+            
+            print_line(error_messages, "%.*s", fs(parser->node_locations.base[function_call->node.index].text));
+            error_messages->indent--;
+            
+            print_newline(error_messages);
+            print_line(error_messages, "with types:");
+            error_messages->indent++;
+            print(error_messages, "(");
+            
+            bool is_first = true;
+            for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
+            {
+                if (!is_first)
+                    print(error_messages, ", ");
+                    
+                print_type(parser, error_messages, get_expression_type(parser, call_argument));
+                is_first = false;
+            }
+            print_line(error_messages, ")");
+            print_newline(error_messages);
+            error_messages->indent--;
+            
+            print_newline(error_messages);
+            print_line(error_messages, "possible functions are:");
+            error_messages->indent++;
+            
+            for (auto function_reference = function_overloads->first_function_reference; function_reference; function_reference = (ast_function_reference *) function_reference->node.next)
+            {
+                auto function = function_reference->function;
+                local_node_type(function_type, function->type.base_type.node);
+                
+                auto function_input    = get_node_type(compound_type, function_type->input.base_type.node);
+                // print whole token
+                print(error_messages, "%.*s func%.*s", fs(function->name), fs(parser->node_locations.base[function_type->node.index].text));
+            }
+            error_messages->indent--;
+            lang_maybe_assert_on_error();
+            
+            return;
         }
     }
-    
+
 #if 1
 
     for (u32 i = 0; i < unresolved_names.count; i++)
