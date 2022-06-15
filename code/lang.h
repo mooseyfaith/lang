@@ -1,9 +1,9 @@
 #pragma once
 
 #if defined LANG_ASSERT_ON_ERROR
-#define lang_maybe_break() assert(0)
+#define lang_maybe_assert_on_error() assert(0)
 #else
-#define lang_maybe_break()
+#define lang_maybe_assert_on_error()
 #endif
 
 #include "utf8_string.h"
@@ -21,6 +21,8 @@
     macro(enumeration_item, __VA_ARGS__) \
     macro(external_binding, __VA_ARGS__) \
     macro(function, __VA_ARGS__) \
+    macro(function_reference, __VA_ARGS__) \
+    macro(function_overloads, __VA_ARGS__) \
     macro(compound_literal, __VA_ARGS__) \
     macro(compound_literal_field, __VA_ARGS__) \
     macro(array_literal, __VA_ARGS__) \
@@ -347,6 +349,19 @@ struct ast_function
     ast_node *first_statement;
 };
 
+struct ast_function_reference
+{
+    ast_base_node node;
+    ast_function *function;
+};
+
+struct ast_function_overloads
+{
+    ast_base_node           node;
+    string                  name;
+    ast_function_reference *first_function_reference;
+};
+
 struct ast_compound_type
 {
     ast_base_node node;
@@ -507,6 +522,7 @@ struct ast_binary_operator
 {
     ast_base_node node;
     complete_type_info type;
+    ast_function *function; // if its an overload
     ast_node *left, *right;
 };
 
@@ -653,6 +669,10 @@ struct name \
 };
 
 bucket_type(base_bucket_type, u8, 1);
+
+#define for_bucket_item(bucket, index, bucket_array) \
+for (auto bucket = bucket_array; bucket; bucket = bucket->next) \
+    for (u32 index = 0; index < bucket->count; index++) 
 
 const u32 ast_bucket_item_count = 1024;
 
@@ -1008,7 +1028,7 @@ location_line get_location_line(lang_parser *parser, string token)
     return { file, line, line_count, column_count };
 }
 
-void parse_message_va(lang_parser *parser, string token, cstring format, va_list va_arguments)
+void parser_message_va(lang_parser *parser, string token, cstring format, va_list va_arguments)
 {
     auto location = get_location_line(parser, token);
     
@@ -1020,12 +1040,12 @@ void parse_message_va(lang_parser *parser, string token, cstring format, va_list
     print_line(error_messages, "%.*s(%i,%i):  %*c", fs(location.file->path), location.line + 1, location.column + 1, location.column, '^');
 }
 
-void parse_message(lang_parser *parser, string token, cstring format, ...)
+void parser_message(lang_parser *parser, string token, cstring format, ...)
 {
     va_list va_arguments;
     va_start(va_arguments, format);
     
-    parse_message_va(parser, token, format, va_arguments);
+    parser_message_va(parser, token, format, va_arguments);
     
     va_end(va_arguments);
 }
@@ -1035,8 +1055,8 @@ void parse_message(lang_parser *parser, string token, cstring format, ...)
     if (!(condition)) \
     { \
         parser->error = true; \
-        parse_message(parser, token, "ERROR: " message, __VA_ARGS__); \
-        lang_maybe_break(); \
+        parser_message(parser, token, "ERROR: " message, __VA_ARGS__); \
+        lang_maybe_assert_on_error(); \
         return return_value; \
     }
 
@@ -1599,8 +1619,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         {
             new_local_node(array_index, parser->node_locations.base[expression->index].text);
             array_index->array_expression = expression;
-            array_index->index_expression = lang_require_call(parse_expression(parser, {}));
-            lang_require(array_index->index_expression, parser->iterator, "expected array index expression after '['");
+            lang_require_expression(array_index->index_expression, parser, {});
             
             lang_require(try_consume(parser, s("]")), parser->iterator, "expected ']' after array index expression");
             
@@ -2895,8 +2914,15 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
     return function_type;
 }
 
-bool types_are_compatible(complete_type_info to, complete_type_info from)
+bool types_are_compatible(lang_parser *parser, complete_type_info to, complete_type_info from)
 {
+    if (to.base_type.indirection_count != from.base_type.indirection_count)
+        return false;
+        
+    // implicit cast to u8 pointer
+    if (to.base_type.indirection_count && to.base_type.node == get_type(parser, lang_base_type_u8).base_type.node)
+        return true;
+
     if (is_node_type(to.base_type.node, number_type) && is_node_type(from.base_type.node, number_type))
     {
         auto to_number_type   = get_node_type(number_type, to.base_type.node);
@@ -2908,9 +2934,6 @@ bool types_are_compatible(complete_type_info to, complete_type_info from)
             return false;
     }
     else if (to.base_type.node != from.base_type.node)
-        return false;
-    
-    if (to.base_type.indirection_count != from.base_type.indirection_count)
         return false;
 
     return true;
@@ -3036,9 +3059,29 @@ get_expression_type_declaration
             if (!field_dereference->reference)
                 return {};
             
+            // HACKY:
             switch (field_dereference->reference->node_type)
             {
                 cases_complete;
+                
+                case ast_node_type_array_type:
+                {
+                    local_node_type(array_type, field_dereference->reference);
+                    if (field_dereference->name == s("count"))
+                    {
+                        if (array_type->count_expression)
+                            return get_expression_type(parser, array_type->count_expression);
+                        else
+                            return get_type(parser, lang_base_type_usize);
+                    }
+                    else if (field_dereference->name == s("base"))
+                    {
+                        auto type = array_type->item_type;
+                        type.base_type.indirection_count++;
+                        type.name_type.indirection_count++;
+                        return type;
+                    }
+                } break;
                 
                 case ast_node_type_enumeration_type:
                 {
@@ -3052,7 +3095,6 @@ get_expression_type_declaration
                     return variable->type;
                 } break;
                 
-                // HACKY:
                 case ast_node_type_enumeration_item:
                 {
                     local_node_type(enumeration_item, field_dereference->reference);
@@ -3155,9 +3197,9 @@ get_expression_type_declaration
                 if (!left_type.base_type.node || !right_type.base_type.node)
                     return {};
                 
-                if (types_are_compatible(left_type, right_type))
+                if (types_are_compatible(parser, left_type, right_type))
                     binary_operator->type = left_type;
-                else if (types_are_compatible(right_type, left_type))
+                else if (types_are_compatible(parser, right_type, left_type))
                     binary_operator->type = right_type;
                 else
                 {
@@ -3213,6 +3255,12 @@ get_expression_type_declaration
             {
                 cases_complete("%.*s", fs(ast_node_type_names[name_reference->reference->node_type]));
                 
+                // not fully resolved
+                case ast_node_type_function_overloads:
+                {
+                    return {};
+                } break;
+                
                 case ast_node_type_type_alias:
                 {
                     local_node_type(type_alias, name_reference->reference);
@@ -3234,11 +3282,6 @@ get_expression_type_declaration
                 case ast_node_type_function:
                 {
                     local_node_type(function, name_reference->reference);
-                    //auto function_type = get_function_type(parser, function);
-                    
-                    //assert(function_type->first_output && !function_type->first_output->next);
-                    //local_node_type(variable, function_type->first_output);
-                    
                     return function->type;
                 } break;
             }
@@ -3501,6 +3544,11 @@ ast_node * get(resolve_table table, resolve_table_key key)
     return table.values[slot];
 }
 
+ast_node * get(resolve_table table, string name, ast_node *scope)
+{
+    return get(table, { name, scope });
+}
+
 resolve_table make_resolve_table(usize count)
 {
     resolve_table table = {};
@@ -3730,176 +3778,230 @@ struct resolve_name_entry
 
 buffer_type(resolve_name_buffer, resolve_name_array, resolve_name_entry);
 
+
+void print_type(lang_parser *parser, string_builder *builder, complete_type_info type)
+{
+    if (!type.name_type.node)
+    {
+        print(builder, "/* not resolved type */ '%.*s'", fs(type.name));
+        return;
+    }
+
+    switch (type.name_type.node->node_type)
+    {
+        cases_complete;
+        
+        case ast_node_type_number_type:
+        {
+            local_node_type(number_type, type.name_type.node);
+            print(builder, "%.*s", fs(number_type->name));
+        } break;
+        /*
+        case ast_node_type_enumeration_type:
+        {
+        } break;
+        
+        case ast_node_type_function_type:
+        {
+            print(builder, "func(");
+            
+            for (auto argument = );
+            
+        } break;
+
+        case ast_node_type_compound_type:
+        {
+        } break;
+        */
+        
+        case ast_node_type_array_type:
+        {
+            local_node_type(array_type, type.name_type.node);
+            print_type(parser, builder, array_type->item_type);
+            
+            if (array_type->count_expression)
+                print(builder, "[x]");
+            else
+                print(builder, "[]");
+        } break;
+
+        case ast_node_type_type_alias:
+        {
+            local_node_type(type_alias, type.name_type.node);
+            print(builder, "%.*s", fs(type_alias->name));
+        } break;
+    }
+    
+    for (u32 i = 0; i < type.name_type.indirection_count; i++)
+        print(builder, " ref");
+}
+
 void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
 {
-    local_buffer(unresolved_nodes, resolve_name_buffer);
+    local_buffer(unresolved_names, resolve_name_buffer);
     local_buffer(unresolved_types, resolve_name_buffer);
     local_buffer(unresolved_field_dereferences, ast_node_buffer);
     local_buffer(unresolved_variables, ast_node_buffer);
+    local_buffer(unresolved_function_calls, ast_node_buffer);
 
+    // collect
     {
-        local_buffer(scope_stack, ast_node_buffer);
-        local_buffer(queue, ast_queue);
-        
-        if (root)
-            enqueue(&queue, &root);
-            
-        ast_queue_entry entry;
-        while (next(&entry, &queue))
+        for_bucket_item(bucket, index, parser->name_reference_buckets)
         {
-            auto node = *entry.node_field;
+            auto name_reference = &bucket->base[index];
             
-            update(&scope_stack, entry.scope);
-            
-            switch (node->node_type)
+            if (!name_reference->reference)
             {
-                case ast_node_type_name_reference:
-                {
-                    local_node_type(name_reference, node);
-                
-                    if (!name_reference->reference)
-                    {
-                        resize_buffer(&unresolved_nodes, unresolved_nodes.count + 1);
-                        unresolved_nodes.base[unresolved_nodes.count - 1] = { node->parent, &name_reference->reference, name_reference->name };
-                    }
-                } break;
-                
-                case ast_node_type_field_dereference:
-                {
-                    local_node_type(field_dereference, node);
-                    
-                    assert(!field_dereference->type.name_type.node);
-                
-                    resize_buffer(&unresolved_field_dereferences, unresolved_field_dereferences.count + 1);
-                    unresolved_field_dereferences.base[unresolved_field_dereferences.count - 1] = node;
-                } break;
+                resize_buffer(&unresolved_names, unresolved_names.count + 1);
+                unresolved_names.base[unresolved_names.count - 1] = { name_reference->node.parent, &name_reference->reference, name_reference->name };
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->function_call_buckets)
+        {
+            auto function_call = &bucket->base[index];
             
-                case ast_node_type_variable:
+            if (is_node_type(function_call->expression, name_reference))
+            {
+                resize_buffer(&unresolved_function_calls, unresolved_function_calls.count + 1);
+                unresolved_function_calls.base[unresolved_function_calls.count - 1] = get_base_node(function_call);
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->field_dereference_buckets)
+        {
+            auto field_dereference = &bucket->base[index];
+            
+            assert(!field_dereference->type.name_type.node);
+            resize_buffer(&unresolved_field_dereferences, unresolved_field_dereferences.count + 1);
+            unresolved_field_dereferences.base[unresolved_field_dereferences.count - 1] = get_base_node(field_dereference);
+        }
+        
+        for_bucket_item(bucket, index, parser->variable_buckets)
+        {
+            auto variable = &bucket->base[index];
+            
+            if (!variable->type.name_type.node)
+            {
+                if (variable->type.name.count)
                 {
-                    local_node_type(variable, node);
-                    
-                    if (!variable->type.name_type.node)
-                    {
-                        if (variable->type.name.count)
-                        {
-                            resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                            auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                            entry->parent = node->parent;
-                            entry->type = &variable->type;
-                            entry->name = variable->type.name;
-                        }
-                        else
-                        {
-                            assert(variable->default_expression);
-                            resize_buffer(&unresolved_variables, unresolved_variables.count + 1);
-                            unresolved_variables.base[unresolved_variables.count - 1] = node;
-                        }
-                    }
-                } break;
-                
-                case ast_node_type_array_literal:
+                    resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                    auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                    entry->parent = variable->node.parent;
+                    entry->type = &variable->type;
+                    entry->name = variable->type.name;
+                }
+                else
                 {
-                    local_node_type(array_literal, node);
-                    local_node_type(array_type, array_literal->type.name_type.node);
-                    
-                    if (!array_type->item_type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &array_type->item_type;
-                        entry->name = array_type->item_type.name;
-                    }
-                } break;
-                
-                case ast_node_type_compound_literal:
-                {
-                    local_node_type(compound_literal, node);
-                    
-                    if (!compound_literal->type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &compound_literal->type;
-                        entry->name = compound_literal->type.name;
-                    }
-                } break;
-                
-                case ast_node_type_type_alias:
-                {
-                    local_node_type(type_alias, node);
-                    
-                    if (!type_alias->type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &type_alias->type;
-                        entry->name = type_alias->type.name;
-                    }
-                } break;
-
-                case ast_node_type_array_type:
-                {
-                    local_node_type(array_type, node);
-
-                    if (!array_type->item_type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &array_type->item_type;
-                        entry->name = array_type->item_type.name;
-                    }
-                } break;
-                
-                 case ast_node_type_cast:
-                {
-                    local_node_type(cast, node);
-
-                    if (!cast->type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &cast->type;
-                        entry->name = cast->type.name;
-                    }
-                } break;
-
-                case ast_node_type_function:
-                {
-                    local_node_type(function, node);
-                    
-                    if (!function->type.name_type.node)
-                    {
-                        resize_buffer(&unresolved_types, unresolved_types.count + 1);
-                        auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                        entry->parent = node->parent;
-                        entry->type = &function->type;
-                        entry->name = function->type.name;
-                    }
-                } break;
+                    assert(variable->default_expression);
+                    resize_buffer(&unresolved_variables, unresolved_variables.count + 1);
+                    unresolved_variables.base[unresolved_variables.count - 1] = get_base_node(variable);
+                }
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->array_literal_buckets)
+        {
+            auto array_literal = &bucket->base[index];
+            local_node_type(array_type, array_literal->type.name_type.node);
+            
+            if (!array_type->item_type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = array_type->node.parent;
+                entry->type = &array_type->item_type;
+                entry->name = array_type->item_type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->compound_literal_buckets)
+        {
+            auto compound_literal = &bucket->base[index];
+            
+            if (!compound_literal->type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = compound_literal->node.parent;
+                entry->type = &compound_literal->type;
+                entry->name = compound_literal->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->type_alias_buckets)
+        {
+            auto type_alias = &bucket->base[index];
+            
+            if (!type_alias->type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = type_alias->node.parent;
+                entry->type = &type_alias->type;
+                entry->name = type_alias->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->function_buckets)
+        {
+            auto function = &bucket->base[index];
+            
+            if (!function->type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = function->node.parent;
+                entry->type = &function->type;
+                entry->name = function->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->array_type_buckets)
+        {
+            auto array_type = &bucket->base[index];
+            
+            if (!array_type->item_type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = array_type->node.parent;
+                entry->type = &array_type->item_type;
+                entry->name = array_type->item_type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->cast_buckets)
+        {
+            auto cast = &bucket->base[index];
+            
+            if (!cast->type.name_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->parent = cast->node.parent;
+                entry->type = &cast->type;
+                entry->name = cast->type.name;
             }
         }
     }
     
+    // resolve
     {
         bool did_resolve_entry = true;
         while (did_resolve_entry)
         {
             did_resolve_entry = false;
             
-            for (u32 i = 0; i < unresolved_nodes.count; i++)
+            for (u32 i = 0; i < unresolved_names.count; i++)
             {
-                auto entry = unresolved_nodes.base[i];
+                auto entry = unresolved_names.base[i];
                 
                 *entry.storage = find_node(resolver, entry.parent, entry.name);
                 if (*entry.storage)
                 {
-                    unresolved_nodes.base[i] = unresolved_nodes.base[--unresolved_nodes.count];
-                    resize_buffer(&unresolved_nodes, unresolved_nodes.count);
+                    unresolved_names.base[i] = unresolved_names.base[--unresolved_names.count];
+                    resize_buffer(&unresolved_names, unresolved_names.count);
                     did_resolve_entry = true;
                     i--; // repeat index
                 }
@@ -3948,6 +4050,142 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                     resize_buffer(&unresolved_variables, unresolved_variables.count);
                     did_resolve_entry = true;
                     i--; // repeat index
+                }
+            }
+            
+            for (u32 i = 0; i < unresolved_function_calls.count; i++)
+            {
+                auto node = unresolved_function_calls.base[i];
+                local_node_type(function_call, node);
+                
+                local_node_type(name_reference, function_call->expression);
+                if (name_reference->reference)
+                {
+                    // reference is variable or something
+                    if (!is_node_type(name_reference->reference, function_overloads))
+                    {
+                         unresolved_function_calls.base[i] = unresolved_function_calls.base[--unresolved_function_calls.count];
+                        resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
+                        // did_resolve_entry = true; nothing was resolved
+                        i--; // repeat index
+                        continue;
+                    }
+                
+                    local_node_type(function_overloads, name_reference->reference);
+                    
+                    ast_function *matching_function = null;
+                    
+                    for (auto function_reference = function_overloads->first_function_reference; function_reference; function_reference = (ast_function_reference *) function_reference->node.next)
+                    {
+                        auto function = function_reference->function;
+                        local_node_type(function_type, function->type.base_type.node);
+                        
+                        // no arguments
+                        if (!function_type->input.base_type.node && !function_call->first_argument)
+                        {
+                            matching_function = function;
+                            break;
+                        }
+                        
+                        auto function_input    = get_node_type(compound_type, function_type->input.base_type.node);
+                        auto function_argument = function_input->first_field;
+                        
+                        bool does_match = true;
+                        for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
+                        {
+                            // overloads are not completely resolved
+                            if (!function_argument->type.base_type.node)
+                            {
+                                function_reference = null;
+                                break;
+                            }
+                        
+                            if (!function_argument)
+                            {
+                                does_match = false;
+                                break;
+                            }
+                        
+                            auto call_argument_type = get_expression_type(parser, call_argument);
+                            
+                            if (!call_argument_type.base_type.node || !types_are_compatible(parser, function_argument->type, call_argument_type))
+                            {
+                                does_match = false;
+                                break;
+                            }
+                            
+                            function_argument = (ast_variable *) function_argument->node.next;
+                        }
+                        
+                        if (!function_reference)
+                            break;
+                        
+                        if (does_match)
+                        {
+                            matching_function = function;
+                            break;
+                        }
+                    }
+                    
+                    if (matching_function) 
+                    {
+                        name_reference->reference = get_base_node(matching_function);
+                    
+                        unresolved_function_calls.base[i] = unresolved_function_calls.base[--unresolved_function_calls.count];
+                        resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
+                        did_resolve_entry = true;
+                        i--; // repeat index
+                    }
+                    else
+                    {
+                        parser->error = true;
+                        parser_message(parser, parser->node_locations.base[function_call->node.index].text, "ERROR: no matching function overload found"); \
+                        
+                        auto error_messages = &parser->error_messages;
+                        
+                        print_newline(error_messages);
+                        print_line(error_messages, "for function call:");
+                        error_messages->indent++;
+                        
+                        print_line(error_messages, "%.*s", fs(parser->node_locations.base[function_call->node.index].text));
+                        error_messages->indent--;
+                        
+                        print_newline(error_messages);
+                        print_line(error_messages, "with types:");
+                        error_messages->indent++;
+                        print(error_messages, "(");
+                        
+                        bool is_first = true;
+                        for (auto call_argument = function_call->first_argument; call_argument; call_argument = call_argument->next)
+                        {
+                            if (!is_first)
+                                print(error_messages, ", ");
+                                
+                            print_type(parser, error_messages, get_expression_type(parser, call_argument));
+                            is_first = false;
+                        }
+                        print_line(error_messages, ")");
+                        print_newline(error_messages);
+                        error_messages->indent--;
+                        
+                        print_newline(error_messages);
+                        print_line(error_messages, "possible functions are:");
+                        error_messages->indent++;
+                        
+                        for (auto function_reference = function_overloads->first_function_reference; function_reference; function_reference = (ast_function_reference *) function_reference->node.next)
+                        {
+                            auto function = function_reference->function;
+                            local_node_type(function_type, function->type.base_type.node);
+                            
+                            auto function_input    = get_node_type(compound_type, function_type->input.base_type.node);
+                            // print whole token
+                            print(error_messages, "%.*s func%.*s", fs(function->name), fs(parser->node_locations.base[function_type->node.index].text));
+                        }
+                        error_messages->indent--;
+                        lang_maybe_assert_on_error();
+                        
+                        return;
+                    }
                 }
             }
             
@@ -4007,7 +4245,9 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                             {
                                 local_node_type(array_type, base_type);
                                 
-                                lang_require_return_value(field_dereference->name == s("count") || field_dereference->name == s("base"), ,field_dereference->name, "arrays have no field '%.*s'", fs(field_dereference->name));
+                                lang_require_return_value(field_dereference->name == s("count") || field_dereference->name == s("base"), ,field_dereference->name, "array has no field '%.*s'", fs(field_dereference->name));
+                                
+                                field_dereference->reference = base_type;
                             } break;
                         }
                     }
@@ -4098,9 +4338,9 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
     
 #if 1
 
-    for (u32 i = 0; i < unresolved_nodes.count; i++)
+    for (u32 i = 0; i < unresolved_names.count; i++)
     {
-        auto entry = unresolved_nodes.base[i];
+        auto entry = unresolved_names.base[i];
         
     #if 0
         switch (node->node_type)
@@ -4352,7 +4592,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
             argument_type = get_expression_type(parser, argument);
 
         // default argument skipped on type match
-        if (!argument || !types_are_compatible(input_type, argument_type))
+        if (!argument || !types_are_compatible(parser, input_type, argument_type))
         {
             auto default_expression = clone(parser, default_value, get_base_node(function_call));
 
@@ -4447,15 +4687,49 @@ void resolve(lang_parser *parser)
             for (u32 i = 0; i < bucket->count; i++)
             {
                 auto function = &bucket->base[i];
-                auto is_new = insert(&resolver.table, { function->name, function->node.parent }, get_base_node(function));
-                assert(is_new);
+                
+                auto function_overloads = (ast_function_overloads *) get(resolver.table, function->name, function->node.parent);
+                if (!function_overloads)
+                {
+                    function_overloads = new_leaf_node(function_overloads, function->name);
+                    function_overloads->node.parent = function->node.parent;
+                    function_overloads->name        = function->name;
+                    
+                    auto is_new = insert(&resolver.table, { function_overloads->name, function_overloads->node.parent }, get_base_node(function_overloads));
+                    assert(is_new);
+                }
+                
+                // TODO: assert function overloads in one scope are unique?
+                for (auto it = function_overloads->first_function_reference; it; it = (ast_function_reference *) it->node.next)
+                {
+
+                }
+                
+                new_local_leaf_node(function_reference, function->name);
+                function_reference->function = function;
+                
+                function_reference->node.next = get_base_node(function_overloads->first_function_reference);
+                function_overloads->first_function_reference = function_reference;
             }
         }
     }
     
     // printf("table used count / count: %llu / %llu\n", resolver.table.used_count, resolver.table.count);
     
-    resolve_names(parser, &resolver, root);
+    lang_require_call_return_value(resolve_names(parser, &resolver, root), );
+    
+    // check for semantic errors
+    {
+        for_bucket_item(bucket, index, parser->array_index_buckets)
+        {
+            auto array_index = &bucket->base[index];
+            
+            auto base_type = get_expression_type(parser, array_index->array_expression).base_type.node;
+            lang_require_return_value(is_node_type(base_type, array_type), , parser->node_locations.base[array_index->array_expression->index].text, "can't index expression of type '%.*s'", fnode_type_name(base_type));
+            local_node_type(array_type, base_type);
+            
+        }
+    }
     
     // check function calls
     {
@@ -4500,7 +4774,7 @@ void resolve(lang_parser *parser)
                         
                         auto input_type = input->type;
                         
-                        if (input_type.name_type.node && argument_type.name_type.node && !types_are_compatible(input_type, argument_type) && try_add_default_argument(parser, function_call, function_type, &argument_tail_next, &input))
+                        if (input_type.name_type.node && argument_type.name_type.node && !types_are_compatible(parser, input_type, argument_type) && try_add_default_argument(parser, function_call, function_type, &argument_tail_next, &input))
                             continue;
                         
                         argument_tail_next = &argument->next;

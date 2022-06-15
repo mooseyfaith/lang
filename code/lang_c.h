@@ -92,6 +92,15 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 
                 if (array_type->count_expression)
                 {
+                    print(builder, "struct");
+                    print_scope_open(builder);
+                    print_type(buffer, array_type->item_type, s("base["));
+                    print_expression(buffer, array_type->count_expression);
+                    print(builder, "];");
+                    print_scope_close(builder, false);
+                    print(builder, " %.*s", fs(variable_name));
+                
+                #if 0
                     auto item_type = array_type->item_type;
                     while (item_type.base_type.node && is_node_type(item_type.base_type.node, array_type))
                     {
@@ -111,8 +120,9 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                         
                         type = array_type->item_type;
                     }
-                    
+                    #endif
                     return;
+                    
                 }
                 else
                 {
@@ -439,12 +449,7 @@ print_expression_declaration
             
             print_expression(buffer, array_index->array_expression);
             
-            if (!array_type->count_expression)
-            {
-                print(builder, ".base");
-            }
-            
-            print(builder, "[");
+            print(builder, ".base[");
             print_expression(buffer, array_index->index_expression);
             print(builder, "]");
         } break;
@@ -1413,10 +1418,6 @@ insert_type_dependency_declaration
     }
 }
 
-#define for_bucket_item(bucket, index, bucket_array) \
-for (auto bucket = bucket_array; bucket; bucket = bucket->next) \
-    for (u32 index = 0; index < bucket->count; index++) 
-
 ast_node_buffer sort_declaration_dependencies(lang_parser *parser)
 {
     dependency_graph graph = {};
@@ -1937,21 +1938,33 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                             {
                                 local_node_type(array_type, base_type);
                                 
-                                if (array_type->count_expression)
-                                    break;
-                                
                                 maybe_print_blank_line(builder);
-                                
                                 print_line(builder, "typedef struct");
                                 print_scope_open(builder);
                             
-                                print_line(builder, "usize count;");
                                 
-                                print_type(&buffer, array_type->item_type, s("*base"));
-                                print_line(builder, ";");
+                                if (array_type->count_expression)
+                                {
+                                    //print_line(builder, "static const usize count = ");
+                                    //print_expression(&buffer, array_type->count_expression);
+                                    //print_line(builder, ";");
+                                
+                                    print_type(&buffer, array_type->item_type, s("base["));
+                                    print_expression(&buffer, array_type->count_expression);
+                                    
+                                    print_line(builder, "];");
+                                }
+                                else
+                                {
+                                    print_line(builder, "usize count;");
+                                
+                                    print_type(&buffer, array_type->item_type, s("*base"));
+                                    print_line(builder, ";");
+                                }
                                 
                                 print_scope_close(builder, false);
                                 print_line(builder, " %.*s;", fs(type_alias->name));
+                            
                                 print_newline(builder);
                             } break;
                             

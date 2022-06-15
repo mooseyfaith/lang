@@ -2,6 +2,7 @@ import platform;
 import platform_win32;
 import gl;
 import random;
+import math;
 
 var platform platform_api;
 platform_init(platform ref);
@@ -23,7 +24,7 @@ def piece_type enum
     l;
     j;
     z;
-    n;
+    s;
 }
 
 def falling_piece struct
@@ -60,9 +61,11 @@ var next_piece = make_random_piece(random ref, board[0].count, board.count);
 
 var game_over b32 = false;
 
+var pos = add(type(vec2) { 0; 1 }, type(vec2) { 1; 1 });
+
 while true
 {
-    if not platform_handle_messages(platform ref) 
+    if not platform_handle_messages(platform ref)
     {
         break;
     }
@@ -185,7 +188,7 @@ while true
     var viewport_scale = v2(2 / window_width_over_height, 2);
     
     var quads quad_buffer;
-    quads.brick_size    = viewport_scale.y / (2 * board.count + 10);
+    quads.brick_size    = viewport_scale[1] / (2 * board.count + 10);
     quads.camera_offset = v2(0, quads.brick_size * 2.5);
     
     var stone_lines u32;
@@ -254,15 +257,15 @@ while true
         var q quad = quads.quads[i];        
         var box box2 = q.box;
         
-        glColor4f(q.color.values[0], q.color.values[1], q.color.values[2], q.color.values[3]);
+        glColor4f(q.color[0], q.color[1], q.color[2], q.color[3]);
         
-        glVertex2f(box.min.x * viewport_scale.x, box.min.y * viewport_scale.y);
-        glVertex2f(box.max.x * viewport_scale.x, box.min.y * viewport_scale.y);
-        glVertex2f(box.max.x * viewport_scale.x, box.max.y * viewport_scale.y);
+        glVertex2f(box.min[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
+        glVertex2f(box.max[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
+        glVertex2f(box.max[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
         
-        glVertex2f(box.min.x * viewport_scale.x, box.min.y * viewport_scale.y);
-        glVertex2f(box.max.x * viewport_scale.x, box.max.y * viewport_scale.y);
-        glVertex2f(box.min.x * viewport_scale.x, box.max.y * viewport_scale.y);
+        glVertex2f(box.min[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
+        glVertex2f(box.max[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
+        glVertex2f(box.min[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
     }
     
     glEnd();
@@ -348,7 +351,7 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[3].x = x + 1;
         piece.bricks[3].y = board_height - 4;
     }
-    case piece_type.n
+    case piece_type.s
     {
         var x s32 = board_width / 2 - 1;
         piece.bricks[0].x = x + 1;
@@ -388,7 +391,7 @@ def push_brick func(buffer quad_buffer ref; x f32; y f32; color rgba32; location
     var margin = 0.1 * buffer.brick_size;
     var size   = buffer.brick_size - margin;
     
-    push_quad(buffer, box2_size(v2((x - 4.5) * buffer.brick_size + margin - buffer.camera_offset.x, (y - 9.5) * buffer.brick_size + margin - buffer.camera_offset.y), v2(size, size)), color, location);
+    push_quad(buffer, box2_size(v2((x - 4.5) * buffer.brick_size + margin - buffer.camera_offset[0], (y - 9.5) * buffer.brick_size + margin - buffer.camera_offset[1]), v2(size, size)), color, location);
 }
 
 def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code_location = get_call_location())
@@ -399,17 +402,12 @@ def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code
     buffer.count = buffer.count + 1;
 }
 
-def vec2 struct
-{ 
-    x f32;
-    y f32;
-}
 
 def v2 func(x f32; y f32) (result vec2)
 {
     var vector vec2;
-    vector.x = x;
-    vector.y = y;
+    vector[0] = x;
+    vector[1] = y;
     
     return vector;
 }
@@ -420,10 +418,7 @@ def box2 struct
     max vec2;
 }
 
-def rgba32 struct
-{
-    values f32[4];
-}
+def rgba32 type f32[4];
 
 def quad struct
 {
@@ -435,8 +430,8 @@ def box2_size func(min vec2; size vec2) (result box2)
 {
     var box box2;
     box.min = min;
-    box.max.x = min.x + size.x;
-    box.max.y = min.y + size.y;
+    box.max[0] = min[0] + size[0];
+    box.max[1] = min[1] + size[1];
     
     return box;
 }

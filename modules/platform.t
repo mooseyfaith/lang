@@ -108,7 +108,7 @@ def platform_init func(platform platform_api ref)
 def platform_window_init func(platform platform_api ref; window platform_window ref; title string; width s32; height s32)
 {
     assert(title[title.count - 1] is 0, "title needs to be 0-terminated");
-    window.handle = CreateWindowExA(0, platform.window_class_name, title.base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, 0);
+    window.handle = CreateWindowExA(0, platform.window_class_name, title.base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, null);
     platform_require(window.handle is_not null);
 
     window.device_context = GetDC(window.handle);

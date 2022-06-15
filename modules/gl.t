@@ -24,7 +24,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     window_class.hCursor       = LoadCursorA(NULL, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
 
-    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
     platform_require(window_handle is_not null);
 
     var device_context = GetDC(window_handle);

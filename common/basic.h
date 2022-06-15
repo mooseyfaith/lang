@@ -286,10 +286,13 @@ bool operator!=(string a, string b)
     return !(a == b);
 }
 
+
+#include <intrin.h>
+
 // returns 0 on 0
 u32 get_highest_bit_index(u64 value)
 {
-    unsigned long index;
+    unsigned long index; // because unsigned long is soooo different form unsigned int. It's not!
     bool is_none_zero = _BitScanReverse64(&index, value);
     if (!is_none_zero)
         index = 0;
