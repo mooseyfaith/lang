@@ -1,6 +1,7 @@
 module platform;
 
 import platform_win32;
+import random;
 
 def platform_api struct
 {
@@ -236,4 +237,13 @@ def assert func(condition b8; message = ""; location code_location = get_call_lo
         __debugbreak();
         ExitProcess(0);
     }
+}
+
+def platform_get_random_from_time func(platform platform_api ref) (random random_pcg)
+{
+    var filetime FILETIME;
+    GetSystemTimeAsFileTime(filetime ref);
+    var random random_pcg = filetime ref cast(random_pcg ref) . ;
+    
+    return random;
 }

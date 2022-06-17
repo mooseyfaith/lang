@@ -1,5 +1,4 @@
 import platform;
-import platform_win32;
 import gl;
 import random;
 import math;
@@ -49,10 +48,7 @@ def piece_type_colors = type(rgba32[]) // piece_type.count
 
 platform_update_time(platform ref); // skip startup time
 
-var random random_pcg;
-var filetime FILETIME;
-GetSystemTimeAsFileTime(filetime ref);
-random = filetime ref cast(u64 ref) . ;
+var random = platform_get_random_from_time(platform ref);
 
 var tick_timeout f32 = 1;
 var board piece_type[10][24]; // or [24][10]piece_type ?
@@ -61,15 +57,8 @@ var next_piece = make_random_piece(random ref, board[0].count, board.count);
 
 var game_over b32 = false;
 
-var pos = add(type(vec2) { 0; 1 }, type(vec2) { 1; 1 });
-
-while true
+while platform_handle_messages(platform ref)
 {
-    if not platform_handle_messages(platform ref)
-    {
-        break;
-    }
-    
     if game_over
     {
         tick_timeout = tick_timeout + (platform.delta_seconds * board.count * 2);
@@ -259,18 +248,21 @@ while true
         
         glColor4f(q.color[0], q.color[1], q.color[2], q.color[3]);
         
-        glVertex2f(box.min[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
-        glVertex2f(box.max[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
-        glVertex2f(box.max[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
+        var min = scale(box.min, viewport_scale);
+        var max = scale(box.max, viewport_scale);
         
-        glVertex2f(box.min[0] * viewport_scale[0], box.min[1] * viewport_scale[1]);
-        glVertex2f(box.max[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
-        glVertex2f(box.min[0] * viewport_scale[0], box.max[1] * viewport_scale[1]);
+        glVertex2f(min[0], min[1]);
+        glVertex2f(max[0], min[1]);
+        glVertex2f(max[0], max[1]);
+        
+        glVertex2f(min[0], min[1]);
+        glVertex2f(max[0], max[1]);
+        glVertex2f(min[0], max[1]);
     }
     
     glEnd();
     
-    SwapBuffers(window.device_context);
+    gl_window_present(platform ref, gl ref, window ref);
 }
 
 def make_piece func(type piece_type; board_width s32; board_height s32) (result falling_piece)
@@ -391,7 +383,8 @@ def push_brick func(buffer quad_buffer ref; x f32; y f32; color rgba32; location
     var margin = 0.1 * buffer.brick_size;
     var size   = buffer.brick_size - margin;
     
-    push_quad(buffer, box2_size(v2((x - 4.5) * buffer.brick_size + margin - buffer.camera_offset[0], (y - 9.5) * buffer.brick_size + margin - buffer.camera_offset[1]), v2(size, size)), color, location);
+    var min = ((v2(x, y) - v2(4.5, 9.5)) * buffer.brick_size) - buffer.camera_offset + margin;
+    push_quad(buffer, box2_size(min, v2(size)), color, location);
 }
 
 def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code_location = get_call_location())
@@ -402,14 +395,16 @@ def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code
     buffer.count = buffer.count + 1;
 }
 
+// short constructors
 
 def v2 func(x f32; y f32) (result vec2)
 {
-    var vector vec2;
-    vector[0] = x;
-    vector[1] = y;
-    
-    return vector;
+    return type(vec2) { x; y };
+}
+
+def v2 func(scale f32) (result vec2)
+{
+    return type(vec2) { scale; scale };
 }
 
 def box2 struct
@@ -428,10 +423,6 @@ def quad struct
 
 def box2_size func(min vec2; size vec2) (result box2)
 {
-    var box box2;
-    box.min = min;
-    box.max[0] = min[0] + size[0];
-    box.max[1] = min[1] + size[1];
-    
+    var box box2 = { min; min + size };
     return box;
 }

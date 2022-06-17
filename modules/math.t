@@ -29,6 +29,17 @@ def vec4 type f32[4];
 //    }
 //}
 
+def add func(a vec2; b f32) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] + b;
+    }
+    
+    return result;
+}
+
 def add func(a vec2; b vec2) (result vec2)
 {
     var result vec2;
@@ -40,6 +51,82 @@ def add func(a vec2; b vec2) (result vec2)
     return result;
 }
 
+def negate func(a vec2) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = -a[i];
+    }
+    
+    return result;
+}
+
+def subtract func(a vec2; b vec2) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] - b[i];
+    }
+    
+    return result;
+}
+
+def subtract func(a vec2; b f32) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] - b;
+    }
+    
+    return result;
+}
+
+def multiply func(a vec2; b f32) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] * b;
+    }
+    
+    return result;
+}
+
+def scale func(a vec2; b vec2) (result vec2)
+{
+    var result vec2;
+    loop var i; a.count
+    {
+        result[i] = a[i] * b[i];
+    }
+    
+    return result;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+def negate func(a vec4) (result vec4)
+{
+    var result vec4;
+    loop var i; a.count
+    {
+        result[i] = -a[i];
+    }
+    
+    return result;
+}
 
 def add func(a vec4; b vec4) (result vec4)
 {
@@ -47,17 +134,6 @@ def add func(a vec4; b vec4) (result vec4)
     loop var i; a.count
     {
         result[i] = a[i] + b[i];
-    }
-    
-    return result;
-}
-
-def neg func(a vec4) (result vec4)
-{
-    var result vec4;
-    loop var i; a.count
-    {
-        result[i] = -a[i];
     }
     
     return result;

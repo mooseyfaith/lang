@@ -21,7 +21,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     window_class.hbrBackground = COLOR_BACKGROUND cast(usize) cast(HBRUSH);
     window_class.lpszClassName = "gl dummy window class".base cast(cstring);
     window_class.style         = CS_OWNDC;
-    window_class.hCursor       = LoadCursorA(NULL, IDC_ARROW);
+    window_class.hCursor       = LoadCursorA(null, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
 
     var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
@@ -112,6 +112,11 @@ def gl_window_init func(platform platform_api ref; gl gl_api ref; window platfor
     }
     
     platform_require(wglMakeCurrent(window.device_context, gl.win32_context));
+}
+
+def gl_window_present func(platform platform_api ref; gl gl_api ref; window platform_window ref)
+{
+    SwapBuffers(window.device_context);
 }
 
 def gl_debug_message_callback func GLDEBUGPROC

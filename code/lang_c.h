@@ -256,6 +256,8 @@ print_expression_declaration
     
     switch (node->node_type)
     {
+        cases_complete_message("unhandled expression type %.*s", fnode_type_name(node));
+        
         case ast_node_type_number:
         {
             local_node_type(number, node);
@@ -454,39 +456,50 @@ print_expression_declaration
             print(builder, "]");
         } break;
         
-        case ast_node_type_cast:
+        case ast_node_type_unary_operator:
         {
-            local_node_type(cast, node);
-            
-            print(builder, "((");
-            print_type(buffer, cast->type);
-            print(builder, ") ");
-            print_expression(buffer, cast->expression);
-            print(builder, ")");
-        } break;
+            local_node_type(unary_operator, node);
         
-        case ast_node_type_take_reference:
-        {
-            local_node_type(take_reference, node);
-            
-            print(builder, "&");
-            print_expression(buffer, take_reference->expression);
-        } break;
-        
-        case ast_node_type_not:
-        {
-            local_node_type(not, node);
-            
-            print(builder, "!");
-            print_expression(buffer, not->expression);
-        } break;
-        
-        default:
-        {
-            if (is_unary_operator(node))
+            switch (unary_operator->operator_type)
             {
+                cases_complete;
+                
+                case ast_unary_operator_type_not:
+                {
+                    print(builder, "!");
+                    print_expression(buffer, unary_operator->expression);
+                } break;
+                
+                case ast_unary_operator_type_take_reference:
+                {
+                    print(builder, "&");
+                    print_expression(buffer, unary_operator->expression);
+                } break;
+                
+                case ast_unary_operator_type_cast:
+                {
+                    print(builder, "((");
+                    print_type(buffer, unary_operator->type);
+                    print(builder, ") ");
+                    print_expression(buffer, unary_operator->expression);
+                    print(builder, ")");
+                } break;
             }
-            else if (is_binary_operator(node))
+        } break;
+        
+        case ast_node_type_binary_operator:
+        {
+            local_node_type(binary_operator, node);
+        
+            if (binary_operator->function)
+            {
+                print(builder, "%.*s(", fs(ast_binary_operator_names[binary_operator->operator_type]));
+                print_expression(buffer, binary_operator->left);
+                print(builder, ", ");
+                print_expression(buffer, binary_operator->right);
+                print(builder, ")");
+            }
+            else
             {
                 string c_symbols[] =
                 {
@@ -515,22 +528,15 @@ print_expression_declaration
                     s("%"),
                 };
                 
-                u32 c_symbol_index = node->node_type - ast_node_type_binary_operator - 1;
-                assert(c_symbol_index < carray_count(c_symbols));
+                assert(binary_operator->operator_type < carray_count(c_symbols));
                 
-                auto binary_operator = (ast_binary_operator *) node;
-            
                 print(builder, "(");
                 print_expression(buffer, binary_operator->left);
-                print(builder, " %.*s ", fs(c_symbols[c_symbol_index]));
+                print(builder, " %.*s ", fs(c_symbols[binary_operator->operator_type]));
                 print_expression(buffer, binary_operator->right);
                 print(builder, ")");
             }
-            else
-            {
-                assert(false, "unhandled expression type %.*s", fnode_type_name(node));
-            }
-        }
+        } break;
     }
 }
 
@@ -1294,6 +1300,8 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
 {
     switch (expression->node_type)
     {
+        cases_complete_message("%.*s", fs(ast_node_type_names[expression->node_type]));
+    
         case ast_node_type_number:
         break;
         
@@ -1322,25 +1330,21 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
                 insert_expression_dependency(graph, child, item_expression);
             }
         } break;
-    
-        default:
+        
+        case ast_node_type_unary_operator:
         {
-            if (is_unary_operator(expression))
-            {
-                auto unary_operator = (ast_unary_operator *) expression;
-                insert_expression_dependency(graph, child, unary_operator->expression);
-            }
-            else if (is_binary_operator(expression))
-            {
-                auto binary_operator = (ast_binary_operator *) expression;
-                insert_expression_dependency(graph, child, binary_operator->left);
-                insert_expression_dependency(graph, child, binary_operator->right);
-            }
-            else
-            {
-                assert(0, "cases_complete");
-            }
-        }
+            local_node_type(unary_operator, expression);
+            
+            insert_expression_dependency(graph, child, unary_operator->expression);
+        } break;
+        
+        case ast_node_type_binary_operator:
+        {
+            local_node_type(binary_operator, expression);
+            
+            insert_expression_dependency(graph, child, binary_operator->left);
+            insert_expression_dependency(graph, child, binary_operator->right);
+        } break;
     }
 }
 
