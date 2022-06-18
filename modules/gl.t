@@ -127,7 +127,10 @@ def gl_debug_message_callback func GLDEBUGPROC
 def gl_win32_window_init_1 func(device_context HDC)
 {
     var pixel_format_descriptor PIXELFORMATDESCRIPTOR;
-    pixel_format_descriptor.nSize        = sizeof(PIXELFORMATDESCRIPTOR);
+    
+    //type_byte_count(PIXELFORMATDESCRIPTOR)
+    
+    pixel_format_descriptor.nSize        = type_byte_count(type_of(pixel_format_descriptor)); //sizeof(PIXELFORMATDESCRIPTOR);
     pixel_format_descriptor.nVersion     = 1; // allways 1
     pixel_format_descriptor.dwFlags      = PFD_DRAW_TO_WINDOW bit_or PFD_SUPPORT_OPENGL bit_or PFD_DOUBLEBUFFER;
     pixel_format_descriptor.iPixelType   = PFD_TYPE_RGBA;

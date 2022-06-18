@@ -174,7 +174,7 @@ while platform_handle_messages(platform ref)
     var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
-    var viewport_scale = v2(2 / window_width_over_height, 2);
+    var viewport_scale = v2(2.0 / window_width_over_height, 2.0);
     
     var quads quad_buffer;
     quads.brick_size    = viewport_scale[1] / (2 * board.count + 10);

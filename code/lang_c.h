@@ -20,9 +20,29 @@ struct lang_c_buffer
     lang_parser *parser;
     lang_c_compile_settings settings;
     string_builder builder;
+    u32 comment_depth;
     
     unique_type_buffer unique_types;
 };
+
+// since C/C++ don't support nested comments
+
+void print_comment_start(lang_c_buffer *buffer)
+{
+    if (!buffer->comment_depth)
+        print(&buffer->builder, "/* ");
+    
+    buffer->comment_depth++;
+}
+
+void print_comment_end(lang_c_buffer *buffer)
+{
+    assert(buffer->comment_depth);
+    buffer->comment_depth--;
+    
+    if (!buffer->comment_depth)
+        print(&buffer->builder, " */ ");
+}
 
 bool print_next(ast_node **out_node, ast_queue *queue)
 {
@@ -80,10 +100,23 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 print(builder, "_enumeration_%x", name_type.node->index);
             } break;
             
-            case ast_node_type_type_alias:
+            case ast_node_type_alias_type:
             {
-                local_node_type(type_alias, name_type.node);
-                print(builder, "%.*s", fs(type_alias->name));
+                local_node_type(alias_type, name_type.node);
+                print(builder, "%.*s", fs(alias_type->name));
+            } break;
+            
+            case ast_node_type_expression_reference_type:
+            {
+                local_node_type(expression_reference_type, name_type.node);
+                
+                print_comment_start(buffer);
+                print(builder, "type_of(");
+                print_expression(buffer, expression_reference_type->expression);
+                print(builder, ")");
+                print_comment_end(buffer);
+                
+                print_type(buffer, expression_reference_type->type);
             } break;
             
             case ast_node_type_array_type:
@@ -147,7 +180,11 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
     {
         auto parser = buffer->parser;
         lang_require_return_value(type.name.count, , parser->iterator, "unresolved type needs to have at least a name");
-        print(builder, "/* not resolved */ %.*s", fs(type.name));
+        print_comment_start(buffer);
+        print(builder, "not resolved", fs(type.name));
+        print_comment_end(buffer);
+        
+        print(builder, " %.*s", fs(type.name));
     }
     
     // some space for formating, since the * is considered part of the name, not the type in C
@@ -311,7 +348,11 @@ print_expression_declaration
             local_node_type(name_reference, node);
             
             if (!name_reference->reference)
-                print(builder, "/* not resolved */ ");
+            {
+                print_comment_start(buffer);
+                print(builder, "not resolved");
+                print_comment_end(buffer);
+            }
                 
             print(builder, "%.*s", fs(name_reference->name));
         } break;
@@ -357,9 +398,14 @@ print_expression_declaration
                     {
                         local_node_type(enumeration_type, type.node);
                         
-                        print(builder, "/* ");
+                        print_comment_start(buffer);
+                        
                         print_expression(buffer, field_dereference->expression);
-                        print(builder, "_%.*s */ %i", fs(field_dereference->name), enumeration_type->item_count);
+                        print(builder, "_%.*s", fs(field_dereference->name));
+                        
+                        print_comment_end(buffer);
+                        
+                        print(builder, " %i", enumeration_type->item_count);
                     }
                     else
                     {
@@ -381,9 +427,13 @@ print_expression_declaration
                     {
                         if (array_type->count_expression)
                         {
-                            print(builder, "/* ");
+                            print_comment_start(buffer);
+                            
                             print_expression(buffer, field_dereference->expression);
-                            print(builder, ".count */ ");
+                            print(builder, ".count");
+                            
+                            print_comment_end(buffer);
+                            
                             print_expression(buffer, array_type->count_expression);
                         }
                         else
@@ -398,9 +448,14 @@ print_expression_declaration
                         {
                             local_node_type(array_literal, field_dereference->expression);
                             
-                            print(builder, "/* ");
+                            print_comment_start(buffer);
+                            
                             print_expression(buffer, field_dereference->expression);
-                            print(builder, ".base */ _array_literal_base_%x", array_literal->node.index);
+                            print(builder, ".base");
+                            
+                            print_comment_end(buffer);
+                            
+                            print(builder, "_array_literal_base_%x", array_literal->node.index);
                             //print_expression(buffer, array_type->count_expression);
                         }
                         else
@@ -433,12 +488,16 @@ print_expression_declaration
             }
             else
             {
-                print(builder, "/* too many indirections %.*s */", fs(field_dereference->name));
+                print_comment_start(buffer);
+                print(builder, "too many indirections %.*s", fs(field_dereference->name));
+                print_comment_end(buffer);
             }
             
             if (!field_dereference->reference)
             {
-                print(builder, " /* unresolved */");
+                print_comment_start(buffer);
+                print(builder, "not resolved");
+                print_comment_end(buffer);
             }
         } break;
         
@@ -485,6 +544,23 @@ print_expression_declaration
                     print(builder, ")");
                 } break;
             }
+        } break;
+        
+        case ast_node_type_type_byte_count:
+        {
+            local_node_type(type_byte_count, node);
+            
+            auto count_and_alignment = get_type_byte_count(type_byte_count->type);
+            
+            print_comment_start(buffer);
+            
+            print(builder, "type_byte_count(");
+            print_type(buffer, type_byte_count->type);
+            print(builder, ")");
+            
+            print_comment_end(buffer);
+            
+            print(builder, "%llu", count_and_alignment.byte_count);
         } break;
         
         case ast_node_type_binary_operator:
@@ -548,7 +624,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
     {
         // skip global declarations
         case ast_node_type_enumeration_type:
-        case ast_node_type_type_alias:
+        case ast_node_type_alias_type:
         case ast_node_type_function:
         case ast_node_type_number_type:
         case ast_node_type_function_type:
@@ -1040,7 +1116,7 @@ ast_variable * add_unique_declarations(lang_c_buffer *buffer, ast_variable *firs
 // TODO: add cycle check
 get_unique_type_declaration
 {
-    if (type.name_type.node && is_node_type(type.name_type.node, type_alias))
+    if (type.name_type.node && is_node_type(type.name_type.node, alias_type))
     {
         auto unique_base_type = type;
         unique_base_type.name_type = {};
@@ -1370,7 +1446,7 @@ insert_type_dependency_declaration
         cases_complete;
     
         case ast_node_type_number_type:
-        case ast_node_type_type_alias:
+        case ast_node_type_alias_type:
         {
             insert_dependency(graph, child, name_type);
         } break;
@@ -1468,24 +1544,24 @@ ast_node_buffer sort_declaration_dependencies(lang_parser *parser)
         }
     #endif
         
-        for_bucket_item(bucket, index, parser->type_alias_buckets)
+        for_bucket_item(bucket, index, parser->alias_type_buckets)
         {
-            auto type_alias = &bucket->base[index];
+            auto alias_type = &bucket->base[index];
             
-            if (!type_alias->type.name_type.indirection_count)
+            if (!alias_type->type.name_type.indirection_count)
             {
-                auto name_type = type_alias->type.name_type.node;
+                auto name_type = alias_type->type.name_type.node;
                 switch(name_type->node_type)
                 {
                     case ast_node_type_function_type:
                     case ast_node_type_compound_type:
                     {
-                        insert_dependency(&graph, get_base_node(type_alias), name_type);
+                        insert_dependency(&graph, get_base_node(alias_type), name_type);
                     } break;
                 }
             }
             
-            insert_type_dependency(&graph, get_base_node(type_alias), type_alias->type);
+            insert_type_dependency(&graph, get_base_node(alias_type), alias_type->type);
         }
         
         for_bucket_item(bucket, index, parser->function_buckets)
@@ -1890,21 +1966,21 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     print_newline(builder);
                 } break;
                 
-                case ast_node_type_type_alias:
+                case ast_node_type_alias_type:
                 {
-                    local_node_type(type_alias, node);
+                    local_node_type(alias_type, node);
                     
-                    auto name = type_alias->name;
-                    auto base_type = type_alias->type.base_type.node;
+                    auto name = alias_type->name;
+                    auto base_type = alias_type->type.base_type.node;
                     
-                    if (type_alias->type.base_type.node && !type_alias->type.base_type.indirection_count && !is_node_type(base_type, number_type))
+                    if (alias_type->type.base_type.node && !alias_type->type.base_type.indirection_count && !is_node_type(base_type, number_type))
                     {
                         switch (base_type->node_type)
                         {
                             default:
                             {
                                 print(builder, "typedef ");
-                                print_type(&buffer, type_alias->type, name);
+                                print_type(&buffer, alias_type->type, name);
                                         
                                 print_line(builder, ";");
                             } break;
@@ -1914,7 +1990,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                                 local_node_type(function_type, base_type);
                                 
                                 print(builder, "typedef ");
-                                print_function_type(&buffer, function_type, type_alias->name, true);
+                                print_function_type(&buffer, function_type, alias_type->name, true);
                                 print_line(builder, ";");
                             } break;
                             
@@ -1934,7 +2010,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                                 }
                                 
                                 print_scope_close(builder, false);
-                                print_line(builder, " %.*s;", fs(type_alias->name));
+                                print_line(builder, " %.*s;", fs(alias_type->name));
                                 print_newline(builder);
                             } break;
                             
@@ -1967,7 +2043,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                                 }
                                 
                                 print_scope_close(builder, false);
-                                print_line(builder, " %.*s;", fs(type_alias->name));
+                                print_line(builder, " %.*s;", fs(alias_type->name));
                             
                                 print_newline(builder);
                             } break;
@@ -2019,7 +2095,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     else
                     {
                         print(builder, "typedef ");
-                        print_type(&buffer, type_alias->type, type_alias->name);
+                        print_type(&buffer, alias_type->type, alias_type->name);
                         print_line(builder, ";");
                     }
                 } break;

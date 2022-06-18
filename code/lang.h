@@ -1,9 +1,15 @@
 #pragma once
 
-#if defined LANG_ASSERT_ON_ERROR
-#define lang_maybe_assert_on_error() assert(0)
+#if defined LANG_BREAK_ON_ERROR
+#define lang_maybe_break_on_error() \
+    platform_conditional_fatal_error_location(false, get_call_location(), "Internal Debug Breakpoint", "Hit 'Continue' to see error messages")
+
+//assert(0, "Internal Debug Breakpoint\n\nHit 'Continue' to see error messages")
+
+// assert(0, "Debug Breakpoint:\n\n%.*s", fs(parser->error_messages.memory.array))
+//assert(0, format, __VA_ARGS__)
 #else
-#define lang_maybe_assert_on_error()
+#define lang_maybe_break_on_error()
 #endif
 
 #include "utf8_string.h"
@@ -40,6 +46,9 @@
     macro(function_call, __VA_ARGS__) \
     macro(dereference, __VA_ARGS__) \
     macro(field_dereference, __VA_ARGS__) \
+    macro(type_byte_count, __VA_ARGS__) \
+    macro(get_call_location, __VA_ARGS__) \
+    macro(get_call_argument_text, __VA_ARGS__) \
     macro(unary_operator, __VA_ARGS__) \
     macro(binary_operator, __VA_ARGS__) \
     
@@ -78,7 +87,9 @@
     macro(function_type, __VA_ARGS__) \
     macro(compound_type, __VA_ARGS__) \
     macro(array_type, __VA_ARGS__) \
-    macro(type_alias, __VA_ARGS__) \
+    \
+    macro(expression_reference_type, __VA_ARGS__) \
+    macro(alias_type, __VA_ARGS__) \
     
 #define menum(entry, prefix) \
     prefix ## entry,
@@ -134,7 +145,7 @@ string ast_node_type_names[] =
     macro(f32, __VA_ARGS__) \
     macro(f64, __VA_ARGS__) \
 
-#define lang_base_type_alias_list(macro, ...) \
+#define lang_base_alias_type_list(macro, ...) \
     macro(b8, __VA_ARGS__) \
     macro(b32, __VA_ARGS__) \
     macro(usize, __VA_ARGS__) \
@@ -155,17 +166,17 @@ enum lang_base_number_type
     lang_base_number_type_count,
 };
 
-enum lang_base_type_alias
+enum lang_base_alias_type
 {
-    lang_base_type_alias_list(menum, lang_base_type_alias_)
+    lang_base_alias_type_list(menum, lang_base_alias_type_)
     
-    lang_base_type_alias_count,
+    lang_base_alias_type_count,
 };
 
 enum lang_base_type
 {
     lang_base_number_type_list(menum, lang_base_type_)
-    lang_base_type_alias_list(menum, lang_base_type_)
+    lang_base_alias_type_list(menum, lang_base_type_)
     
     lang_base_type_count,
 };
@@ -180,7 +191,7 @@ enum lang_base_constant
 string lang_base_type_names[] = 
 {
     lang_base_number_type_list(menum_name)
-    lang_base_type_alias_list(menum_name)
+    lang_base_alias_type_list(menum_name)
 };
 
 string lang_base_constant_names[] = 
@@ -331,10 +342,17 @@ struct ast_constant
     ast_node *expression;
 };
 
-struct ast_type_alias
+struct ast_alias_type
 {
     ast_base_node node;
     string name;
+    complete_type_info type;
+};
+
+struct ast_expression_reference_type
+{
+    ast_base_node      node;
+    ast_node           *expression;
     complete_type_info type;
 };
 
@@ -452,6 +470,22 @@ struct ast_field_dereference
         ast_node             *array_count_expression;
     };
 #endif
+};
+
+// pseodo functions
+
+struct ast_type_byte_count
+{
+    ast_base_node      node;
+    complete_type_info type;
+};
+
+typedef ast_base_node ast_get_call_location;
+
+struct ast_get_call_argument_text
+{
+    ast_base_node node;
+    ast_name_reference *argument;
 };
 
 struct ast_array_index
@@ -714,7 +748,7 @@ struct lang_parser
         struct
         {
             ast_number_type *base_number_types[lang_base_number_type_count];
-            ast_type_alias  *base_type_aliases[lang_base_type_alias_count];
+            ast_alias_type  *base_alias_typees[lang_base_alias_type_count];
         };
         
         ast_node *base_types[lang_base_type_count];
@@ -733,6 +767,7 @@ struct lang_parser
     ast_file_list   file_list;
     
     ast_module *lang_module;
+    ast_file   *lang_file;
     ast_module *unnamed_module;
     
     ast_file   *current_file;
@@ -970,7 +1005,14 @@ location_line get_location_line(lang_parser *parser, string token)
             break;
         }
     }
+    
+#if 0
+    // internal strings
+    if (!file)
+        return { parser->lang_file };
+#else
     assert(file);
+#endif
 
     string left = file->text;
     string line = left;
@@ -1014,6 +1056,7 @@ void parser_message_va(lang_parser *parser, string token, cstring format, va_lis
     auto location = get_location_line(parser, token);
     
     auto error_messages = &parser->error_messages;
+    print_newline(error_messages);
     print(error_messages, "%.*s(%i,%i):  ", fs(location.file->path), location.line + 1, location.column + 1);
     print_va(error_messages, format, va_arguments);
     print_newline(error_messages);
@@ -1037,7 +1080,7 @@ void parser_message(lang_parser *parser, string token, cstring format, ...)
     { \
         parser->error = true; \
         parser_message(parser, token, "ERROR: " message, __VA_ARGS__); \
-        lang_maybe_assert_on_error(); \
+        lang_maybe_break_on_error(); \
         return return_value; \
     }
 
@@ -1056,9 +1099,11 @@ void parser_message(lang_parser *parser, string token, cstring format, ...)
 #define parse_expression_declaration ast_node * parse_expression(lang_parser *parser, complete_type_info type)
 parse_expression_declaration;
 
-#define lang_require_expression(destination, parser, type) \
-    destination = lang_require_call(parse_expression(parser, type)); \
-    lang_require(destination, parser->iterator, "expected expression after '%.*s' in %.*s", fs(parser->last_location_token), fnode_type_name(parser->current_parent));
+#define lang_require_expression_return_value(destination, return_value, parser, type) \
+    destination = lang_require_call_return_value(parse_expression(parser, type), return_value); \
+    lang_require_return_value(destination, return_value, parser->iterator, "expected expression after '%.*s' in %.*s", fs(parser->last_location_token), fnode_type_name(parser->current_parent));
+
+#define lang_require_expression(destination, parser, type) lang_require_expression_return_value(destination, null,parser, type)
 
 ast_number * parse_number(lang_parser *parser)
 {
@@ -1348,6 +1393,9 @@ ast_array_literal * parse_array_literal(lang_parser *parser, complete_type_info 
     return array_literal;
 }
 
+#define get_expression_type_declaration complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
+get_expression_type_declaration;
+
 void resolve_complete_type(lang_parser *parser, complete_type_info *type)
 {
     if (type->base_type.node || !type->name_type.node)
@@ -1366,17 +1414,33 @@ void resolve_complete_type(lang_parser *parser, complete_type_info *type)
             type->base_type = type->name_type;
         } break;
         
-        case ast_node_type_type_alias:
+        case ast_node_type_expression_reference_type:
         {
-            local_node_type(type_alias, name_type);
+            local_node_type(expression_reference_type, name_type);
             
-            resolve_complete_type(parser, &type_alias->type);            
-            if (!type_alias->type.base_type.node)
+            if (!expression_reference_type->type.base_type.node)
+            {
+                auto type = get_expression_type(parser, expression_reference_type->expression);
+                resolve_complete_type(parser, &type);
+                
+                expression_reference_type->type = type;
+            }
+            
+            type->base_type = expression_reference_type->type.base_type;
+            type->base_type.indirection_count += type->name_type.indirection_count;
+        } break;
+        
+        case ast_node_type_alias_type:
+        {
+            local_node_type(alias_type, name_type);
+            
+            resolve_complete_type(parser, &alias_type->type);
+            if (!alias_type->type.base_type.node)
                 break;
                 
-            assert(type_alias->type.base_type.node->node_type != ast_node_type_type_alias);
+            assert(alias_type->type.base_type.node->node_type != ast_node_type_alias_type);
             
-            type->base_type = type_alias->type.base_type;
+            type->base_type = alias_type->type.base_type;
             type->base_type.indirection_count += type->name_type.indirection_count;
         } break;
     }
@@ -1390,6 +1454,21 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
         return {};
     
     complete_type_info result = {};
+    
+    if (name == s("type_of"))
+    {
+        new_local_node(expression_reference_type);
+        
+        lang_require_consume_return_value("(", {}, "after 'type_of'");
+        
+        lang_require_expression_return_value(expression_reference_type->expression, {}, parser, {});
+        
+        lang_require_consume_return_value(")", {}, "after type_of expression");
+        
+        result.name_type.node = get_base_node(expression_reference_type);
+        return result;
+    }
+    
     result.name = name;
 
     for (u32 i = 0; i < lang_base_type_count; i++)
@@ -1445,6 +1524,8 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
     ast_node *parent = parser->current_parent;
     ast_node **parent_expression = &root;
     
+    ast_node *expression = null;
+    
     while (true)
     {
         auto backup = *parser;
@@ -1460,12 +1541,11 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
             parent_expression = &unary_operator->expression;
             continue;
         }
+        else 
         
         *parser = backup;
         break;
     }
-    
-    ast_node *expression = null;
 
     if (try_consume(parser, s("(")))
     {
@@ -1535,36 +1615,77 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         auto name = consume_name(parser);
         if (name.count)
         {
-            new_local_leaf_node(name_reference, name);
-            name_reference->name = name;
-            expression = get_base_node(name_reference);
-            
-            // function call
-            if (try_consume(parser, s("(")))
+            // check some psedo function calls
+            if (name == s("get_call_location"))
             {
-                new_local_node(function_call, parser->node_locations.base[expression->index].text);
+                new_local_leaf_node(get_call_location, name);
+                
+                lang_require_consume("(", "after 'get_call_location'");
+                lang_require_consume(")", "after 'get_call_location('");
+                
+                 expression = get_base_node(get_call_location);
+            }
+            else if (name == s("get_call_argument_text"))
+            {
+                new_local_node(get_call_argument_text);
+                
+                lang_require_consume("(", "after 'get_call_argument_text'");
+                
+                auto argument_name = consume_name(parser);
+                lang_require(argument_name.count, parser->iterator, "expected function argument name as single argument to get_call_argument_text");
+                
+                lang_require_consume(")", "after 'get_call_argument_text('");
+                
+                new_local_leaf_node(name_reference, argument_name);
+                name_reference->name = argument_name;
+                get_call_argument_text->argument = name_reference;
+                
+                expression = get_base_node(get_call_argument_text);
+            }
+            else if (name == s("type_byte_count"))
+            {
+                new_local_node(type_byte_count);
+                
+                lang_require_consume_return_value("(", {}, "after 'type_byte_count'");
             
-                auto argument_tail_next = make_tail_next(&function_call->first_argument);
-            
-                bool is_first = true;
-                while (!try_consume(parser, s(")")))
+                type_byte_count->type = lang_require_call(parse_type(parser, true));
+                
+                lang_require_consume_return_value(")", {}, "after type_byte_count type");
+                expression = get_base_node(type_byte_count);
+            }
+            else
+            {
+                new_local_leaf_node(name_reference, name);
+                name_reference->name = name;
+                expression = get_base_node(name_reference);
+                
+                // function call
+                if (try_consume(parser, s("(")))
                 {
-                    lang_require(is_first || try_consume(parser, s(",")), parser->iterator, "expected expression after ','");
+                    new_local_node(function_call, parser->node_locations.base[expression->index].text);
+                
+                    auto argument_tail_next = make_tail_next(&function_call->first_argument);
+                
+                    bool is_first = true;
+                    while (!try_consume(parser, s(")")))
+                    {
+                        lang_require(is_first || try_consume(parser, s(",")), parser->iterator, "expected expression after ','");
+                        
+                        auto argument = lang_require_call(parse_expression(parser, {}));
+                        lang_require(argument, parser->iterator, "expected expression or ')' in function call");
                     
-                    auto argument = lang_require_call(parse_expression(parser, {}));
-                    lang_require(argument, parser->iterator, "expected expression or ')' in function call");
-                
-                    append_tail_next(&argument_tail_next, argument);
-                
-                    is_first = false;
+                        append_tail_next(&argument_tail_next, argument);
+                    
+                        is_first = false;
+                    }
+                    
+                    function_call->expression = expression;
+                    
+                    function_call->node.parent = expression->parent;
+                    expression->parent = get_base_node(function_call);
+                    
+                    expression = get_base_node(function_call);
                 }
-                
-                function_call->expression = expression;
-                
-                function_call->node.parent = expression->parent;
-                expression->parent = get_base_node(function_call);
-                
-                expression = get_base_node(function_call);
             }
         }
     }
@@ -1818,12 +1939,12 @@ complete_type_info get_type(lang_parser *parser, lang_base_type type)
             result.name = number_type->name;
         } break;
         
-        case ast_node_type_type_alias:
+        case ast_node_type_alias_type:
         {
-            local_node_type(type_alias, result.name_type.node);
-            result.base_type                    = type_alias->type.base_type;
-            result.base_type.indirection_count += type_alias->type.name_type.indirection_count;
-            result.name = type_alias->type.name;
+            local_node_type(alias_type, result.name_type.node);
+            result.base_type                    = alias_type->type.base_type;
+            result.base_type.indirection_count += alias_type->type.name_type.indirection_count;
+            result.name = alias_type->type.name;
         } break;
     }
     
@@ -1844,9 +1965,6 @@ complete_type_info parse_type_or_default(lang_parser *parser)
     
     return type;
 }
-
-#define get_expression_type_declaration complete_type_info get_expression_type(lang_parser *parser, ast_node *node)
-get_expression_type_declaration;
 
 ast_variable * parse_declaration(base_list_tail_next *tail_next, lang_parser *parser)
 {
@@ -2046,6 +2164,15 @@ ast_node * parse_statements(lang_parser *parser)
             {
                 auto name = consume_name(parser);
                 
+                bool is_debug_only = false;
+                if (name == s("debug"))
+                {
+                    is_debug_only = true;
+                    name = consume_name(parser);
+                }
+                
+                assert(!is_debug_only, "not supported yet");
+                
                 if (try_consume(parser, s("=")))
                 {
                     new_local_node(constant);
@@ -2134,10 +2261,10 @@ ast_node * parse_statements(lang_parser *parser)
                         lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' after function type");
                         
                         // type alias def x func ...;
-                        new_local_node(type_alias);
-                        type_alias->type = type;
-                        type_alias->name = name;
-                        statement = get_base_node(type_alias);
+                        new_local_node(alias_type);
+                        alias_type->type = type;
+                        alias_type->name = name;
+                        statement = get_base_node(alias_type);
                     }
                     
                     if (type.name_type.node)
@@ -2147,21 +2274,21 @@ ast_node * parse_statements(lang_parser *parser)
                 }
                 else if (try_consume_keyword(parser, s("struct")))
                 {
-                    new_local_node(type_alias);
+                    new_local_node(alias_type);
                 
                     lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after structure declaration");
                     
                     auto compound_type = lang_require_call(parse_arguments(parser, s("}")));
                     
-                    type_alias->type.base_type.node = get_base_node(compound_type);
-                    type_alias->type.name_type      = type_alias->type.base_type;
-                    type_alias->name = name;
+                    alias_type->type.base_type.node = get_base_node(compound_type);
+                    alias_type->type.name_type      = alias_type->type.base_type;
+                    alias_type->name = name;
                     
-                    append_tail_next(&tail_next, &type_alias->node);
+                    append_tail_next(&tail_next, &alias_type->node);
                 }
                 else if (try_consume_keyword(parser, s("enum")))
                 {
-                    new_local_node(type_alias);
+                    new_local_node(alias_type);
                 
                     new_local_node(enumeration_type);
                     
@@ -2227,19 +2354,19 @@ ast_node * parse_statements(lang_parser *parser)
                     
                     enumeration_type->item_count = item_count;
                     
-                    type_alias->type.base_type.node = get_base_node(enumeration_type);
-                    type_alias->type.name_type      = type_alias->type.base_type;
-                    type_alias->name = name;
-                    append_tail_next(&tail_next, &type_alias->node);
+                    alias_type->type.base_type.node = get_base_node(enumeration_type);
+                    alias_type->type.name_type      = alias_type->type.base_type;
+                    alias_type->name = name;
+                    append_tail_next(&tail_next, &alias_type->node);
                 }
                 else if (try_consume_keyword(parser, s("type")))
                 {
-                    new_local_node(type_alias);
-                    type_alias->name = name;
-                    type_alias->type = lang_require_call(parse_type(parser, true));
+                    new_local_node(alias_type);
+                    alias_type->name = name;
+                    alias_type->type = lang_require_call(parse_type(parser, true));
                     lang_require(try_consume(parser, s(";")), parser->iterator, "expected ';' at the end of type alias definition");
                     
-                    append_tail_next(&tail_next, &type_alias->node);
+                    append_tail_next(&tail_next, &alias_type->node);
                 }
                 else
                 {
@@ -2433,10 +2560,10 @@ string get_name(ast_node *node)
             name = field_dereference->name;
         } break;
 
-        case ast_node_type_type_alias:
+        case ast_node_type_alias_type:
         {
-            local_node_type(type_alias, node);
-            name = type_alias->name;
+            local_node_type(alias_type, node);
+            name = alias_type->name;
         } break;
 
         case ast_node_type_function:
@@ -2524,7 +2651,15 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_string:
         case ast_node_type_name_reference:
         case ast_node_type_external_binding:
+        case ast_node_type_get_call_location:
         {
+        } break;
+        
+        case ast_node_type_get_call_argument_text:
+        {
+            local_node_type(get_call_argument_text, node);
+            
+            enqueue(queue, node, &get_base_node(get_call_argument_text->argument));
         } break;
         
         case ast_node_type_variable:
@@ -2539,18 +2674,33 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, &variable->type.name_type.node);
         } break;
         
-        case ast_node_type_type_alias:
+        case ast_node_type_type_byte_count:
         {
-            local_node_type(type_alias, node);
+            local_node_type(type_byte_count, node);
             
-            auto name_node = type_alias->type.name_type.node;
+            if (type_byte_count->type.name_type.node && type_byte_count->type.name_type.node->parent == node)
+                enqueue(queue, node, &type_byte_count->type.name_type.node);
+        } break;
+        
+        case ast_node_type_expression_reference_type:
+        {
+            local_node_type(expression_reference_type, node);
+            
+            enqueue(queue, node, &expression_reference_type->expression);
+        } break;
+        
+        case ast_node_type_alias_type:
+        {
+            local_node_type(alias_type, node);
+            
+            auto name_node = alias_type->type.name_type.node;
             if (name_node)
             {
                 switch (name_node->node_type)
                 {
                     cases_complete;
                 
-                    case ast_node_type_type_alias:
+                    case ast_node_type_alias_type:
                     case ast_node_type_number_type:
                     break;
                 
@@ -2559,7 +2709,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                     case ast_node_type_enumeration_type:
                     case ast_node_type_array_type:
                     {
-                        enqueue(queue, node, &type_alias->type.name_type.node);
+                        enqueue(queue, node, &alias_type->type.name_type.node);
                     } break;
                 }
             }
@@ -3091,11 +3241,11 @@ get_expression_type_declaration
                 {
                     local_node_type(enumeration_item, field_dereference->reference);
                     
-                    local_node_type(type_alias, enumeration_item->enumeration_type->node.parent);
+                    local_node_type(alias_type, enumeration_item->enumeration_type->node.parent);
                     
                     complete_type_info type = {};
-                    type.base_type.node = type_alias->type.base_type.node;
-                    type.name_type.node = get_base_node(type_alias);
+                    type.base_type.node = alias_type->type.base_type.node;
+                    type.name_type.node = get_base_node(alias_type);
                     return type;
                 } break;
             }
@@ -3117,9 +3267,7 @@ get_expression_type_declaration
                     if (!unary_operator->type.base_type.node)
                     {
                         unary_operator->type = get_expression_type(parser, unary_operator->expression);
-                        if (unary_operator->type.name_type.node != unary_operator->type.base_type.node)
-                            unary_operator->type.base_type.indirection_count++;
-                            
+                        unary_operator->type.base_type.indirection_count++;
                         unary_operator->type.name_type.indirection_count++;
                     }
                     
@@ -3268,10 +3416,10 @@ get_expression_type_declaration
                     return {};
                 } break;
                 
-                case ast_node_type_type_alias:
+                case ast_node_type_alias_type:
                 {
-                    local_node_type(type_alias, name_reference->reference);
-                    return type_alias->type;
+                    local_node_type(alias_type, name_reference->reference);
+                    return alias_type->type;
                 } break;
                 
                 case ast_node_type_variable:
@@ -3466,6 +3614,7 @@ void reset(lang_parser *parser)
     lang_require_return_value(parse(parser, source, s("lang_internal")), , source, "internal compiler error");
     
     auto file = parser->file_list.first;
+    parser->lang_file   = file;
     parser->lang_module = file->module;
     
     // prepend basic types into file
@@ -3475,15 +3624,15 @@ void reset(lang_parser *parser)
     auto parent = get_base_node(file);
     for (auto it = file->first_statement; it; it = it->next)
     {
-        if (is_node_type(it, type_alias))
+        if (is_node_type(it, alias_type))
         {
-            local_node_type(type_alias, it);
+            local_node_type(alias_type, it);
             
-            for (u32 i = lang_base_number_type_count; i < lang_base_number_type_count + lang_base_type_alias_count; i++)
+            for (u32 i = lang_base_number_type_count; i < lang_base_number_type_count + lang_base_alias_type_count; i++)
             {
-                if (type_alias->name == lang_base_type_names[i])
+                if (alias_type->name == lang_base_type_names[i])
                 {
-                    parser->base_types[i] = get_base_node(type_alias);
+                    parser->base_types[i] = get_base_node(alias_type);
                     break;
                 }
             }
@@ -3772,15 +3921,14 @@ void update(ast_node_buffer *scope_stack, ast_node *scope)
 
 struct resolve_name_entry
 {
-    ast_node *parent;
+    ast_node *node;
+    string name;
     
     union
     {
         ast_node           **storage;
         complete_type_info *type;
     };
-    
-    string name;
 };
 
 buffer_type(resolve_name_buffer, resolve_name_array, resolve_name_entry);
@@ -3832,10 +3980,10 @@ void print_type(lang_parser *parser, string_builder *builder, complete_type_info
                 print(builder, "[]");
         } break;
 
-        case ast_node_type_type_alias:
+        case ast_node_type_alias_type:
         {
-            local_node_type(type_alias, type.name_type.node);
-            print(builder, "%.*s", fs(type_alias->name));
+            local_node_type(alias_type, type.name_type.node);
+            print(builder, "%.*s", fs(alias_type->name));
         } break;
     }
     
@@ -3933,6 +4081,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
     local_buffer(unresolved_types, resolve_name_buffer);
     local_buffer(unresolved_field_dereferences, ast_node_buffer);
     local_buffer(unresolved_variables, ast_node_buffer);
+    local_buffer(unresolved_expression_reference_types, ast_node_buffer);
     local_buffer(unresolved_function_calls, ast_node_buffer);
     local_buffer(unresolved_binary_operations, ast_node_buffer);
 
@@ -3945,7 +4094,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             if (!name_reference->reference)
             {
                 resize_buffer(&unresolved_names, unresolved_names.count + 1);
-                unresolved_names.base[unresolved_names.count - 1] = { name_reference->node.parent, &name_reference->reference, name_reference->name };
+                unresolved_names.base[unresolved_names.count - 1] = { get_base_node(name_reference), name_reference->name, &name_reference->reference };
             }
         }
         
@@ -3987,7 +4136,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 {
                     resize_buffer(&unresolved_types, unresolved_types.count + 1);
                     auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                    entry->parent = variable->node.parent;
+                    entry->node = get_base_node(variable);
                     entry->type = &variable->type;
                     entry->name = variable->type.name;
                 }
@@ -4009,7 +4158,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = array_type->node.parent;
+                entry->node = get_base_node(array_type);
                 entry->type = &array_type->item_type;
                 entry->name = array_type->item_type.name;
             }
@@ -4023,23 +4172,48 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = compound_literal->node.parent;
+                entry->node = get_base_node(compound_literal);
                 entry->type = &compound_literal->type;
                 entry->name = compound_literal->type.name;
             }
         }
         
-        for_bucket_item(bucket, index, parser->type_alias_buckets)
+        for_bucket_item(bucket, index, parser->alias_type_buckets)
         {
-            auto type_alias = &bucket->base[index];
+            auto alias_type = &bucket->base[index];
             
-            if (!type_alias->type.base_type.node)
+            if (!alias_type->type.base_type.node)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = type_alias->node.parent;
-                entry->type = &type_alias->type;
-                entry->name = type_alias->type.name;
+                entry->node = get_base_node(alias_type);
+                entry->type = &alias_type->type;
+                entry->name = alias_type->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->type_byte_count_buckets)
+        {
+            auto type_byte_count = &bucket->base[index];
+            
+            if (!type_byte_count->type.base_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->node = get_base_node(type_byte_count);
+                entry->type = &type_byte_count->type;
+                entry->name = type_byte_count->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->expression_reference_type_buckets)
+        {
+            auto expression_reference_type = &bucket->base[index];
+            
+            if (!expression_reference_type->type.base_type.node)
+            {
+                resize_buffer(&unresolved_expression_reference_types, unresolved_expression_reference_types.count + 1);
+                unresolved_expression_reference_types.base[unresolved_expression_reference_types.count - 1] = get_base_node(expression_reference_type);
             }
         }
         
@@ -4051,7 +4225,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = function->node.parent;
+                entry->node = get_base_node(function);
                 entry->type = &function->type;
                 entry->name = function->type.name;
             }
@@ -4065,7 +4239,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = array_type->node.parent;
+                entry->node = get_base_node(array_type);
                 entry->type = &array_type->item_type;
                 entry->name = array_type->item_type.name;
             }
@@ -4079,7 +4253,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 resize_buffer(&unresolved_types, unresolved_types.count + 1);
                 auto entry = &unresolved_types.base[unresolved_types.count - 1];
-                entry->parent = unary_operator->node.parent;
+                entry->node = get_base_node(unary_operator);
                 entry->type = &unary_operator->type;
                 entry->name = unary_operator->type.name;
             }
@@ -4097,7 +4271,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             {
                 auto entry = unresolved_names.base[i];
                 
-                *entry.storage = find_node(resolver, entry.parent, entry.name);
+                *entry.storage = find_node(resolver, entry.node, entry.name);
                 if (*entry.storage)
                 {
                     unresolved_names.base[i] = unresolved_names.base[--unresolved_names.count];
@@ -4113,8 +4287,8 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 
                 if (!entry.type->name_type.node)
                 {
-                    auto type_node = find_node(resolver, entry.parent, entry.name);
-                    if (type_node && type_node->node_type <= ast_node_type_type_alias)
+                    auto type_node = find_node(resolver, entry.node, entry.name);
+                    if (type_node && type_node->node_type <= ast_node_type_alias_type)
                     {
                         entry.type->name_type.node = type_node;
                         did_resolve_entry |= (entry.type->name_type.node != null);
@@ -4153,6 +4327,23 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 }
             }
             
+            for (u32 i = 0; i < unresolved_expression_reference_types.count; i++)
+            {
+                auto node = unresolved_expression_reference_types.base[i];
+                local_node_type(expression_reference_type, node);
+                
+                auto type = get_expression_type(parser, expression_reference_type->expression);
+                if (type.base_type.node)
+                {
+                    expression_reference_type->type = type;
+                    
+                    unresolved_expression_reference_types.base[i] = unresolved_expression_reference_types.base[--unresolved_expression_reference_types.count];
+                    resize_buffer(&unresolved_expression_reference_types, unresolved_expression_reference_types.count);
+                    did_resolve_entry = true;
+                    i--; // repeat index
+                }
+            }
+            
             for (u32 i = 0; i < unresolved_field_dereferences.count; i++)
             {
                 auto node = unresolved_field_dereferences.base[i];
@@ -4169,6 +4360,13 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                         switch (base_type->node_type)
                         {
                             cases_complete_message("%.*s", fnode_type_name(base_type));
+                            
+                            case ast_node_type_number_type:
+                            {
+                                local_node_type(number_type, base_type);
+                                
+                                lang_require_return_value(false, , parser->node_locations.base[field_dereference->node.index].text, "number type %.*s has no field '%.*s'", fs(number_type->name), fs(field_dereference->name));
+                            } break;
                             
                             case ast_node_type_compound_type:
                             {
@@ -4287,7 +4485,32 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
         }
     }
  
+    // semantic checks
+
     {
+        auto error_messages = &parser->error_messages;
+        bool has_warnings = false;
+        
+        for (u32 i = 0; i < unresolved_variables.count; i++)
+        {
+            auto node = unresolved_variables.base[i];
+            local_node_type(variable, node);
+            
+            lang_require_return_value(variable->type.name.count, , parser->node_locations.base[variable->node.index].text, "could not infere variable type");
+        }
+        
+        for (u32 i = 0; i < unresolved_names.count; i++)
+        {
+            auto node = unresolved_names.base[i].node;
+            local_node_type(name_reference, node);
+            
+            if (!name_reference->reference)
+            {
+                has_warnings = true;
+                parser_message(parser, parser->node_locations.base[name_reference->node.index].text, "WARNING: could not resolve name '%.*s'", fs(name_reference->name));
+            }
+        }
+    
         for (u32 i = 0; i < unresolved_function_calls.count; i++)
         {
             auto node = unresolved_function_calls.base[i];
@@ -4316,9 +4539,8 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             local_node_type(function_overloads, name_reference->reference);
                 
             parser->error = true;
-            parser_message(parser, parser->node_locations.base[function_call->node.index].text, "ERROR: no matching function overload found"); \
+            parser_message(parser, parser->node_locations.base[function_call->node.index].text, "ERROR: no matching function overload found");
             
-            auto error_messages = &parser->error_messages;
             
             print_newline(error_messages);
             print_line(error_messages, "for function call:");
@@ -4359,107 +4581,14 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 print_line(error_messages, "%.*s func%.*s", fs(function->name), fs(parser->node_locations.base[function_type->node.index].text));
             }
             error_messages->indent--;
-            lang_maybe_assert_on_error();
-            
+        }
+        
+        if (parser->error)
+        {
+            lang_maybe_break_on_error();
             return;
         }
     }
-
-#if 1
-
-    for (u32 i = 0; i < unresolved_names.count; i++)
-    {
-        auto entry = unresolved_names.base[i];
-        
-    #if 0
-        switch (node->node_type)
-        {
-            case ast_node_type_field_dereference:
-            {
-                local_node_type(field_dereference, node);
-                
-                if (field_dereference->name == s("count"))
-                {
-                    auto type = get_expression_type(field_dereference->expression);
-                    
-                    if (type.base_type.modifiers.count && (type.base_type.modifiers.base[type.base_type.modifiers.count - 1] == type_modifier_type_constant_array))
-                    {
-                        field_dereference->array_count_expression = type.base_type.modifiers.base[type.base_type.modifiers.count - 1].constant_array_count_expression;
-                        field_dereference->referene_type = field_dereference_type_array_count_expression;
-                    }
-                }
-                
-            } break;
-        }
-    #endif
-    
-        //printf("unresolved reference to '%.*s'\n", fs(entry.name));
-        
-    }
-
-    #if 0
-    {
-        local_buffer(queue, ast_queue);
- 
-        if (root)
-            enqueue(&queue, &root);
-            
-        ast_queue_entry entry;
-        while (next(&entry, &queue))
-        {
-            auto node = *entry.node_field;
-            
-            update(&scope_stack, entry.scope);
-            
-            switch (node->node_type)
-            {
-                case ast_node_type_name_reference:
-                {
-                    local_node_type(name_reference, node);
-                
-                    if (!name_reference->reference)
-                        printf("unresolved reference to '%.*s'\n", fs(name_reference->name));
-                } break;
-                
-                case ast_node_type_field_dereference:
-                {
-                    local_node_type(field_dereference, node);
-                    
-                    if (!field_dereference->variable)
-                    {
-                        printf("unresolved reference to '%.*s'\n", fs(field_dereference->name));
-                    }
-                } break;
-                
-                case ast_node_type_variable:
-                {
-                    local_node_type(variable, node);
-                    
-                    if (!variable->type.base_type)
-                        printf("unresolved reference to '%.*s'\n", fs(variable->type.name));
-                } break;
-                
-                case ast_node_type_type_alias:
-                {
-                    local_node_type(type_alias, node);
-                    
-                    if (!type_alias->type.base_type)
-                        printf("unresolved reference to '%.*s'\n", fs(type_alias->type.name));
-                } break;
-                
-                case ast_node_type_function:
-                {
-                    local_node_type(function, node);
-                    
-                    if (!function->type.base_type)
-                        printf("unresolved reference to '%.*s'\n", fs(function->type.name));
-                } break;
-            }
-        }
-    }
-    #endif
-    
-#endif
 }
 
 bool try_add_default_argument(lang_parser *parser, ast_function_call *function_call, ast_function_type *function_type, ast_node ***argument_tail_next, ast_variable **input_pointer)
@@ -4473,168 +4602,166 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
     {
         auto default_value = input_variable->default_expression;
 
-        // handle special pseudo functions
-        if (is_node_type(default_value, function_call))
+        // handle pseodo functions for default arguments
+        switch (default_value->node_type)
         {
-            auto pseudo_function_call = get_node_type(function_call, default_value);
-
-            if (is_node_type(pseudo_function_call->expression, name_reference))
+            case ast_node_type_get_call_location:
             {
-                local_node_type(name_reference, pseudo_function_call->expression);
-
-                if (name_reference->name == s("get_call_argument_text"))
+                local_node_type(get_call_location, default_value);
+                
+                new_local_node(compound_literal);
+                compound_literal->type.name_type.node = parser->base_types[lang_base_type_code_location];
+                compound_literal->type.name           = get_name(parser->base_types[lang_base_type_code_location]);
+                resolve_complete_type(parser, &compound_literal->type);
+                
+                compound_literal->node.parent = get_base_node(function_call);
+                
+                auto tail_next = make_tail_next(&compound_literal->first_field);
+                
+                auto location_token = parser->node_locations.base[function_call->node.index].text;
+                auto location = get_location_line(parser, location_token);
+                
                 {
-                    lang_require_return_value(pseudo_function_call->first_argument && !pseudo_function_call->first_argument->next && is_node_type(pseudo_function_call->first_argument, name_reference), false, name_reference->name, "pseudo function get_call_argument_text expects exactly one name reference argument");
-
-                    auto argument_name = get_node_type(name_reference, pseudo_function_call->first_argument);
-
-                    auto call_argument = function_call->first_argument;
+                    new_local_node(compound_literal_field);
+                    compound_literal_field->name = s("module");
+                
+                    new_local_node(string);
+                    string->text = location.file->module->name;
+                    compound_literal_field->expression = get_base_node(string);
                     
-                    auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
-                    
-                    for (auto variable = input_compound_type->first_field; variable; variable = (ast_variable *) variable->node.next)
-                    {
-                        if (variable->name == argument_name->name)
-                        {
-                            lang_require_return_value(call_argument != argument, false, name_reference->name, "pseudo function get_call_argument_text can not have itself as the name reference argument");
-
-                            auto text_node = new_leaf_node(string, parser->node_locations.base[default_value->index].text);
-                            text_node->text = parser->node_locations.base[call_argument->index].text;
-                            text_node->node.parent = get_base_node(function_call);
-
-                            // add new argument with default value
-                            text_node->node.next = argument;
-                            **argument_tail_next = get_base_node(text_node);
-                            *argument_tail_next = &text_node->node.next;
-                            // argument stays the same
-
-                            input_variable = (ast_variable *) input_variable->node.next;
-                            break;
-                        }
-
-                        call_argument = call_argument->next;
-                    }
-
-                    lang_require_return_value(call_argument, false, name_reference->name, "can't find function argument %.*s for pseudo function get_call_argument_text, expects a name of an argument of the function type input", fs(name_reference->name));
-                    
-                    *input_pointer = input_variable;
-                    return true;
+                    append_tail_next(&tail_next, get_base_node(compound_literal_field));
                 }
-                else if (name_reference->name == s("get_call_location"))
+                
                 {
-                    lang_require(!pseudo_function_call->first_argument, name_reference->name, "pseudo function get_call_location expects no arguments");
-    
-                    new_local_node(compound_literal);
-                    compound_literal->type.name_type.node = parser->base_types[lang_base_type_code_location];
-                    compound_literal->type.name           = get_name(parser->base_types[lang_base_type_code_location]);
-                    resolve_complete_type(parser, &compound_literal->type);
+                    new_local_node(compound_literal_field);
+                    compound_literal_field->name = s("file");
+                
+                    new_local_node(string);
+                    string->text = location.file->path;
+                    compound_literal_field->expression = get_base_node(string);
                     
-                    compound_literal->node.parent = get_base_node(function_call);
+                    append_tail_next(&tail_next, get_base_node(compound_literal_field));
+                }
+                
+                {
+                    auto function = (ast_function *) function_call->node.parent;
+                    while (function && !is_node_type(get_base_node(function), function))
+                        function = (ast_function *) function->node.parent;
+                
+                    new_local_node(compound_literal_field);
+                    compound_literal_field->name = s("function");
+                
+                    auto string_literal = new_leaf_node(string, string{});
+                    if (function)
+                        string_literal->text = function->name;
+                    else
+                        string_literal->text = s("main");
+                    compound_literal_field->expression = get_base_node(string_literal);
                     
-                    auto tail_next = make_tail_next(&compound_literal->first_field);
+                    append_tail_next(&tail_next, get_base_node(compound_literal_field));
+                }
+                
+                {
+                    new_local_node(compound_literal_field);
+                    compound_literal_field->name = s("line");
+                
+                    new_local_node(number);
+                    number->value.u64_value = location.line + 1;
+                    number->value.bit_count_power_of_two = 6;
+                    compound_literal_field->expression = get_base_node(number);
                     
-                    auto location_token = parser->node_locations.base[function_call->node.index].text;
-                    auto location = get_location_line(parser, location_token);
+                    append_tail_next(&tail_next, get_base_node(compound_literal_field));
+                }
+                
+                {
+                    new_local_node(compound_literal_field);
+                    compound_literal_field->name = s("column");
+                
+                    new_local_node(number);
+                    number->value.u64_value = location.column + 1;
+                    number->value.bit_count_power_of_two = 6;
+                    compound_literal_field->expression = get_base_node(number);
                     
-                    {
-                        new_local_node(compound_literal_field);
-                        compound_literal_field->name = s("module");
+                    append_tail_next(&tail_next, get_base_node(compound_literal_field));
+                }
+                
+                // add new argument with default value
+                compound_literal->node.next = argument;
+                **argument_tail_next = get_base_node(compound_literal);
+                *argument_tail_next = &compound_literal->node.next;
+                // argument stays the same
+
+                input_variable = (ast_variable *) input_variable->node.next;
+                *input_pointer = input_variable;
+                
+                return true;
+            } break;
+            
+            case ast_node_type_get_call_argument_text:
+            {
+                local_node_type(get_call_argument_text, default_value);
+                
+                auto input_argument_variable = get_node_type(variable, get_call_argument_text->argument->reference);
+                
+                lang_require_return_value(input_argument_variable, false, input_argument_variable->name, "pseudo function get_call_argument_text argument reference could not be resolved");
+                
+                lang_require_return_value(input_variable != input_argument_variable, false, input_argument_variable->name, "pseudo function get_call_argument_text can not have itself as the argument reference");
+                
+                lang_require_return_value(input_argument_variable->node.parent == function_type->input.base_type.node, false, input_argument_variable->name, "pseudo function get_call_argument_text argument reference was not resolved to an argument of function input");
+                
+                auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
+                
+                // skip to call argument
+                auto call_argument = function_call->first_argument;
+                for (auto variable = input_compound_type->first_field; variable; variable = (ast_variable *) variable->node.next)
+                {
+                    if (variable->name == input_argument_variable->name)
+                        break;
                     
-                        new_local_node(string);
-                        string->text = location.file->module->name;
-                        compound_literal_field->expression = get_base_node(string);
-                        
-                        append_tail_next(&tail_next, get_base_node(compound_literal_field));
-                    }
-                    
-                    {
-                        new_local_node(compound_literal_field);
-                        compound_literal_field->name = s("file");
-                    
-                        new_local_node(string);
-                        string->text = location.file->path;
-                        compound_literal_field->expression = get_base_node(string);
-                        
-                        append_tail_next(&tail_next, get_base_node(compound_literal_field));
-                    }
-                    
-                    {
-                    
-                        auto function = (ast_function *) function_call->node.parent;
-                        while (function && !is_node_type(get_base_node(function), function))
-                            function = (ast_function *) function->node.parent;
-                    
-                        new_local_node(compound_literal_field);
-                        compound_literal_field->name = s("function");
-                    
-                        auto string_literal = new_leaf_node(string, string{});
-                        if (function)
-                            string_literal->text = function->name;
-                        else
-                            string_literal->text = s("main");
-                        compound_literal_field->expression = get_base_node(string_literal);
-                        
-                        append_tail_next(&tail_next, get_base_node(compound_literal_field));
-                    }
-                    
-                    {
-                        new_local_node(compound_literal_field);
-                        compound_literal_field->name = s("line");
-                    
-                        new_local_node(number);
-                        number->value.u64_value = location.line + 1;
-                        number->value.bit_count_power_of_two = 6;
-                        compound_literal_field->expression = get_base_node(number);
-                        
-                        append_tail_next(&tail_next, get_base_node(compound_literal_field));
-                    }
-                    
-                    {
-                        new_local_node(compound_literal_field);
-                        compound_literal_field->name = s("column");
-                    
-                        new_local_node(number);
-                        number->value.u64_value = location.column + 1;
-                        number->value.bit_count_power_of_two = 6;
-                        compound_literal_field->expression = get_base_node(number);
-                        
-                        append_tail_next(&tail_next, get_base_node(compound_literal_field));
-                    }
-                    
+                    call_argument = call_argument->next;
+                }
+                
+                auto text_node = new_leaf_node(string, parser->node_locations.base[default_value->index].text);
+                text_node->text = parser->node_locations.base[call_argument->index].text;
+                text_node->node.parent = get_base_node(function_call);
+
+                // add new argument with default value
+                text_node->node.next = argument;
+                **argument_tail_next = get_base_node(text_node);
+                *argument_tail_next = &text_node->node.next;
+                // argument stays the same
+
+                input_variable = (ast_variable *) input_variable->node.next;
+                *input_pointer = input_variable;
+                
+                return true;
+            } break;
+            
+            default:
+            {
+                auto input_type = input_variable->type;
+                auto argument_type = input_type;
+                if (argument)
+                    argument_type = get_expression_type(parser, argument);
+        
+                // default argument skipped on type match
+                if (!argument || !types_are_compatible(parser, input_type, argument_type))
+                {
+                    auto default_expression = clone(parser, default_value, get_base_node(function_call));
+        
                     // add new argument with default value
-                    compound_literal->node.next = argument;
-                    **argument_tail_next = get_base_node(compound_literal);
-                    *argument_tail_next = &compound_literal->node.next;
+                    default_expression->next = argument;
+                    **argument_tail_next = default_expression;
+                    *argument_tail_next = &default_expression->next;
                     // argument stays the same
-    
+        
                     input_variable = (ast_variable *) input_variable->node.next;
-    
                     *input_pointer = input_variable;
+                    
                     return true;
                 }
             }
         }
-
-        auto input_type = input_variable->type;
-        auto argument_type = input_type;
-        if (argument)
-            argument_type = get_expression_type(parser, argument);
-
-        // default argument skipped on type match
-        if (!argument || !types_are_compatible(parser, input_type, argument_type))
-        {
-            auto default_expression = clone(parser, default_value, get_base_node(function_call));
-
-            // add new argument with default value
-            default_expression->next = argument;
-            **argument_tail_next = default_expression;
-            *argument_tail_next = &default_expression->next;
-            // argument stays the same
-
-            input_variable = (ast_variable *) input_variable->node.next;
-            *input_pointer = input_variable;
-            return true;
-        }                                                                                           
     }
     
     return false;
@@ -4681,12 +4808,12 @@ void resolve(lang_parser *parser)
     
     // collect declarations
     {
-        for (auto bucket = parser->type_alias_buckets; bucket; bucket = bucket->next)
+        for (auto bucket = parser->alias_type_buckets; bucket; bucket = bucket->next)
         {
             for (u32 i = 0; i < bucket->count; i++)
             {
-                auto type_alias = &bucket->base[i];
-                auto is_new = insert(&resolver.table, { type_alias->name, type_alias->node.parent }, get_base_node(type_alias));
+                auto alias_type = &bucket->base[i];
+                auto is_new = insert(&resolver.table, { alias_type->name, alias_type->node.parent }, get_base_node(alias_type));
                 assert(is_new);
             }
         }

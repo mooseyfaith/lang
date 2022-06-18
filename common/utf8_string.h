@@ -279,7 +279,7 @@ struct string_builder
     bool pending_newline;
 };
 
-void print_raw_va(string_builder *builder, cstring format, va_list va_arguments)
+string print_raw_va(string_builder *builder, cstring format, va_list va_arguments)
 {
     usize count = _vscprintf_p(format, va_arguments) + 1;
 
@@ -291,16 +291,20 @@ void print_raw_va(string_builder *builder, cstring format, va_list va_arguments)
     
     builder->previous_was_newline    = false;
     builder->previous_was_blank_line = false;
+    
+    return { count - 1, builder->memory.base + offset };
 }
 
-void print_raw(string_builder *builder, cstring format, ...)
+string print_raw(string_builder *builder, cstring format, ...)
 {
     va_list va_arguments;
     va_start(va_arguments, format);
     
-    print_raw_va(builder, format, va_arguments);
+    auto result = print_raw_va(builder, format, va_arguments);
     
     va_end(va_arguments);
+    
+    return result;
 }
 
 void print_newline(string_builder *builder)
@@ -311,7 +315,7 @@ void print_newline(string_builder *builder)
     builder->pending_newline = false;
 }
 
-void print_va(string_builder *builder, cstring format, va_list va_arguments)
+string print_va(string_builder *builder, cstring format, va_list va_arguments)
 {
     if (builder->pending_newline)
         print_newline(builder);
@@ -320,7 +324,7 @@ void print_va(string_builder *builder, cstring format, va_list va_arguments)
         print_raw(builder, "%*c", builder->indent * 4 - 1, ' ');
 
     auto debug_offset = builder->memory.count;
-    print_raw_va(builder, format, va_arguments);
+    auto result = print_raw_va(builder, format, va_arguments);
     
     // make sure no newline in format
     for (u32 i = debug_offset; i < builder->memory.count; i++)
@@ -333,16 +337,20 @@ void print_va(string_builder *builder, cstring format, va_list va_arguments)
     builder->previous_was_blank_line = false;
     builder->previous_was_scope_open = false;
     builder->previous_was_scope_close = false;
+    
+    return result;
 }
 
-void print(string_builder *builder, cstring format, ...)
+string print(string_builder *builder, cstring format, ...)
 {
     va_list va_arguments;
     va_start(va_arguments, format);
     
-    print_va(builder, format, va_arguments);
+    auto result = print_va(builder, format, va_arguments);
     
     va_end(va_arguments);
+    
+    return result;
 }
 
 void print_line(string_builder *builder, cstring format, ...)

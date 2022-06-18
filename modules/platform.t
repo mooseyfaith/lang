@@ -97,13 +97,8 @@ def platform_init func(platform platform_api ref)
     window_class.hCursor       = LoadCursorA(null, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
     
-    var ticks_per_second LARGE_INTEGER;
-    platform_require(QueryPerformanceFrequency(ticks_per_second ref));
-    platform.ticks_per_second = ticks_per_second.QuadPart;
-    
-    var time_ticks LARGE_INTEGER;
-    platform_require(QueryPerformanceCounter(time_ticks ref));
-    platform.time_ticks = time_ticks.QuadPart;
+    platform_require(QueryPerformanceFrequency(platform.ticks_per_second ref));
+    platform_require(QueryPerformanceCounter(platform.time_ticks ref));
 }
 
 def platform_window_init func(platform platform_api ref; window platform_window ref; title string; width s32; height s32)
@@ -137,7 +132,7 @@ def platform_window_frame func(platform platform_api ref; window platform_window
 
 def platform_handle_messages func(platform platform_api ref) (result b8)
 {
-    loop var key_index; 256
+    loop var key_index; platform.keys.count
     {
         platform.keys[key_index].half_transition_count = 0;
     }
@@ -171,11 +166,11 @@ def platform_handle_messages func(platform platform_api ref) (result b8)
 
 def platform_update_time func(platform platform_api ref)
 {
-    var time_ticks LARGE_INTEGER;
+    var time_ticks u64;
     platform_require(QueryPerformanceCounter(time_ticks ref));
     
-    platform.delta_seconds = (time_ticks.QuadPart - platform.time_ticks) cast(f32) / platform.ticks_per_second;
-    platform.time_ticks = time_ticks.QuadPart;
+    platform.delta_seconds = (time_ticks - platform.time_ticks) cast(f32) / platform.ticks_per_second;
+    platform.time_ticks = time_ticks;
 }
 
 def platform_window_callback func WNDPROC
@@ -227,7 +222,6 @@ def require func(condition b8; message = ""; location code_location = get_call_l
         ExitProcess(0);
     }
 }
-
 
 def assert func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
 {

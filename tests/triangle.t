@@ -17,13 +17,8 @@ gl_window_init(platform ref, gl ref, window ref);
 
 platform_update_time(platform ref); // skip startup time
 
-while true
+while platform_handle_messages(platform ref)
 {
-    if not platform_handle_messages(platform ref)
-    {
-        break;
-    }
-    
     // update
     // ...
     
@@ -49,5 +44,5 @@ while true
     
     glEnd();
     
-    SwapBuffers(window.device_context);
+    gl_window_present(platform ref, gl ref, window ref);
 }
