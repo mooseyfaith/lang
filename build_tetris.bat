@@ -8,7 +8,7 @@ set options=/MTd /Od /DEBUG /Zi /EHsc /nologo /I %cd%/code
 rem set options=/MT /O2 /EHsc /nologo /I %cd%/code
 
 rem lang tests\tetris.t modules\platform.t modules\platform_win32.t modules\gl.t modules\gl_win32.t modules\random.t
-lang tests\tetris.t modules
+lang tetris modules
 
 if not exist build mkdir build
 pushd build

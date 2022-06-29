@@ -44,7 +44,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, 0);
+        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
         platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
         var gl_3_3_device_context = GetDC(gl_3_3_window_handle);
@@ -167,4 +167,104 @@ def gl_win32_window_init_3_3 func(device_context HDC)
     var pixel_format_count u32;
     platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes[0] ref, null, 1, pixel_format ref, pixel_format_count ref));
     platform_require(SetPixelFormat(device_context, pixel_format, null));
+}
+
+def create_shader_object func(gl gl_api ref; is_fragment_shader b8; source string; name string) (shader_object u32)
+{
+    var shader_kind_map GLuint[] = 
+    {
+        GL_VERTEX_SHADER;
+        GL_FRAGMENT_SHADER
+    };
+
+    var gl_shader_kind = shader_kind_map[is_fragment_shader];
+    var shader_object = glCreateShader(gl_shader_kind);
+    
+    var source_byte_count = source.count cast(s32);
+    glShaderSource(shader_object, 1, source.base ref, source_byte_count ref);
+    
+    glCompileShader(shader_object);
+    
+    var is_compiled GLint;
+    glGetShaderiv(shader_object, GL_COMPILE_STATUS, is_compiled ref);
+    if is_compiled is GL_FALSE
+    {
+        if not is_fragment_shader
+        { 
+            printf("GLSL Compile Error: could not compile vertex shader '%.*s'\n:\0".base cast(cstring), source.count cast(s32), source.base cast(cstring));
+        }
+        else
+        { 
+            printf("GLSL Compile Error: could not compile fragment shader '%.*s'\n:\0".base cast(cstring), source.count cast(s32), source.base cast(cstring));
+        }
+        
+        var message_buffer u8[4096];
+        var info_length GLint;
+        glGetShaderiv(shader_object, GL_INFO_LOG_LENGTH, info_length ref);
+        
+        if info_length > message_buffer.count
+            { info_length = message_buffer.count; }
+        
+        glGetShaderInfoLog(shader_object, info_length, info_length ref cast(GLsizei ref), message_buffer.base cast(GLchar ref));
+        printf("%.*s\n\0".base cast(cstring), info_length, message_buffer.base cast(cstring));
+        
+        glDeleteShader(shader_object);
+        return 0;
+    }
+    
+    return shader_object;
+}
+
+def create_program_begin func(gl gl_api ref) (program_object u32)
+{
+    var program_object = glCreateProgram();
+    return program_object;
+}
+
+def create_program_add_shader func(gl gl_api ref; program_object u32; shader_object u32)
+{
+    assert(program_object);
+    assert(shader_object);
+    
+    glAttachShader(program_object, shader_object);
+}
+
+def create_program_bind_attribute func(gl gl_api ref; program_object u32; index u32; name string)
+{
+    assert(program_object);
+    
+    var name_buffer u8[256];
+    sprintf_s(name_buffer.base cast(cstring), name_buffer.count cast(s32), "%.*s\0".base cast(cstring), name.count cast(s32), name.base cast(cstring));
+    
+    glBindAttribLocation(program_object, index, name_buffer.base cast(GLchar ref));
+}
+
+def create_program_end func(gl gl_api ref; program_object u32) (program_object u32)
+{
+    assert(program_object);
+    
+    glLinkProgram(program_object);
+        
+    var is_linked GLint;
+    glGetProgramiv(program_object, GL_LINK_STATUS, is_linked ref);
+    if not is_linked
+    {
+        printf("GLSL Error: Could not link gl program:\n\n\0".base cast(cstring));
+    
+        var message_buffer u8[4096];
+        var info_length GLint;
+        glGetProgramiv(program_object, GL_INFO_LOG_LENGTH, info_length ref);
+        
+        if info_length > message_buffer.count
+            { info_length = message_buffer.count; }
+        
+        glGetProgramInfoLog(program_object, info_length, info_length ref cast(GLsizei ref), message_buffer.base cast(GLchar ref));
+        printf("%.*s\n\0".base cast(cstring), info_length, message_buffer.base cast(cstring));
+        
+        glDeleteProgram(program_object);
+        
+        return 0;
+    }
+    
+    return program_object;
 }

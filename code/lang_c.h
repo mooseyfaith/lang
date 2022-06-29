@@ -255,7 +255,6 @@ bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
     }
     
     print_scope_close(builder, false);
-    print_line(builder, ";");
     
     return true;
 }
@@ -510,9 +509,13 @@ print_expression_declaration
             
             print_expression(buffer, array_index->array_expression);
             
+        #if 1
             print(builder, ".base[");
             print_expression(buffer, array_index->index_expression);
             print(builder, "]");
+        #else
+            print(builder, ".base[_array_index%x]", array_index->node.index);
+        #endif
         } break;
         
         case ast_node_type_unary_operator:
@@ -572,7 +575,7 @@ print_expression_declaration
                 print(builder, "%.*s(", fs(ast_binary_operator_names[binary_operator->operator_type]));
                 print_expression(buffer, binary_operator->left);
                 print(builder, ", ");
-                print_expression(buffer, binary_operator->right);
+                print_expression(buffer, binary_operator->left->next);
                 print(builder, ")");
             }
             else
@@ -609,7 +612,7 @@ print_expression_declaration
                 print(builder, "(");
                 print_expression(buffer, binary_operator->left);
                 print(builder, " %.*s ", fs(c_symbols[binary_operator->operator_type]));
-                print_expression(buffer, binary_operator->right);
+                print_expression(buffer, binary_operator->left->next);
                 print(builder, ")");
             }
         } break;
@@ -619,6 +622,52 @@ print_expression_declaration
 void print_statement(lang_c_buffer *buffer, ast_node *node)
 {
     auto builder = &buffer->builder;
+    
+    // add array bounds checks
+    if (0)
+    {
+        local_buffer(queue, ast_queue);
+        
+        switch (node->node_type)
+        {
+        }
+        
+        enqueue_one(&queue, &node);
+        
+        ast_node *array_index_node;
+        while (next(&array_index_node, &queue))
+        {
+            if (!is_node_type(array_index_node, array_index))
+                continue;
+            
+            local_node_type(array_index, array_index_node);
+            
+            print(builder, "usize _array_index%x = ", array_index->node.index);
+            print_expression(buffer, array_index->index_expression);
+            print_line(builder, ";");
+            
+            print(builder, "assert(_array_index%x < (", array_index->node.index);
+            
+            auto type = get_expression_type(buffer->parser, array_index->array_expression);
+            local_node_type(array_type, type.base_type.node);
+            
+            if (array_type->count_expression)
+            {
+                print_comment_start(buffer);
+                print(builder, "(");
+                print_expression(buffer, array_index->array_expression);
+                print(builder, ").count");
+                print_comment_end(buffer);
+                print_expression(buffer, array_type->count_expression);
+                print_line(builder, "));");
+            }
+            else
+            {
+                print_expression(buffer, array_index->array_expression);
+                print(builder, ").count));");
+            }
+        }
+    }
     
     switch (node->node_type)
     {
@@ -1419,7 +1468,7 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
             local_node_type(binary_operator, expression);
             
             insert_expression_dependency(graph, child, binary_operator->left);
-            insert_expression_dependency(graph, child, binary_operator->right);
+            insert_expression_dependency(graph, child, binary_operator->left->next);
         } break;
     }
 }
@@ -2190,8 +2239,9 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     {
                         print(builder, " = ");
                         print_expression(&buffer, constant->expression);
-                        print_line(builder, ";");
                     }
+                    
+                    print_line(builder, ";");
                 } break;
             }
         }

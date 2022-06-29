@@ -36,6 +36,6 @@ def random_f32_zero_to_one func(random random_pcg ref) (result f32)
 
 def random_f32_minus_one_to_plus_one func(random random_pcg ref) (result f32)
 {
-    var result = random_f32_zero_to_one(random) * 2.0 - 1.0;
+    var result = (random_f32_zero_to_one(random) * 2.0) - 1.0;
     return result;
 }

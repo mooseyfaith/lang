@@ -3,16 +3,13 @@ import gl;
 import random;
 import math;
 
+import render;
+
 var platform platform_api;
 platform_init(platform ref);
 
-var window platform_window;
-platform_window_init(platform ref, window ref, "tetris\0", 1280, 720);
-
-var gl gl_api;
-gl_init(gl ref, platform ref, true);
-
-gl_window_init(platform ref, gl ref, window ref);
+var renderer render_api;
+init(renderer ref, platform ref);
 
 def piece_type enum u32
 {
@@ -170,7 +167,7 @@ while platform_handle_messages(platform ref)
         }
     }
     
-    var window_size vec2s = platform_window_frame(platform ref, window ref);
+    var window_size vec2s = platform_window_frame(platform ref, renderer.window ref);
     var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
     
     // * 2 since gl is [-1, 1] in both dimensions
@@ -262,7 +259,7 @@ while platform_handle_messages(platform ref)
     
     glEnd();
     
-    gl_window_present(platform ref, gl ref, window ref);
+    present(platform ref, renderer ref);
 }
 
 def make_piece func(type piece_type; board_width s32; board_height s32) (result falling_piece)

@@ -32,6 +32,8 @@ def platform_button struct
     half_transition_count u8;
 }
 
+def u8_array type u8[];
+
 def platform_button_was_pressed func(button platform_button) (result b8)
 {
     return button.half_transition_count >= (2 - button.is_active);
@@ -103,7 +105,8 @@ def platform_init func(platform platform_api ref)
 
 def platform_window_init func(platform platform_api ref; window platform_window ref; title string; width s32; height s32)
 {
-    assert(title[title.count - 1] is 0, "title needs to be 0-terminated");
+    platform_is_zero_terminated(title);
+    
     window.handle = CreateWindowExA(0, platform.window_class_name, title.base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height, null, null, platform.win32_instance, null);
     platform_require(window.handle is_not null);
 
@@ -223,7 +226,7 @@ def require func(condition b8; message = ""; location code_location = get_call_l
     }
 }
 
-def assert func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
+def assert func(condition b8; message = ""; location = get_call_location(); condition_text = get_call_argument_text(condition))
 {
     if not condition
     {
@@ -240,4 +243,106 @@ def platform_get_random_from_time func(platform platform_api ref) (random random
     var random random_pcg = filetime ref cast(random_pcg ref) . ;
     
     return random;
+}
+
+def platform_file_info struct
+{
+    byte_count      u64;
+    write_timestamp u64;
+    ok b8;
+}
+
+def platform_is_zero_terminated func(text string; location = get_call_location())
+{
+    assert(text[text.count - 1] is 0, "title needs to be 0-terminated", location);
+}
+
+def platform_get_file_info func(platform platform_api ref; path string) (result platform_file_info)
+{
+    platform_is_zero_terminated(path);
+    
+    var data WIN32_FILE_ATTRIBUTE_DATA;
+    var ok = GetFileAttributesExA(path.base cast(cstring), GetFileExInfoStandard, data ref);
+    if not ok
+        { return type(platform_file_info) {}; }
+    
+    // we can't just cast to u64, because ms messed up order of high and low values
+    var byte_count      = (data.nFileSizeHigh cast(u64) bit_shift_right 32) bit_or (data.nFileSizeLow cast(u64));
+    var write_timestamp = (data.ftLastWriteTime.dwHighDateTime cast(u64) bit_shift_right 32) bit_or (data.ftLastWriteTime.dwLowDateTime cast(u64));
+    
+    return type(platform_file_info) { byte_count; write_timestamp; true };
+}
+
+def platform_read_entire_file func(data u8_array; platform platform_api ref; path string) (byte_count usize)
+{
+    platform_is_zero_terminated(path);
+    
+    var file_handle = CreateFileA(path.base cast(cstring), GENERIC_READ, FILE_SHARE_READ, null, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, null);
+    
+    // might be written to, or does not exist
+    if file_handle is INVALID_HANDLE_VALUE
+        { return -1; }
+        
+    var file_info = platform_get_file_info(platform, path);
+    if not file_info.ok or (file_info.byte_count > data.count)
+        { return -1; }
+    
+    if data.count > file_info.byte_count
+        { data.count = file_info.byte_count; }
+    
+    // we can only read in ~4gb chunks
+    while data.count
+    {
+        var byte_count u32;
+        
+        if data.count > 0xFFFFFFFF 
+            { byte_count = 0xFFFFFFFF; }
+        else
+            { byte_count = data.count cast(u32); }
+        
+        var read_byte_count u32;
+        var ok = ReadFile(file_handle, data.base, byte_count, read_byte_count ref, null);
+        ok = ok and (byte_count is read_byte_count);
+        if not ok
+            { return -1; }
+        
+        data.base  = data.base  + byte_count;
+        data.count = data.count - byte_count;
+    }
+    
+    CloseHandle(file_handle);
+    
+    return file_info.byte_count;
+}
+
+def platform_write_entire_file func(platform platform_api ref; path string; data u8_array) (ok b8)
+{
+    platform_is_zero_terminated(path);
+    
+    var file_handle = CreateFileA(path.base cast(cstring), GENERIC_WRITE, 0, null, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, null);
+    if file_handle is INVALID_HANDLE_VALUE
+        { return false; }
+    
+    while data.count
+    {
+        var byte_count u32;
+        // has higher bits set
+        if data.count > 0xFFFFFFFF 
+            { byte_count = 0xFFFFFFFF; }
+        else
+            { byte_count = data.count cast(u32); }
+        
+        var write_byte_count u32;
+        var ok = WriteFile(file_handle, data.base, byte_count, write_byte_count ref, null);
+        ok = ok and (byte_count is write_byte_count);
+        if not ok
+            { return false; }
+        
+        data.base  = data.base  + byte_count;
+        data.count = data.count - byte_count;
+    }
+    
+    CloseHandle(file_handle);
+    
+    return true;
 }
