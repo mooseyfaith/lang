@@ -32,8 +32,6 @@ def platform_button struct
     half_transition_count u8;
 }
 
-def u8_array type u8[];
-
 def platform_button_was_pressed func(button platform_button) (result b8)
 {
     return button.half_transition_count >= (2 - button.is_active);
@@ -273,7 +271,7 @@ def platform_get_file_info func(platform platform_api ref; path string) (result 
     return type(platform_file_info) { byte_count; write_timestamp; true };
 }
 
-def platform_read_entire_file func(data u8_array; platform platform_api ref; path string) (byte_count usize)
+def platform_read_entire_file func(data u8_array; platform platform_api ref; path string) (result u8_array)
 {
     platform_is_zero_terminated(path);
     
@@ -281,38 +279,39 @@ def platform_read_entire_file func(data u8_array; platform platform_api ref; pat
     
     // might be written to, or does not exist
     if file_handle is INVALID_HANDLE_VALUE
-        { return -1; }
+        { return type(u8_array) {}; }
         
     var file_info = platform_get_file_info(platform, path);
     if not file_info.ok or (file_info.byte_count > data.count)
-        { return -1; }
+        { return type(u8_array) {}; }
     
     if data.count > file_info.byte_count
         { data.count = file_info.byte_count; }
     
     // we can only read in ~4gb chunks
-    while data.count
+    var offset usize = 0;
+    while offset < data.count
     {
         var byte_count u32;
         
-        if data.count > 0xFFFFFFFF 
+        var count = data.count - offset;
+        if count > 0xFFFFFFFF 
             { byte_count = 0xFFFFFFFF; }
         else
-            { byte_count = data.count cast(u32); }
+            { byte_count = count cast(u32); }
         
         var read_byte_count u32;
-        var ok = ReadFile(file_handle, data.base, byte_count, read_byte_count ref, null);
+        var ok b8 = ReadFile(file_handle, data.base + offset, byte_count, read_byte_count ref, null);
         ok = ok and (byte_count is read_byte_count);
         if not ok
-            { return -1; }
+            { return type(u8_array) {}; }
         
-        data.base  = data.base  + byte_count;
-        data.count = data.count - byte_count;
+        offset = offset + byte_count;
     }
     
     CloseHandle(file_handle);
     
-    return file_info.byte_count;
+    return data;
 }
 
 def platform_write_entire_file func(platform platform_api ref; path string; data u8_array) (ok b8)

@@ -52,13 +52,13 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         
         gl_win32_window_init_3_3(gl_3_3_device_context);
         
-        var context_attributes s32[] = {
+        var context_attributes s32[] = [
                 WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
                 WGL_CONTEXT_MINOR_VERSION_ARB; 3;
                 WGL_CONTEXT_FLAGS_ARB;         WGL_CONTEXT_DEBUG_BIT_ARB;
                 WGL_CONTEXT_PROFILE_MASK_ARB;  WGL_CONTEXT_CORE_PROFILE_BIT_ARB;
                 0
-            };
+            ];
         
         if backwards_compatible
             { context_attributes[7] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
@@ -127,10 +127,7 @@ def gl_debug_message_callback func GLDEBUGPROC
 def gl_win32_window_init_1 func(device_context HDC)
 {
     var pixel_format_descriptor PIXELFORMATDESCRIPTOR;
-    
-    //type_byte_count(PIXELFORMATDESCRIPTOR)
-    
-    pixel_format_descriptor.nSize        = type_byte_count(type_of(pixel_format_descriptor)); //sizeof(PIXELFORMATDESCRIPTOR);
+    pixel_format_descriptor.nSize        = type_byte_count(type_of(pixel_format_descriptor)) cast(u16);
     pixel_format_descriptor.nVersion     = 1; // allways 1
     pixel_format_descriptor.dwFlags      = PFD_DRAW_TO_WINDOW bit_or PFD_SUPPORT_OPENGL bit_or PFD_DOUBLEBUFFER;
     pixel_format_descriptor.iPixelType   = PFD_TYPE_RGBA;
@@ -147,7 +144,7 @@ def gl_win32_window_init_1 func(device_context HDC)
 def gl_win32_window_init_3_3 func(device_context HDC)
 {
     var pixel_format_attributes s32[] =
-    {
+    [
         WGL_DRAW_TO_WINDOW_ARB; GL_TRUE;
         WGL_SUPPORT_OPENGL_ARB; GL_TRUE;
         WGL_DOUBLE_BUFFER_ARB;  GL_TRUE;
@@ -161,7 +158,7 @@ def gl_win32_window_init_3_3 func(device_context HDC)
         // WGL_SAMPLES_ARB; 1;  // Number of samples
         
         0 // end
-    };
+    ];
     
     var pixel_format s32;
     var pixel_format_count u32;
@@ -172,10 +169,10 @@ def gl_win32_window_init_3_3 func(device_context HDC)
 def create_shader_object func(gl gl_api ref; is_fragment_shader b8; source string; name string) (shader_object u32)
 {
     var shader_kind_map GLuint[] = 
-    {
+    [
         GL_VERTEX_SHADER;
         GL_FRAGMENT_SHADER
-    };
+    ];
 
     var gl_shader_kind = shader_kind_map[is_fragment_shader];
     var shader_object = glCreateShader(gl_shader_kind);

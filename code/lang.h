@@ -51,6 +51,7 @@
     macro(get_call_argument_text, __VA_ARGS__) \
     macro(unary_operator, __VA_ARGS__) \
     macro(binary_operator, __VA_ARGS__) \
+
     
 #define ast_unary_operator_list(macro, ...) \
     macro(cast, __VA_ARGS__) \
@@ -60,6 +61,7 @@
 #define ast_binary_operator_list(macro, ...) \
     macro(or, __VA_ARGS__) \
     macro(and, __VA_ARGS__) \
+    macro(xor, __VA_ARGS__) \
     \
     macro(is, __VA_ARGS__) \
     macro(is_not, __VA_ARGS__) \
@@ -150,6 +152,7 @@ string ast_node_type_names[] =
     macro(b32, __VA_ARGS__) \
     macro(usize, __VA_ARGS__) \
     macro(ssize, __VA_ARGS__) \
+    macro(u8_array, __VA_ARGS__) \
     macro(string, __VA_ARGS__) \
     macro(code_location, __VA_ARGS__) \
     macro(cstring, __VA_ARGS__) \
@@ -466,17 +469,6 @@ struct ast_field_dereference
     ast_node           *expression;
     ast_node           *reference;
     complete_type_info type;
-    
-#if 0
-    dereference_type reference_type;
-    union
-    {
-        ast_node             *reference;
-        ast_variable         *variable;
-        ast_enumeration_item *enumeration_item;
-        ast_node             *array_count_expression;
-    };
-#endif
 };
 
 // pseodo functions
@@ -485,6 +477,7 @@ struct ast_type_byte_count
 {
     ast_base_node      node;
     complete_type_info type;
+    parsed_number      byte_count;
 };
 
 typedef ast_base_node ast_get_call_location;
@@ -494,6 +487,13 @@ struct ast_get_call_argument_text
     ast_base_node node;
     ast_name_reference *argument;
 };
+
+/*
+struct ast_import_text_file
+{
+    ast_base_node node;
+    string text;
+};*/
 
 struct ast_array_index
 {
@@ -505,7 +505,8 @@ struct ast_array_index
 struct ast_assignment
 {
     ast_base_node node;
-    ast_node *left, *right;
+    ast_node *left;
+    ast_node *right;
 };
 
 struct ast_string
@@ -1050,6 +1051,18 @@ parse_expression_declaration;
 
 #define lang_require_expression(destination, parser, type) lang_require_expression_return_value(destination, null,parser, type)
 
+u32 get_bit_count_power_of_two(u64 value)
+{
+    u32 bit_count = get_highest_bit_index(value);
+    
+    if (bit_count)
+        bit_count = (bit_count + 7) & ~0x07;
+    else
+        bit_count = 8;
+    
+    return get_highest_bit_index(bit_count);
+}
+
 ast_number * parse_number(lang_parser *parser)
 {
     bool is_signed = try_skip(&parser->iterator, s("-"));
@@ -1279,7 +1292,7 @@ ast_compound_literal * parse_compound_literal(lang_parser *parser, complete_type
         }
         
         compound_literal_field->name = name;
-        compound_literal_field->expression = lang_require_call(parse_expression(parser, type));
+        lang_require_expression(compound_literal_field->expression, parser, type);
         
         append_tail_next(&tail_next, &compound_literal_field->node);
     }
@@ -1287,13 +1300,13 @@ ast_compound_literal * parse_compound_literal(lang_parser *parser, complete_type
     return compound_literal;
 }
 
-// assumes "type(type_name[])" was allready parsed
+// assumes "type(array_type)" was allready parsed
 // add count_expression to type
 ast_array_literal * parse_array_literal(lang_parser *parser, complete_type_info type)
 {
-    if (!try_consume(parser, s("{")))
+    if (!try_consume(parser, s("[")))
         return null;
-        
+    
     new_local_node(array_literal);
     array_literal->type = type;
     
@@ -1303,7 +1316,7 @@ ast_array_literal * parse_array_literal(lang_parser *parser, complete_type_info 
     auto expression_type = array_type->item_type;
     
     bool is_first = true;
-    while (!try_consume(parser, s("}")))
+    while (!try_consume(parser, s("]")))
     {
         if (!is_first)
         {
@@ -1514,12 +1527,14 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         
         if ((type.name.count || type.name_type.node) && !type.name_type.indirection_count)
         {
-            if (type.name_type.node && is_node_type(type.name_type.node, array_type))
+            if (!type.base_type.node || is_node_type(type.base_type.node, array_type))
             {
                 expression = lang_require_call(get_base_node(parse_array_literal(parser, type)));
             }
             
-            if (!expression && (type.name.count || (type.name_type.node && is_node_type(type.name_type.node, compound_type))))
+            // you can do type(u8[]) { count, base } if you want to create an array value
+            // so compound_literals can also be of array_type
+            if (!expression && (!type.base_type.node || is_node_type(type.base_type.node, compound_type) || is_node_type(type.base_type.node, array_type)))
             {
                 expression = lang_require_call(get_base_node(parse_compound_literal(parser, type)));
             }
@@ -1790,35 +1805,38 @@ parse_expression_declaration
         auto keyword = consume_name(parser);
         if (keyword.count)
         {
-            struct
-            {
-                string token;
-                ast_binary_operator_type operator_type;
-            }
-            keyword_operators[] = 
-            {
-                { s("is"), ast_binary_operator_type_is },
-                { s("is_not"), ast_binary_operator_type_is_not },
-            
-                { s("or"), ast_binary_operator_type_or },
-                { s("and"), ast_binary_operator_type_and },
+            string short_names[] = {
+                s("or"),
+                s("and"),
+                s("xor"),
                 
-                { s("bit_not"),         ast_binary_operator_type_bit_not },
-                { s("bit_or"),          ast_binary_operator_type_bit_or },
-                { s("bit_and"),         ast_binary_operator_type_bit_and },
-                { s("bit_xor"),         ast_binary_operator_type_bit_xor },
-                { s("bit_shift_left"),  ast_binary_operator_type_bit_shift_left },
-                { s("bit_shift_right"), ast_binary_operator_type_bit_shift_right },
+                s("is"),
+                s("is_not"),
+                s("is_less"),
+                s("is_less_equal"),
+                s("is_greater"),
+                s("is_greater_equal"),
                 
-                { s("mod"), ast_binary_operator_type_modulo },
+                s("bit_not"),
+                s("bit_or"),
+                s("bit_and"),
+                s("bit_xor"),
+                s("bit_shift_left"),
+                s("bit_shift_right"),
+                
+                s("add"),
+                s("sub"),
+                s("mul"),
+                s("div"),
+                s("mod"),
             };
-            
-            for (u32 i = 0; i < carray_count(keyword_operators); i++)
+        
+            for (u32 i = 0; i < ast_binary_operator_type_count; i++)
             {
-                if (keyword == keyword_operators[i].token)
+                if (keyword == short_names[i])
                 {
-                    operator_type  = keyword_operators[i].operator_type;
-                    operator_token = keyword_operators[i].token;
+                    operator_type  = (ast_binary_operator_type) i;
+                    operator_token = short_names[i];
                     break;
                 }
             }
@@ -1851,8 +1869,8 @@ parse_expression_declaration
             {
                 if (try_consume(parser, symbol_operators[i].token))
                 {
-                    operator_type = symbol_operators[i].operator_type;
-                    operator_token     = symbol_operators[i].token;
+                    operator_type  = symbol_operators[i].operator_type;
+                    operator_token = symbol_operators[i].token;
                     break;
                 }
             }
@@ -2767,7 +2785,8 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             if (compound_literal->first_field)
                 enqueue(queue, node, &(ast_node *) compound_literal->first_field);
                 
-            if (!compound_literal->type.name.count && compound_literal->type.name_type.node)
+            // compound type could be declared on assignment, and would belong to def or var declaration
+            if (compound_literal->type.name_type.node && (compound_literal->type.name_type.node->parent == node))
                 enqueue(queue, node, &compound_literal->type.name_type.node);
         } break;
         
@@ -2775,7 +2794,8 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         {
             local_node_type(compound_literal_field, node);
             
-            enqueue(queue, node, &(ast_node *) compound_literal_field->expression);
+            if (compound_literal_field->expression)
+                enqueue(queue, node, &(ast_node *) compound_literal_field->expression);
         } break;
         
         case ast_node_type_array_literal:
@@ -3025,6 +3045,22 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
     return function_type;
 }
 
+parsed_number evaluate(ast_node *expression)
+{
+    switch (expression->node_type)
+    {
+        cases_complete;
+        
+        case ast_node_type_number:
+        {
+            local_node_type(number, expression);
+            return number->value;
+        } break;
+    }
+
+    return {};
+}
+
 type_compatibility types_are_compatible(lang_parser *parser, complete_type_info to, complete_type_info from)
 {
     assert(to.base_type.node && from.base_type.node);
@@ -3063,10 +3099,30 @@ type_compatibility types_are_compatible(lang_parser *parser, complete_type_info 
         auto to_number_type   = get_node_type(number_type, to.base_type.node);
         auto from_number_type = get_node_type(number_type, from.base_type.node);
         
+        if (to_number_type->is_float && !from_number_type->is_float)
+            return type_compatibility_requires_cast;
+        
         if ((from_number_type->is_float && !to_number_type->is_float) ||
             (from_number_type->is_signed && !to_number_type->is_signed) ||
             (from_number_type->bit_count_power_of_two > to_number_type->bit_count_power_of_two))
             return type_compatibility_false;
+    }
+    else if (is_node_type(to.base_type.node, array_type) && is_node_type(from.base_type.node, array_type))
+    {
+        auto to_array_type   = get_node_type(array_type, to.base_type.node);
+        auto from_array_type = get_node_type(array_type, from.base_type.node);
+        
+        if (types_are_compatible(parser, to_array_type->item_type, from_array_type->item_type) != type_compatibility_true)
+            return type_compatibility_false;
+            
+        if (!to_array_type->count_expression && from_array_type->count_expression)
+            return type_compatibility_requires_cast;
+            
+        if (to_array_type->count_expression && !from_array_type->count_expression)
+            return type_compatibility_false;
+        
+        if ((!to_array_type->count_expression && !from_array_type->count_expression) || evaluate(to_array_type->count_expression).u64_value == evaluate(from_array_type->count_expression).u64_value)
+            return type_compatibility_true;
     }
     else if (to.base_type.node != from.base_type.node)
     {
@@ -3085,12 +3141,55 @@ bool maybe_add_cast(lang_parser *parser, ast_node **expression_pointer, type_com
     auto expression = *expression_pointer;
     auto parent = expression->parent;
     
-    new_local_leaf_node(unary_operator, parser->node_locations.base[expression->index].text);
-    unary_operator->operator_type = ast_unary_operator_type_cast;
-    unary_operator->expression    = expression;
-    unary_operator->type          = type;
-    unary_operator->node.parent   = parent;
-    unary_operator->node.next     = expression->next;
+    ast_node *new_expression;
+    ast_node *new_parent;
+    if (is_node_type(type.base_type.node, array_type))
+    {
+        auto expression_type = get_expression_type(parser, expression);
+        local_node_type(array_type, expression_type.base_type.node);
+        
+        new_local_node(compound_literal, parser->node_locations.base[expression->index].text);
+        compound_literal->type        = type;
+        compound_literal->node.parent = parent;
+        compound_literal->node.next   = expression->next;
+        
+        new_expression = get_base_node(compound_literal);
+        
+        {
+            new_local_node(compound_literal_field, parser->node_locations.base[expression->index].text);
+            compound_literal_field->name = s("count");
+            compound_literal_field->expression = clone(parser, array_type->count_expression, get_base_node(compound_literal_field));
+            compound_literal->first_field = compound_literal_field;
+        }
+        
+        {
+            new_local_node(compound_literal_field, parser->node_locations.base[expression->index].text);
+            compound_literal_field->name = s("base");
+            compound_literal->first_field->node.next = get_base_node(compound_literal_field);
+            
+            new_local_node(field_dereference, parser->node_locations.base[expression->index].text);
+            field_dereference->name       = s("base");
+            field_dereference->expression = expression;
+            field_dereference->type       = array_type->item_type;
+            field_dereference->reference  = get_base_node(array_type);
+            
+            compound_literal_field->expression = get_base_node(field_dereference);
+            
+            new_parent = get_base_node(field_dereference);
+        }
+    }
+    else
+    {
+        new_local_leaf_node(unary_operator, parser->node_locations.base[expression->index].text);
+        unary_operator->operator_type = ast_unary_operator_type_cast;
+        unary_operator->expression    = expression;
+        unary_operator->type          = type;
+        unary_operator->node.parent   = parent;
+        unary_operator->node.next     = expression->next;
+        
+        new_expression = get_base_node(unary_operator);
+        new_parent     = new_expression;
+    }
     
     // NOTE: expression my be changed below
     
@@ -3106,32 +3205,16 @@ bool maybe_add_cast(lang_parser *parser, ast_node **expression_pointer, type_com
         {
             auto entry = queue.base[i];
             if (*entry.node_field == expression)
-                *entry.node_field = get_base_node(unary_operator);
+                *entry.node_field = new_expression;
         }
     }
     
     // after iterating
-    expression->parent = get_base_node(unary_operator);
+    expression->parent = new_parent;
     expression->next   = null;
     
-    *expression_pointer = get_base_node(unary_operator);
+    *expression_pointer = new_expression;
     return true;
-}
-
-parsed_number evaluate(ast_node *expression)
-{
-    switch (expression->node_type)
-    {
-        cases_complete;
-        
-        case ast_node_type_number:
-        {
-            local_node_type(number, expression);
-            return number->value;
-        } break;
-    }
-
-    return {};
 }
 
 struct byte_count_and_alignment
@@ -3358,18 +3441,52 @@ get_expression_type_declaration
                             if (!left_type.base_type.node || !right_type.base_type.node)
                                 return {};
                             
-                            auto left_compatibility  = types_are_compatible(parser, left_type, right_type);
-                            auto right_compatibility = types_are_compatible(parser, right_type, left_type);
-                            
-                            if (right_compatibility > left_compatibility)
+                            switch (binary_operator->operator_type)
                             {
-                                binary_operator->type = right_type;
-                                maybe_add_cast(parser, &binary_operator->left, right_compatibility, right_type);
-                            }
-                            else if (left_compatibility)
-                            {
-                                binary_operator->type = left_type;
-                                maybe_add_cast(parser, &binary_operator->left->next, left_compatibility, left_type);
+                                // convert to b8
+                                case ast_binary_operator_type_and:
+                                case ast_binary_operator_type_or:
+                                case ast_binary_operator_type_xor:
+                                {
+                                    auto b8_type = get_type(parser, lang_base_type_b8);
+                                    auto left_compatibility = types_are_compatible(parser, b8_type, left_type);
+                                    maybe_add_cast(parser, &binary_operator->left, left_compatibility, b8_type);
+                                    
+                                    auto right_compatibility = types_are_compatible(parser, b8_type, right_type);
+                                    maybe_add_cast(parser, &binary_operator->left->next, right_compatibility, b8_type);
+                                    
+                                     binary_operator->type = b8_type;
+                                } break;
+                                
+                                // pointer math
+                                case ast_binary_operator_type_add:
+                                case ast_binary_operator_type_subtract:
+                                {
+                                    if (left_type.base_type.indirection_count && !right_type.base_type.indirection_count && is_node_type(right_type.base_type.node, number_type))
+                                    {
+                                        binary_operator->type = left_type;
+                                        break;
+                                    }
+                                
+                                } // fallthrough
+                                
+                                default:
+                                {
+                                    // check normal compatibility
+                                    auto left_compatibility  = types_are_compatible(parser, left_type, right_type);
+                                    auto right_compatibility = types_are_compatible(parser, right_type, left_type);
+                                    
+                                    if (right_compatibility > left_compatibility)
+                                    {
+                                        binary_operator->type = right_type;
+                                        maybe_add_cast(parser, &binary_operator->left, right_compatibility, right_type);
+                                    }
+                                    else if (left_compatibility)
+                                    {
+                                        binary_operator->type = left_type;
+                                        maybe_add_cast(parser, &binary_operator->left->next, left_compatibility, left_type);
+                                    }
+                                }
                             }
                         }
                     }
@@ -3418,6 +3535,22 @@ get_expression_type_declaration
         case ast_node_type_string:
         {
             return get_type(parser, lang_base_type_string);
+        } break;
+        
+        case ast_node_type_type_byte_count:
+        {
+            local_node_type(type_byte_count, node);
+            
+            if (!type_byte_count->type.base_type.node)
+                return {};
+            
+            if (!type_byte_count->byte_count.bit_count_power_of_two)
+            {
+                type_byte_count->byte_count.u64_value = get_type_byte_count(type_byte_count->type).byte_count;
+                type_byte_count->byte_count.bit_count_power_of_two = get_bit_count_power_of_two(type_byte_count->byte_count.u64_value);
+            }
+            
+            return get_type(parser, (lang_base_type) (lang_base_type_u8 + type_byte_count->byte_count.bit_count_power_of_two - 3));
         } break;
         
         case ast_node_type_array_index:
@@ -3638,7 +3771,9 @@ void reset(lang_parser *parser)
 "\r\n"
 "def b8 type u8;" "\r\n"
 "def b32 type u32;" "\r\n"
-"def string type u8[];" "\r\n"
+"\r\n"
+"def u8_array type u8[];" "\r\n"
+"def string type u8_array;" "\r\n"
 "\r\n"
 "def cstring type u8 ref;" "\r\n"
 "\r\n"
@@ -4673,74 +4808,85 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 auto node = unresolved_function_calls.base[i];
                 local_node_type(function_call, node);
                 
-                local_node_type(name_reference, function_call->expression);
-                if (name_reference->reference)
+                if (is_node_type(function_call->expression, name_reference))
                 {
-                    // reference is variable or something
-                    if (!is_node_type(name_reference->reference, function_overloads))
+                    local_node_type(name_reference, function_call->expression);
+                    if (name_reference->reference && is_node_type(name_reference->reference, function_overloads))
                     {
-                         unresolved_function_calls.base[i] = unresolved_function_calls.base[--unresolved_function_calls.count];
-                        resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
-                        // did_resolve_entry = true; nothing was resolved
-                        i--; // repeat index
-                        continue;
+                        local_node_type(function_overloads, name_reference->reference);
+                        
+                        auto matching_function = find_matching_function(parser, function_overloads, function_call->first_argument);
+                        if (matching_function) 
+                            name_reference->reference = get_base_node(matching_function);
                     }
+                }
                 
-                    local_node_type(function_overloads, name_reference->reference);
-                    
-                    auto matching_function = find_matching_function(parser, function_overloads, function_call->first_argument);
-                    if (matching_function) 
+                auto type = get_expression_type(parser, function_call->expression);
+                
+                if (!type.base_type.node)
+                    continue;
+                
+                lang_require_return_value(is_node_type(type.base_type.node, function_type), , parser->node_locations.base[function_call->node.index].text, "expected function call expression to be of function_type, but type is %.*s", fnode_type_name(type.base_type.node));
+                
+                local_node_type(function_type, type.base_type.node);
+                
+                bool is_resolved = true;
+                if (function_type->input.base_type.node)
+                {
+                    auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
+                    auto input_argument = input_compound_type->first_field;
+                
+                    auto call_argument_tail_next = &function_call->first_argument;
+                    auto call_argument = *call_argument_tail_next;
+                
+                    while (call_argument && input_argument)
                     {
-                        name_reference->reference = get_base_node(matching_function);
-                    
-                        local_node_type(function_type, matching_function->type.base_type.node);
+                        auto call_type = get_expression_type(parser, call_argument);
+                        auto input_type = input_argument->type;
                         
-                        if (function_type->input.base_type.node)
+                        if (!call_type.base_type.node)
                         {
-                            auto input_compound_type = get_node_type(compound_type, function_type->input.base_type.node);
-                            auto input_argument = input_compound_type->first_field;
-                        
-                            auto call_argument_tail_next = &function_call->first_argument;
-                            auto call_argument = *call_argument_tail_next;
-                        
-                            while (call_argument && input_argument)
-                            {
-                                auto call_type = get_expression_type(parser, call_argument);
-                                auto input_type = input_argument->type;
-                                
-                                auto compatibility = types_are_compatible(parser, input_type, call_type);
-                                
-                                if (!compatibility && try_add_default_argument(parser, function_call, function_type, &call_argument_tail_next, &input_argument))
-                                    continue;
-                                
-                                maybe_add_cast(parser, &call_argument, compatibility, input_type);
-                                
-                                call_argument_tail_next = &call_argument->next;
-                                call_argument = *call_argument_tail_next;
-                                input_argument = (ast_variable *) input_argument->node.next;
-                            }
-                            
-                            while (input_argument)
-                            {
-                                lang_require_return_value(input_argument->default_expression, , parser->node_locations.base[function_call->node.index].text, "expected argument '%.*s' in function call", fs(input_argument->name));
-                                
-                                bool ok = try_add_default_argument(parser, function_call, function_type, &call_argument_tail_next, &input_argument);
-                                assert(ok);
-                            }
+                            is_resolved = false;
+                            call_argument = null;
+                            input_argument = null;
+                            break;
                         }
-                    
-                        unresolved_function_calls.base[i] = unresolved_function_calls.base[--unresolved_function_calls.count];
-                        resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
-                        did_resolve_entry = true;
-                        i--; // repeat index
+                        
+                        //lang_require_return_value(call_type.base_type.node, , parser->node_locations.base[call_argument->index].text, "argument type not resolved in function call for argument '%.*s'", fs(input_argument->name));
+                        
+                        auto compatibility = types_are_compatible(parser, input_type, call_type);
+                        
+                        if (!compatibility && try_add_default_argument(parser, function_call, function_type, &call_argument_tail_next, &input_argument))
+                            continue;
+                        
+                        maybe_add_cast(parser, &call_argument, compatibility, input_type);
+                        
+                        call_argument_tail_next = &call_argument->next;
+                        call_argument = *call_argument_tail_next;
+                        input_argument = (ast_variable *) input_argument->node.next;
                     }
+                    
+                    while (input_argument)
+                    {
+                        lang_require_return_value(input_argument->default_expression, , parser->node_locations.base[function_call->node.index].text, "expected argument '%.*s' in function call", fs(input_argument->name));
+                        
+                        bool ok = try_add_default_argument(parser, function_call, function_type, &call_argument_tail_next, &input_argument);
+                        assert(ok);
+                    }
+                }
+            
+                if (is_resolved)
+                {
+                    unresolved_function_calls.base[i] = unresolved_function_calls.base[--unresolved_function_calls.count];
+                    resize_buffer(&unresolved_function_calls, unresolved_function_calls.count);
+                    did_resolve_entry = true;
+                    i--; // repeat index
                 }
             }
         }
     }
  
     // semantic checks
-
     {
         auto error_messages = &parser->error_messages;
         bool has_warnings = false;
@@ -4762,10 +4908,33 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
             auto node = unresolved_names.base[i].node;
             local_node_type(name_reference, node);
             
-            if (!name_reference->reference)
+            if (!name_reference->reference || is_node_type(name_reference->reference, function_overloads))
             {
-                has_warnings = true;
-                parser_message(parser, parser->node_locations.base[name_reference->node.index].text, "WARNING: could not resolve name '%.*s'", fs(name_reference->name));
+                // HACK: ignore some unresolved names
+                string black_list[] =
+                {
+                    s("__debugbreak"),
+                    s("printf"),
+                    s("sprintf_s"),
+                    s("break"),
+                    s("continue")
+                };
+                
+                bool found = false;
+                for (u32 i = 0; i < carray_count(black_list); i++)
+                {
+                    if (black_list[i] == name_reference->name)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+            
+                if (!found)
+                {
+                    has_warnings = true;
+                    parser_message(parser, parser->node_locations.base[name_reference->node.index].text, "WARNING: could not resolve name '%.*s'", fs(name_reference->name));
+                }
             }
         }
     
@@ -4877,6 +5046,64 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                     print_line(error_messages, "too few arguments");
             }
             error_messages->indent--;
+        }
+        
+        for_bucket_item(bucket, index, parser->assignment_buckets)
+        {
+            auto assignment = &bucket->base[index];
+            
+            auto left_type  = get_expression_type(parser, assignment->left);
+            auto right_type = get_expression_type(parser, assignment->right);
+            
+            if (!left_type.base_type.node)
+            {
+                has_warnings = true;
+                parser_message(parser, parser->node_locations.base[assignment->left->index].text, "WARNING: could not resolve left type in assignment");
+                continue;
+            }
+            
+            if (!right_type.base_type.node)
+            {
+                has_warnings = true;
+                parser_message(parser, parser->node_locations.base[assignment->right->index].text, "WARNING: could not resolve right type in assignment");
+                continue;
+            }
+                            
+            auto compatibility = types_are_compatible(parser, left_type, right_type);
+            maybe_add_cast(parser, &assignment->right, compatibility, left_type);
+            
+            if (compatibility == type_compatibility_false)
+            {
+                parser_message(parser, parser->node_locations.base[assignment->node.index].text, "Error: incompatible types in assignment");
+                parser->error = true;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->variable_buckets)
+        {
+            auto variable = &bucket->base[index];
+            
+            if (!variable->default_expression)
+                continue;
+            
+            auto left_type  = variable->type;
+            auto right_type = get_expression_type(parser, variable->default_expression);
+            
+            if (!left_type.base_type.node || !right_type.base_type.node)
+            {
+                has_warnings = true;
+                parser_message(parser, parser->node_locations.base[variable->node.index].text, "WARNING: could not resolve types in variable");
+                continue;
+            }
+                            
+            auto compatibility = types_are_compatible(parser, left_type, right_type);
+            maybe_add_cast(parser, &variable->default_expression, compatibility, left_type);
+            
+            if (compatibility == type_compatibility_false)
+            {
+                parser_message(parser, parser->node_locations.base[variable->node.index].text, "Error: incompatible types in variable default assignment");
+                parser->error = true;
+            }
         }
         
         if (parser->error)
@@ -5001,6 +5228,8 @@ void resolve(lang_parser *parser)
             auto array_index = &bucket->base[index];
             
             auto base_type = get_expression_type(parser, array_index->array_expression).base_type.node;
+            lang_require_return_value(base_type, , parser->node_locations.base[array_index->array_expression->index].text, "can't index expression of unkown type");
+            
             lang_require_return_value(is_node_type(base_type, array_type), , parser->node_locations.base[array_index->array_expression->index].text, "can't index expression of type '%.*s'", fnode_type_name(base_type));
             local_node_type(array_type, base_type);
         }
@@ -5008,14 +5237,15 @@ void resolve(lang_parser *parser)
         for_bucket_item(bucket, index, parser->binary_operator_buckets)
         {
             auto binary_operator = &bucket->base[index];
-        
-            if (!binary_operator->type.base_type.node)
+            
+            auto type = get_expression_type(parser, get_base_node(binary_operator));
+            if (!type.base_type.node)
             {
                 auto left_type  = get_expression_type(parser, binary_operator->left);
                 auto right_type = get_expression_type(parser, binary_operator->left->next);
                 
                 // only complete operators
-                lang_require_return_value(left_type.base_type.node && right_type.base_type.node, , parser->node_locations.base[binary_operator->node.index].text, " types of biary operation '%.*s' arguments don't match", fs(ast_binary_operator_names[binary_operator->operator_type]));
+                lang_require_return_value(false, , parser->node_locations.base[binary_operator->node.index].text, " argument types of binary operation '%.*s' are not compatible", fs(ast_binary_operator_names[binary_operator->operator_type]));
             }
         }
     }

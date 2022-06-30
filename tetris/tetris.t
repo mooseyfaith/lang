@@ -31,7 +31,7 @@ def falling_piece struct
 
 //def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
 def piece_type_colors = type(rgba32[]) // piece_type.count
-{
+[
     { 0.0; 0.0; 0.0; 1.0 };
     { 1.0; 0.0; 0.0; 1.0 };
     { 0.0; 1.0; 0.0; 1.0 };
@@ -41,7 +41,7 @@ def piece_type_colors = type(rgba32[]) // piece_type.count
     { 0.0; 1.0; 1.0; 1.0 };
     { 0.3; 0.3; 1.0; 1.0 };
     { 0.3; 1.0; 0.3; 1.0 }
-};
+];
 
 platform_update_time(platform ref); // skip startup time
 
@@ -167,15 +167,7 @@ while platform_handle_messages(platform ref)
         }
     }
     
-    var window_size vec2s = platform_window_frame(platform ref, renderer.window ref);
-    var window_width_over_height f32 = window_size.x cast(f32) / window_size.y cast(f32);
-    
-    // * 2 since gl is [-1, 1] in both dimensions
-    var viewport_scale = v2(2.0 / window_width_over_height, 2.0);
-    
-    var quads quad_buffer;
-    quads.brick_size    = viewport_scale[1] / (2 * board.count + 10);
-    quads.camera_offset = v2(0, quads.brick_size * 2.5);
+    frame_begin(platform ref, renderer ref, board.count);
     
     var stone_lines u32;
     if game_over
@@ -192,7 +184,7 @@ while platform_handle_messages(platform ref)
                 if y < stone_lines
                     { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
             
-                push_brick(quads ref, x, y, color); 
+                push_brick(renderer ref, x, y, color); 
             }
         }
     }
@@ -203,7 +195,7 @@ while platform_handle_messages(platform ref)
         {
             var brick vec2s = piece.bricks[i];
             
-            push_brick(quads ref, brick.x, brick.y, piece_type_colors[piece.type]);
+            push_brick(renderer ref, brick.x, brick.y, piece_type_colors[piece.type]);
         }
     }
     
@@ -211,14 +203,14 @@ while platform_handle_messages(platform ref)
     {
         var brick vec2s = next_piece.bricks[i];
         
-        push_brick(quads ref, brick.x - 10, brick.y, piece_type_colors[next_piece.type]);
+        push_brick(renderer ref, brick.x - 10, brick.y, piece_type_colors[next_piece.type]);
     }
     
     def frame_color = type(rgba32) { 0.8; 0.8; 0.8; 1.0 };
     
     loop var i; board[0].count + 2
     {
-        push_brick(quads ref, i - 1, -1, frame_color);
+        push_brick(renderer ref, i - 1, -1, frame_color);
     }
     
     loop var i; board.count
@@ -228,36 +220,9 @@ while platform_handle_messages(platform ref)
         if i >= (board.count - 4)
             { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
         
-        push_brick(quads ref, -1,             i, color);
-        push_brick(quads ref, board[0].count, i, color);
+        push_brick(renderer ref, -1,             i, color);
+        push_brick(renderer ref, board[0].count, i, color);
     }
-    
-    glViewport(0, 0, window_size.x, window_size.y);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-    glBegin(GL_TRIANGLES);
-    
-    loop var i; quads.count
-    {
-        var q quad = quads.quads[i];        
-        var box box2 = q.box;
-        
-        glColor4f(q.color[0], q.color[1], q.color[2], q.color[3]);
-        
-        var min = scale(box.min, viewport_scale);
-        var max = scale(box.max, viewport_scale);
-        
-        glVertex2f(min[0], min[1]);
-        glVertex2f(max[0], min[1]);
-        glVertex2f(max[0], max[1]);
-        
-        glVertex2f(min[0], min[1]);
-        glVertex2f(max[0], max[1]);
-        glVertex2f(min[0], max[1]);
-    }
-    
-    glEnd();
     
     present(platform ref, renderer ref);
 }
@@ -366,30 +331,13 @@ def make_random_piece func(random random_pcg ref; board_width s32; board_height 
     return make_piece(type, board_width, board_height);
 }
 
-def quad_buffer struct
+def push_brick func(renderer render_api ref; x f32; y f32; color rgba32; location code_location = get_call_location())
 {
-    quads quad[1024];
-    count u32;
+    var margin = 0.1 * renderer.brick_size;
+    var size   = renderer.brick_size - margin;
     
-    brick_size    f32;
-    camera_offset vec2;
-}
-
-def push_brick func(buffer quad_buffer ref; x f32; y f32; color rgba32; location code_location = get_call_location())
-{
-    var margin = 0.1 * buffer.brick_size;
-    var size   = buffer.brick_size - margin;
-    
-    var min = ((v2(x, y) - v2(4.5, 9.5)) * buffer.brick_size) - buffer.camera_offset + margin;
-    push_quad(buffer, box2_size(min, v2(size)), color, location);
-}
-
-def push_quad func(buffer quad_buffer ref; box box2; color rgba32; location code_location = get_call_location())
-{
-    assert(buffer.count < buffer.quads.count, location);
-    buffer.quads[buffer.count].box   = box;
-    buffer.quads[buffer.count].color = color;
-    buffer.count = buffer.count + 1;
+    var min = ((v2(x, y) - v2(4.5, 9.5)) * renderer.brick_size) - renderer.camera_offset + margin;
+    push_quad(renderer, box2_size(min, v2(size)), color, location);
 }
 
 // short constructors
@@ -408,14 +356,6 @@ def box2 struct
 {
     min vec2;
     max vec2;
-}
-
-def rgba32 type f32[4];
-
-def quad struct
-{
-    box   box2;
-    color rgba32;
 }
 
 def box2_size func(min vec2; size vec2) (result box2)
