@@ -13,7 +13,7 @@ def default_vertex struct
     color    rgba32;
 }
 
-def rgba32 type f32[4];
+def rgba32 type u8[4];
 
 def render_quad struct
 {
@@ -44,7 +44,7 @@ def render_api struct
 
 def init func(renderer render_api ref; platform platform_api ref)
 {
-    gl_init(renderer.gl ref, platform, true);
+    gl_init(renderer.gl ref, platform);
     
     platform_window_init(platform, renderer.window ref, "tetris\0", 1280, 720);
     gl_window_init(platform, renderer.gl ref, renderer.window ref);
@@ -63,14 +63,20 @@ def init func(renderer render_api ref; platform platform_api ref)
     require(fragment_shader);
         
     renderer.default_shader = create_program_begin(renderer.gl ref);
+    create_program_add_shader(renderer.gl ref, renderer.default_shader, vertex_shader);
+    create_program_add_shader(renderer.gl ref, renderer.default_shader, fragment_shader);
+    
+    create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 0, "vertex_position");
+    create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 1, "vertex_color");
+    
+    create_program_end(renderer.gl ref, renderer.default_shader);
     
     glGenVertexArrays(1, renderer.vertex_array ref);
     
-    var buffer_object u32;
     glGenBuffers(1, renderer.vertex_buffer ref);
     
     glBindVertexArray(renderer.vertex_array);
-    glBindBuffer(GL_ARRAY_BUFFER, buffer_object);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer.vertex_buffer);
     
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, type_byte_count(default_vertex), 0 cast(u8 ref));
     glEnableVertexAttribArray(0);
@@ -80,7 +86,8 @@ def init func(renderer render_api ref; platform platform_api ref)
     
     glBufferData(GL_ARRAY_BUFFER, type_byte_count(default_vertex) * 6 * renderer.quads.count, null, GL_DYNAMIC_DRAW);
     
-    glBindVertexArray(renderer.vertex_array);
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 def frame_begin func(platform platform_api ref; renderer render_api ref; board_height s32)
@@ -146,8 +153,9 @@ def present func(platform platform_api ref; renderer render_api ref)
     glUseProgram(renderer.default_shader);
     
     glBindVertexArray(renderer.vertex_array);
-    
     glDrawArrays(GL_TRIANGLES, 0, vertex_count);
+    
+    glBindVertexArray(0);
     
     gl_window_present(platform, renderer.gl ref, renderer.window ref);
     

@@ -29,19 +29,18 @@ def falling_piece struct
     type piece_type;
 }
 
-//def piece_type_colors = type(rgba32[piece_type.count]) // piece_type.count
-def piece_type_colors = type(rgba32[]) // piece_type.count
+def piece_type_colors = type(rgba32[piece_type.count - 1])
 [
-    { 0.0; 0.0; 0.0; 1.0 };
-    { 1.0; 0.0; 0.0; 1.0 };
-    { 0.0; 1.0; 0.0; 1.0 };
-    { 0.0; 0.0; 1.0; 1.0 };
-    { 1.0; 1.0; 0.0; 1.0 };
-    { 1.0; 0.0; 1.0; 1.0 };
-    { 0.0; 1.0; 1.0; 1.0 };
-    { 0.3; 0.3; 1.0; 1.0 };
-    { 0.3; 1.0; 0.3; 1.0 }
+    { 0; 0; 0; 255 };
+    { 255; 0; 0; 255 };
+    { 0; 255; 0; 255 };
+    { 0; 0; 255; 255 };
+    { 255; 255; 0; 255 };
+    { 255; 0; 255; 255 };
+    { 0; 255; 255; 255 }
 ];
+
+def frame_color = type(rgba32) { 80; 80; 80; 255 };
 
 platform_update_time(platform ref); // skip startup time
 
@@ -182,7 +181,7 @@ while platform_handle_messages(platform ref)
             { 
                 var color = piece_type_colors[type];
                 if y < stone_lines
-                    { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
+                    { color = frame_color; }
             
                 push_brick(renderer ref, x, y, color); 
             }
@@ -206,8 +205,6 @@ while platform_handle_messages(platform ref)
         push_brick(renderer ref, brick.x - 10, brick.y, piece_type_colors[next_piece.type]);
     }
     
-    def frame_color = type(rgba32) { 0.8; 0.8; 0.8; 1.0 };
-    
     loop var i; board[0].count + 2
     {
         push_brick(renderer ref, i - 1, -1, frame_color);
@@ -218,7 +215,7 @@ while platform_handle_messages(platform ref)
         var color = frame_color;
         
         if i >= (board.count - 4)
-            { color = type(rgba32) { 0.2; 0.2; 0.2; 1.0 }; }
+            { color = frame_color; }
         
         push_brick(renderer ref, -1,             i, color);
         push_brick(renderer ref, board[0].count, i, color);

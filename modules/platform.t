@@ -271,7 +271,7 @@ def platform_get_file_info func(platform platform_api ref; path string) (result 
     return type(platform_file_info) { byte_count; write_timestamp; true };
 }
 
-def platform_read_entire_file func(data u8_array; platform platform_api ref; path string) (result u8_array)
+def platform_read_entire_file func(data u8[]; platform platform_api ref; path string) (result u8[])
 {
     platform_is_zero_terminated(path);
     
@@ -279,11 +279,11 @@ def platform_read_entire_file func(data u8_array; platform platform_api ref; pat
     
     // might be written to, or does not exist
     if file_handle is INVALID_HANDLE_VALUE
-        { return type(u8_array) {}; }
+        { return type(u8[]) {}; }
         
     var file_info = platform_get_file_info(platform, path);
     if not file_info.ok or (file_info.byte_count > data.count)
-        { return type(u8_array) {}; }
+        { return type(u8[]) {}; }
     
     if data.count > file_info.byte_count
         { data.count = file_info.byte_count; }
@@ -304,7 +304,7 @@ def platform_read_entire_file func(data u8_array; platform platform_api ref; pat
         var ok b8 = ReadFile(file_handle, data.base + offset, byte_count, read_byte_count ref, null);
         ok = ok and (byte_count is read_byte_count);
         if not ok
-            { return type(u8_array) {}; }
+            { return type(u8[]) {}; }
         
         offset = offset + byte_count;
     }
@@ -314,7 +314,7 @@ def platform_read_entire_file func(data u8_array; platform platform_api ref; pat
     return data;
 }
 
-def platform_write_entire_file func(platform platform_api ref; path string; data u8_array) (ok b8)
+def platform_write_entire_file func(platform platform_api ref; path string; data u8[]) (ok b8)
 {
     platform_is_zero_terminated(path);
     

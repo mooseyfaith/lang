@@ -152,7 +152,6 @@ string ast_node_type_names[] =
     macro(b32, __VA_ARGS__) \
     macro(usize, __VA_ARGS__) \
     macro(ssize, __VA_ARGS__) \
-    macro(u8_array, __VA_ARGS__) \
     macro(string, __VA_ARGS__) \
     macro(code_location, __VA_ARGS__) \
     macro(cstring, __VA_ARGS__) \
@@ -3772,8 +3771,7 @@ void reset(lang_parser *parser)
 "def b8 type u8;" "\r\n"
 "def b32 type u32;" "\r\n"
 "\r\n"
-"def u8_array type u8[];" "\r\n"
-"def string type u8_array;" "\r\n"
+"def string type u8[];" "\r\n"
 "\r\n"
 "def cstring type u8 ref;" "\r\n"
 "\r\n"

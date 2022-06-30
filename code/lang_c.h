@@ -2202,10 +2202,16 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                 {
                     local_node_type(alias_type, node);
                     
-                    auto name = alias_type->name;
-                    auto name_type = alias_type->type.name_type.node;
-                    
-                    print_type_declaration(&buffer, alias_type->type, alias_type->name);
+                    if (is_node_type(alias_type->type.base_type.node, array_type))
+                    {
+                        print(builder, "typedef ");
+                        print_type(&buffer, alias_type->type, alias_type->name);
+                        print_line(builder, ";");
+                    }
+                    else
+                    {
+                        print_type_declaration(&buffer, alias_type->type, alias_type->name);
+                    }
                 } break;
                 
                 case ast_node_type_function:
