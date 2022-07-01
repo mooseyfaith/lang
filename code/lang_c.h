@@ -275,18 +275,29 @@ print_expression_declaration
             local_node_type(number, node);
             if (number->value.is_float)
             {
-                if (number->value.bit_count_power_of_two == 32)
+                if (number->value.bit_count_power_of_two == 5)
                     print(builder, "%ff", number->value.f64_value);
                 else
                     print(builder, "%f", number->value.f64_value);
             }
             else if (number->value.is_signed)
             {
-                print(builder, "%lli", number->value.s64_value);
+                if (number->value.is_hex)
+                {
+                    if (number->value.s64_value < 0)
+                        print(builder, "-0x%llx", number->value.s64_value);
+                    else
+                        print(builder, "0x%llx", number->value.s64_value);
+                }
+                else
+                    print(builder, "%lli", number->value.s64_value);
             }
             else
             {
-                print(builder, "%llu", number->value.u64_value);
+                if (number->value.is_hex)
+                    print(builder, "0x%llx", number->value.u64_value);
+                else
+                    print(builder, "%llu", number->value.u64_value);
             }
         } break;
         
@@ -299,7 +310,22 @@ print_expression_declaration
         case ast_node_type_array_literal:
         {
             local_node_type(array_literal, node);
-            print(builder, "_array_literal_%x", node->index);
+            
+            print_type(buffer, array_literal->type);
+            print(builder, " { ");
+            
+            for (auto it = array_literal->first_expression; it; it = it->next)
+            {
+                print_expression(buffer, it);
+                
+                if (it->next)
+                    print(builder, ", ");
+                else
+                    print(builder, " ");
+            }
+            print(builder, "}");
+            
+            //print(builder, "_array_literal_%x", node->index);
         } break;
         
         case ast_node_type_compound_literal:
@@ -504,20 +530,6 @@ print_expression_declaration
         
             switch (unary_operator->operator_type)
             {
-                cases_complete;
-                
-                case ast_unary_operator_type_not:
-                {
-                    print(builder, "!");
-                    print_expression(buffer, unary_operator->expression);
-                } break;
-                
-                case ast_unary_operator_type_take_reference:
-                {
-                    print(builder, "&");
-                    print_expression(buffer, unary_operator->expression);
-                } break;
-                
                 case ast_unary_operator_type_cast:
                 {
                     print(builder, "((");
@@ -526,6 +538,30 @@ print_expression_declaration
                     print_expression(buffer, unary_operator->expression);
                     print(builder, ")");
                 } break;
+                
+                default:
+                {
+                    if (unary_operator->function)
+                    {
+                        print(builder, "%.*s(", fs(ast_unary_operator_names[unary_operator->operator_type]));
+                        print_expression(buffer, unary_operator->expression);
+                        print(builder, ")");
+                    }
+                    else
+                    {
+                        string c_symbols[] =
+                        {
+                            s("!"),
+                            s("-"),
+                            s("&"),
+                        };
+                        
+                        assert(unary_operator->operator_type < carray_count(c_symbols));
+                
+                        print(builder, " %.*s ", fs(c_symbols[unary_operator->operator_type]));
+                        print_expression(buffer, unary_operator->expression);
+                    }
+                }
             }
         } break;
         

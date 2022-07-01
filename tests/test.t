@@ -14,7 +14,7 @@ def foo func(x u8 ref)
 {
 }
 
-var a f32[] = [ 1; 2; 3; 4 ];
+var a f32[] = type(f32[]) [ 1; 2; 3; 4 ];
 var b f32[] = a;
 var byte_count u32 = 12;
 a.base = a.base + byte_count;

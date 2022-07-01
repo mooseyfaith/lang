@@ -1,173 +1,37 @@
 
 module math;
 
-def vec2 type f32[2];
-def vec3 type f32[3];
-def vec4 type f32[4];
+def radians32 type f32;
 
-//def vec4 union
-//{
-//    f32[4];
-//    struct { x   f32; y     f32; z    f32; w     f32; };
-//    struct { r   f32; g     f32; b    f32; a     f32; };
-//    struct { red f32; green f32; blue f32; alpha f32; };
-//}
+def pi32 = 3.14159265358979323846;
 
-//def node struct
-//{
-//    type node_type;
-//}
+def sqrt func(_X f64) (result f64) calling_convention "__cdecl" extern_binding("kernel32", false);
+def sin  func(_X f64) (result f64) calling_convention "__cdecl" extern_binding("kernel32", false);
+def cos  func(_X f64) (result f64) calling_convention "__cdecl" extern_binding("kernel32", false);
+def tan  func(_X f64) (result f64) calling_convention "__cdecl" extern_binding("kernel32", false);
+def fmod func(a f64; b f64) (result f64) calling_convention "__cdecl" extern_binding("kernel32", false);
 
-//def my_node union
-//{
-//    node;
-//    
-//    struct
-//    {
-//        base node;
-//        //..
-//    }
-//}
-
-def add func(a vec2; b f32) (result vec2)
+def sqrt func(_X f32) (result f32)
 {
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] + b;
-    }
-    
-    return result;
+    return sqrt(_X cast(f64)) cast(f32);
 }
 
-def add func(a vec2; b vec2) (result vec2)
+def sin func(_X f32) (result f32)
 {
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] + b[i];
-    }
-    
-    return result;
+    return sin(_X cast(f64)) cast(f32);
 }
 
-def negate func(a vec2) (result vec2)
+def cos func(_X f32) (result f32)
 {
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = -a[i];
-    }
-    
-    return result;
+    return cos(_X cast(f64)) cast(f32);
 }
 
-def subtract func(a vec2; b vec2) (result vec2)
+def tan func(_X f32) (result f32)
 {
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] - b[i];
-    }
-    
-    return result;
+    return tan(_X cast(f64)) cast(f32);
 }
 
-def subtract func(a vec2; b f32) (result vec2)
+def fmod func(a f32; b f32) (result f32)
 {
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] - b;
-    }
-    
-    return result;
+    return fmod(a cast(f64), b cast(f64)) cast(f32);
 }
-
-def multiply func(a vec2; b f32) (result vec2)
-{
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] * b;
-    }
-    
-    return result;
-}
-
-def scale func(a vec2; b vec2) (result vec2)
-{
-    var result vec2;
-    loop var i; a.count
-    {
-        result[i] = a[i] * b[i];
-    }
-    
-    return result;
-}
-
-
-
-
-
-
-
-
-
-
-
-
-def negate func(a vec4) (result vec4)
-{
-    var result vec4;
-    loop var i; a.count
-    {
-        result[i] = -a[i];
-    }
-    
-    return result;
-}
-
-def add func(a vec4; b vec4) (result vec4)
-{
-    var result vec4;
-    loop var i; a.count
-    {
-        result[i] = a[i] + b[i];
-    }
-    
-    return result;
-}
-
-def dot func(a vec4; b vec4) (result f32)
-{
-    var result = a[0] * b[0];
-    loop var i = 1; a.count
-    {
-        result = (a[i] * b[i]) + result;
-    }
-    
-    return result;
-}
-
-//def mul func(transform mat4; vector vec4) (result vec4)
-//{
-//    var result vec4;
-//    loop var column; mat4.count
-//    {
-//        result[column] = dot(mat4[column], vector);
-//    }
-//    
-//    return result;
-//}
-
-//def mul func(second mat4; first mat4) (result mat4)
-//{
-//    var result mat4;
-//    loop var column; first.count
-//    {
-//        result[column] = second * first[column];
-//    }
-//    
-//    return result;
-//}

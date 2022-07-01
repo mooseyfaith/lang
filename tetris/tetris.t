@@ -29,15 +29,16 @@ def falling_piece struct
     type piece_type;
 }
 
-def piece_type_colors = type(rgba32[piece_type.count - 1])
+def piece_type_colors = type(rgba32[piece_type.count])
 [
-    { 0; 0; 0; 255 };
+    {};
     { 255; 0; 0; 255 };
     { 0; 255; 0; 255 };
     { 0; 0; 255; 255 };
     { 255; 255; 0; 255 };
     { 255; 0; 255; 255 };
-    { 0; 255; 255; 255 }
+    { 0; 255; 255; 255 };
+    { 255; 255; 255; 255 }
 ];
 
 def frame_color = type(rgba32) { 80; 80; 80; 255 };
@@ -52,6 +53,7 @@ var piece      = make_random_piece(random ref, board[0].count, board.count);
 var next_piece = make_random_piece(random ref, board[0].count, board.count);
 
 var game_over b32 = false;
+var jiggle_time f32;
 
 while platform_handle_messages(platform ref)
 {
@@ -166,7 +168,10 @@ while platform_handle_messages(platform ref)
         }
     }
     
-    frame_begin(platform ref, renderer ref, board.count);
+    jiggle_time = fmod(jiggle_time + (platform.delta_seconds * 0.1), 1.0);
+    var jiggle = sin(jiggle_time * 2 * pi32) * 0.05 * pi32;
+    
+    frame_begin(platform ref, renderer ref, jiggle);
     
     var stone_lines u32;
     if game_over
@@ -330,10 +335,10 @@ def make_random_piece func(random random_pcg ref; board_width s32; board_height 
 
 def push_brick func(renderer render_api ref; x f32; y f32; color rgba32; location code_location = get_call_location())
 {
-    var margin = 0.1 * renderer.brick_size;
-    var size   = renderer.brick_size - margin;
+    var margin = 0.1;
+    var size   = 1.0 - margin;
     
-    var min = ((v2(x, y) - v2(4.5, 9.5)) * renderer.brick_size) - renderer.camera_offset + margin;
+    var min = v2(x, y) - v2(4.5, 9.5) + margin;
     push_quad(renderer, box2_size(min, v2(size)), color, location);
 }
 
@@ -341,12 +346,14 @@ def push_brick func(renderer render_api ref; x f32; y f32; color rgba32; locatio
 
 def v2 func(x f32; y f32) (result vec2)
 {
-    return type(vec2) { x; y };
+    var result vec2 = [ x; y ];
+    return result;
 }
 
 def v2 func(scale f32) (result vec2)
 {
-    return type(vec2) { scale; scale };
+    var result vec2 = [ scale; scale ];
+    return result;
 }
 
 def box2 struct
