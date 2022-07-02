@@ -15,9 +15,15 @@ set options=/MTd /Od /DEBUG /Zi /EHsc /nologo %includes%
 rem set options=/MT /O2 /EHsc /nologo %includes%
 
 if not exist build mkdir build
+
+del build\embedded_files.rc > NUL 2>NUL
+echo lang_internal.t RCDATA "%cd:\=/%/code/lang_internal.t" >> build\embedded_files.rc
+
 pushd build
 
-cl /Fe%name% %source% %options% /link /INCREMENTAL:NO
+rc /nologo /fo emedded_files.res /r embedded_files.rc
+
+cl /Fe%name% %source% %options% emedded_files.res /link /INCREMENTAL:NO
 
 popd
 

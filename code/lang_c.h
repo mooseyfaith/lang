@@ -123,14 +123,19 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
             {
                 local_node_type(array_type, name_type.node);
                 
-                if (array_type->count_expression)
+                if (array_type->item_count_expression)
                 {
+                /*
                     print(builder, "struct");
                     print_scope_open(builder);
                     print_type(buffer, array_type->item_type, s("base["));
                     print_expression(buffer, array_type->count_expression);
                     print(builder, "];");
                     print_scope_close(builder, false);
+                */
+                    
+                    print_type(buffer, array_type->item_type);
+                    print(builder, "_array_type_%i", get_array_item_count(array_type));
                 }
                 else
                 {
@@ -430,7 +435,7 @@ print_expression_declaration
                 #else
                     if (field_dereference->name == s("count"))
                     {
-                        if (array_type->count_expression)
+                        if (array_type->item_count_expression)
                         {
                             print_comment_start(buffer);
                             
@@ -439,7 +444,7 @@ print_expression_declaration
                             
                             print_comment_end(buffer);
                             
-                            print_expression(buffer, array_type->count_expression);
+                            print_expression(buffer, array_type->item_count_expression);
                         }
                         else
                         {
@@ -461,7 +466,7 @@ print_expression_declaration
                             print_comment_end(buffer);
                             
                             print(builder, "_array_literal_base_%x", array_literal->node.index);
-                            //print_expression(buffer, array_type->count_expression);
+                            //print_expression(buffer, array_type->item_count_expression);
                         }
                         else
                         {
@@ -563,6 +568,39 @@ print_expression_declaration
                     }
                 }
             }
+        } break;
+        
+        case ast_node_type_get_type_info:
+        {
+            local_node_type(get_type_info, node);
+            
+            print_comment_start(buffer);
+            
+            print(builder, "get_type_info(");
+            print_type(buffer, get_type_info->type);
+            print(builder, ")");
+            
+            print_comment_end(buffer);
+            
+            auto name_type = get_type_info->type.name_type.node;
+            u32 type_index = 0;
+            u32 type_byte_count = ast_node_type_byte_counts[name_type->node_type];
+            
+            for (auto bucket = parser->bucket_arrays[name_type->node_type]; bucket; bucket = bucket->next)
+            {
+                auto index = ((u8 *) name_type - (u8 *) bucket->base) / type_byte_count;
+                if (index < ast_bucket_item_count)
+                {
+                    type_index += index;
+                    break;
+                }
+                
+                type_index += ast_bucket_item_count;
+            }
+            
+            auto count_and_alignment = get_type_byte_count(get_type_info->type);
+            
+            print(builder, "lang_type_info { &type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
         } break;
         
         case ast_node_type_type_byte_count:
@@ -668,14 +706,14 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             auto type = get_expression_type(buffer->parser, array_index->array_expression);
             local_node_type(array_type, type.base_type.node);
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
             {
                 print_comment_start(buffer);
                 print(builder, "(");
                 print_expression(buffer, array_index->array_expression);
                 print(builder, ").count");
                 print_comment_end(buffer);
-                print_expression(buffer, array_type->count_expression);
+                print_expression(buffer, array_type->item_count_expression);
                 print_line(builder, "));");
             }
             else
@@ -1248,7 +1286,7 @@ get_unique_type_declaration
                 base_type = unique_type->node;
             }
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
                 return type;
         } break;
         
@@ -1355,6 +1393,7 @@ bucket_type(u32_list_entry_bucket, u32_list_entry, 1024);
 
 struct dependency_graph
 {
+    lang_parser *parser;
     dependency_node_buffer nodes;
     u32_list_entry_bucket *index_buckets;
     
@@ -1382,7 +1421,7 @@ ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
         {
             local_node_type(array_type, node);
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
                 return node;
             
             auto unique_item_type = get_unique_node(graph, array_type->item_type.name_type.node);
@@ -1502,7 +1541,11 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
 {
     switch (expression->node_type)
     {
-        cases_complete_message("%.*s", fs(ast_node_type_names[expression->node_type]));
+        default:
+        {
+            auto type = get_expression_type(graph->parser, expression);
+            insert_type_dependency(graph, child, type);
+        } break;
     
         case ast_node_type_number:
         break;
@@ -1529,7 +1572,7 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
             
             for (auto item_expression = array_literal->first_expression; item_expression; item_expression = item_expression->next)
             {
-                insert_expression_dependency(graph, child, item_expression);
+                //insert_expression_dependency(graph, child, item_expression);
             }
         } break;
         
@@ -1620,7 +1663,7 @@ insert_type_dependency_declaration
         {
             local_node_type(array_type, name_type);
         #if 1
-            if (array_type->count_expression)
+            if (false && array_type->item_count_expression)
             {
                 insert_type_dependency(graph, child, array_type->item_type);
             }
@@ -1660,6 +1703,7 @@ void free_graph(dependency_graph *graph)
 dependency_graph sort_declaration_dependencies(lang_parser *parser)
 {
     dependency_graph graph = {};
+    graph.parser = parser;
     
     // collect
     {
@@ -1721,7 +1765,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                     {
                         local_node_type(array_type, name_type);
                         //// skip dependency on array type
-                        //insert_type_dependency(&graph, get_base_node(alias_type), array_type->item_type);
+                        insert_type_dependency(&graph, get_base_node(alias_type), array_type->item_type);
                     } break;
                 }
             }
@@ -1936,14 +1980,14 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
             print_line(builder, "typedef struct");
             print_scope_open(builder);
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
             {
                 //print_line(builder, "static const usize count = ");
-                //print_expression(buffer, array_type->count_expression);
+                //print_expression(buffer, array_type->item_count_expression);
                 //print_line(builder, ";");
             
                 print_type(buffer, array_type->item_type, s("base["));
-                print_expression(buffer, array_type->count_expression);
+                print_expression(buffer, array_type->item_count_expression);
                 
                 print_line(builder, "];");
             }
@@ -2271,6 +2315,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     print_line(builder, ";");
                 } break;                
                 
+            #if 0
                 case ast_node_type_array_literal:
                 {
                     maybe_print_blank_line(builder);
@@ -2295,11 +2340,12 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     print_line(builder, ";");
                     
                     auto type_without_count = *array_type;
-                    type_without_count.count_expression = null;
+                    type_without_count.item_count_expression = null;
                     print_type(&buffer, get_base_node(&type_without_count));
                     print_line(builder, " _array_literal_%x = { %llu, _array_literal_%x_base };", node->index, array_literal->item_count, node->index);
                     print_newline(builder);
                 } break;
+            #endif
                 
                 case ast_node_type_compound_literal:
                 {
@@ -2334,14 +2380,26 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                 {
                     local_node_type(constant, node);
                     
-                    auto type = get_expression_type(parser, constant->expression);
-                    print(builder, "const ");
-                    print_type(&buffer, type, constant->name);
+                    maybe_print_blank_line(builder);
                     
-                    if (!try_print_literal_assignment(&buffer, constant->expression))
+                    auto type = get_expression_type(parser, constant->expression);
+                    
+                    // "forward declare" arrays
+                    if (is_node_type(type.base_type.node, array_type))
                     {
-                        print(builder, " = ");
-                        print_expression(&buffer, constant->expression);
+                        print(builder, "extern const ");
+                        print_type(&buffer, type, constant->name);
+                    }
+                    else
+                    {
+                        print(builder, "const ");
+                        print_type(&buffer, type, constant->name);
+                        
+                        if (!try_print_literal_assignment(&buffer, constant->expression))
+                        {
+                            print(builder, " = ");
+                            print_expression(&buffer, constant->expression);
+                        }
                     }
                     
                     print_line(builder, ";");
@@ -2403,23 +2461,49 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         }
     }
 
-    maybe_print_blank_line(builder);
-    print_line(builder, "void main(%.*s argument_count, %.*s arguments[])", fs(lang_c_base_type_names[lang_c_base_type_s32]), fs(lang_c_base_type_names[lang_c_base_type_cstring]));
-
-    print_scope_open(builder);
-
-    for (auto file = parser->file_list.first; file; file = (ast_file *) file->node.next)
     {
         maybe_print_blank_line(builder);
-        print_line(builder, "// file: %.*s", fs(file->path));
-        //print_line(builder, "#line 1 \"%.*s\"", fs(file->path));
-        print_newline(builder);
-
-        if (file->first_statement)
-            print_statements(&buffer, file->first_statement);
+        print_line(builder, "void main(%.*s argument_count, %.*s arguments[])", fs(lang_c_base_type_names[lang_c_base_type_s32]), fs(lang_c_base_type_names[lang_c_base_type_cstring]));
+    
+        print_scope_open(builder);
+    
+        for (auto file = parser->file_list.first; file; file = (ast_file *) file->node.next)
+        {
+            maybe_print_blank_line(builder);
+            print_line(builder, "// file: %.*s", fs(file->path));
+            //print_line(builder, "#line 1 \"%.*s\"", fs(file->path));
+            print_newline(builder);
+    
+            if (file->first_statement)
+                print_statements(&buffer, file->first_statement);
+        }
+        
+        print_scope_close(builder);
     }
     
-    print_scope_close(builder);
+    // declare all arrays with content
+    
+    for_bucket_item(bucket, index, parser->constant_buckets)
+    {
+        auto constant = &bucket->base[index];
+        
+        auto type = get_expression_type(parser, constant->expression);
+            
+        if (!is_node_type(type.base_type.node, array_type))
+            continue;
+
+        maybe_print_blank_line(builder);
+        print(builder, "const ");
+        print_type(&buffer, type, constant->name);
+        
+        if (!try_print_literal_assignment(&buffer, constant->expression))
+        {
+            print(builder, " = ");
+            print_expression(&buffer, constant->expression);
+        }
+        
+        print_line(builder, ";");
+    }
     
     return buffer;
 }

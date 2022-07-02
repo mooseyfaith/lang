@@ -4,6 +4,7 @@
 #endif
 
 #include "lang_c.h"
+#include "platform.h"
 
 struct lang_source
 {
@@ -42,6 +43,7 @@ s32 main(s32 argument_count, cstring arguments[])
     }
     
     lang_parser parser = {};
+    parser.lang_internal_source = platform_read_embedded_file("LANG_INTERNAL.T");
     reset(&parser);
     
     u64 ticks_per_second;

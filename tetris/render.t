@@ -1,7 +1,6 @@
 
 import math;
 import gl;
-import gl_win32;
 import platform;
 
 //def vertex_shader_source   = import_text_file("default.vert.glsl");
@@ -87,10 +86,50 @@ def init func(renderer render_api ref; platform platform_api ref)
     glBindVertexArray(renderer.vertex_array);
     glBindBuffer(GL_ARRAY_BUFFER, renderer.vertex_buffer);
     
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, type_byte_count(default_vertex), 0 cast(u8 ref));
-    glEnableVertexAttribArray(0);
+    var info = get_type_info(default_vertex).base_type cast(lang_type_info_compound ref);
     
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, type_byte_count(default_vertex), type_byte_count(vec3) cast(u8 ref));
+    loop var i; info.fields.count
+    {
+        var field = info.fields[i];
+        
+        def type_map = type(GLenum[])
+        [
+            GL_UNSIGNED_BYTE;
+            GL_UNSIGNED_SHORT;
+            GL_UNSIGNED_INT;
+            GL_INVALID_ENUM; // there is no 64bit number type in gl
+            
+            GL_BYTE;
+            GL_SHORT;
+            GL_INT;
+            GL_INVALID_ENUM; // there is no 64bit number type in gl
+            
+            GL_FLOAT;
+            GL_DOUBLE;
+        ];
+        
+        var gl_type GLenum;
+        var item_count usize = 1;
+        
+        switch field.type.base_type
+        case lang_type_info_type.array
+        {
+            var array_type = field.type.base_type cast(lang_type_info_array ref);
+            item_count = array_type.item_count;
+            
+            assert(array_type.item_type.base_type is lang_type_info_type.number);
+            gl_type = type_map[array_type.item_type.base_type cast(type_info_number ref).number_type];
+        }
+        else
+        {
+            assert(0);
+        }
+    
+        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, type_byte_count(default_vertex), info.fields[i].byte_offset cast(u8 ref));
+        glEnableVertexAttribArray(i);
+    }
+    
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, type_byte_count(default_vertex), type_byte_count(vec3) cast(u8 ref));
     glEnableVertexAttribArray(1);
     
     glBufferData(GL_ARRAY_BUFFER, type_byte_count(default_vertex) * 6 * renderer.quads.count, null, GL_DYNAMIC_DRAW);

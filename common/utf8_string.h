@@ -279,6 +279,15 @@ struct string_builder
     bool pending_newline;
 };
 
+void clear(string_builder *builder)
+{
+    auto memory = builder->memory;
+    *builder = {};
+    
+    resize_buffer(&memory, 0);
+    builder->memory = memory;
+}
+
 string print_raw_va(string_builder *builder, cstring format, va_list va_arguments)
 {
     usize count = _vscprintf_p(format, va_arguments) + 1;

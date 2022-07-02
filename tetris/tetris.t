@@ -1,9 +1,6 @@
 import platform;
-import gl;
 import random;
 import math;
-
-import render;
 
 var platform platform_api;
 platform_init(platform ref);

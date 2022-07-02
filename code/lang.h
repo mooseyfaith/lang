@@ -46,6 +46,7 @@
     macro(function_call, __VA_ARGS__) \
     macro(dereference, __VA_ARGS__) \
     macro(field_dereference, __VA_ARGS__) \
+    macro(get_type_info, __VA_ARGS__) \
     macro(type_byte_count, __VA_ARGS__) \
     macro(get_call_location, __VA_ARGS__) \
     macro(get_call_argument_text, __VA_ARGS__) \
@@ -161,11 +162,23 @@ string ast_node_type_names[] =
     macro(string, __VA_ARGS__) \
     macro(code_location, __VA_ARGS__) \
     macro(cstring, __VA_ARGS__) \
+    macro(lang_type_info_type, __VA_ARGS__) \
+    macro(lang_type_info, __VA_ARGS__) \
+    macro(lang_type_info_number_type, __VA_ARGS__) \
+    macro(lang_type_info_number, __VA_ARGS__) \
+    macro(lang_type_info_compound_field, __VA_ARGS__) \
+    macro(lang_type_info_compound, __VA_ARGS__) \
+    macro(lang_type_info_array, __VA_ARGS__) \
+    macro(lang_type_info_any_value, __VA_ARGS__) \
 
 #define lang_base_constant_list(macro, ...) \
     macro(null, __VA_ARGS__) \
     macro(false, __VA_ARGS__) \
     macro(true, __VA_ARGS__) \
+    macro(lang_type_info_number_table, __VA_ARGS__) \
+    macro(lang_type_info_compound_table, __VA_ARGS__) \
+    macro(lang_type_info_compound_field_table, __VA_ARGS__) \
+    macro(lang_type_info_array_table, __VA_ARGS__) \
 
 enum lang_base_number_type
 {
@@ -318,7 +331,8 @@ struct ast_array_type
 {
     ast_base_node      node;
     complete_type_info item_type;
-    ast_node           *count_expression; // is constant array
+    ast_node           *item_count_expression;  // is constant array
+    usize              item_count; // only if count_expression != null
 };
 
 struct ast_enumeration_type
@@ -450,17 +464,6 @@ struct ast_name_reference
     ast_node *reference;
 };
 
-#if 0
-enum field_reference_type
-{
-    field_reference_type_none,
-    field_reference_type_variable,
-    field_reference_type_enumeration_item,
-    field_reference_type_array_count_expression,
-    field_reference_type_count,
-};
-#endif
-
 struct ast_dereference
 {
     ast_base_node      node;
@@ -477,7 +480,13 @@ struct ast_field_dereference
     complete_type_info type;
 };
 
-// pseodo functions
+// pseudo functions
+
+struct ast_get_type_info
+{
+    ast_base_node      node;
+    complete_type_info type;
+};
 
 struct ast_type_byte_count
 {
@@ -719,6 +728,7 @@ struct lang_parser
     ast_module_list module_list;
     ast_file_list   file_list;
     
+    string     lang_internal_source;
     ast_module *lang_module;
     ast_file   *lang_file;
     ast_module *unnamed_module;
@@ -1117,6 +1127,15 @@ u32 get_bit_count_power_of_two(u64 value)
     return get_highest_bit_index(bit_count);
 }
 
+ast_number * new_number_u64(lang_parser *parser, string location_text, u64 value)
+{
+    new_local_node(number, location_text);
+    number->value.u64_value              = value;
+    number->value.bit_count_power_of_two = get_bit_count_power_of_two(value);
+    
+    return number;
+}
+
 ast_number * parse_number(lang_parser *parser, bool parsed_minus)
 {
     bool is_signed = parsed_minus || try_skip(&parser->iterator, s("-"));
@@ -1406,7 +1425,7 @@ ast_array_literal * parse_array_literal(lang_parser *parser, complete_type_info 
         number->value.bit_count_power_of_two = 6;
         
         number->node.parent = get_base_node(array_type);
-        array_type->count_expression = get_base_node(number);
+        array_type->item_count_expression = get_base_node(number);
     }
     
 #if 0
@@ -1526,7 +1545,7 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
             if (result.name_type.node == result.base_type.node)
                 result.base_type = result.name_type;
             
-            array_type->count_expression = expression;
+            array_type->item_count_expression = expression;
             array_type->item_type = result;
             
             result = {};
@@ -1720,6 +1739,17 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 get_call_argument_text->argument = name_reference;
                 
                 expression = get_base_node(get_call_argument_text);
+            }
+            else if (name == s("get_type_info"))
+            {
+                new_local_node(get_type_info);
+                
+                lang_require_consume_return_value("(", {}, "after 'get_type_info'");
+            
+                get_type_info->type = lang_require_call(parse_type(parser, true));
+                
+                lang_require_consume_return_value(")", {}, "after get_type_info type");
+                expression = get_base_node(get_type_info);
             }
             else if (name == s("type_byte_count"))
             {
@@ -2083,7 +2113,7 @@ complete_type_info get_type(lang_parser *parser, lang_base_type type)
             local_node_type(alias_type, result.name_type.node);
             result.base_type                    = alias_type->type.base_type;
             result.base_type.indirection_count += alias_type->type.name_type.indirection_count;
-            result.name = alias_type->type.name;
+            result.name = alias_type->name;
         } break;
     }
     
@@ -2813,6 +2843,14 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
                 enqueue(queue, node, &variable->type.name_type.node);
         } break;
         
+        case ast_node_type_get_type_info:
+        {
+            local_node_type(get_type_info, node);
+            
+            if (get_type_info->type.name_type.node && get_type_info->type.name_type.node->parent == node)
+                enqueue(queue, node, &get_type_info->type.name_type.node);
+        } break;
+        
         case ast_node_type_type_byte_count:
         {
             local_node_type(type_byte_count, node);
@@ -2976,8 +3014,8 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
             
             //auto item_type = array_type->item_type.name_type.node;
             
-            if (array_type->count_expression)
-                enqueue(queue, node, &array_type->count_expression);
+            if (array_type->item_count_expression)
+                enqueue(queue, node, &array_type->item_count_expression);
             
             if (array_type->item_type.name_type.node && (array_type->item_type.name_type.node->parent == node))
                 enqueue(queue, node, &array_type->item_type.name_type.node);
@@ -3189,11 +3227,136 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
     return function_type;
 }
 
+#define get_array_item_count_declaration u64 get_array_item_count(ast_array_type *array_type)
+get_array_item_count_declaration;
+
 parsed_number evaluate(ast_node *expression)
 {
     switch (expression->node_type)
     {
         cases_complete;
+        
+        case ast_node_type_field_dereference:
+        {
+            local_node_type(field_dereference, expression);
+            
+            if (!field_dereference->reference)
+                return {};
+            
+            switch (field_dereference->reference->node_type)
+            {
+                cases_complete;
+                
+                case ast_node_type_array_type:
+                {
+                    local_node_type(array_type, field_dereference->reference);
+                    
+                    assert(field_dereference->name == s("count"));
+                    
+                    {
+                        assert(array_type->item_count_expression);
+                        parsed_number value = {};
+                        value.u64_value = get_array_item_count(array_type);
+                        value.bit_count_power_of_two = get_bit_count_power_of_two(value.u64_value);
+                        return value;
+                    }
+                    /*else if (field_dereference->name == s("base"))
+                    {
+                        auto type = array_type->item_type;
+                        type.base_type.indirection_count++;
+                        type.name_type.indirection_count++;
+                        return type;
+                    }*/
+                } break;
+                
+                /*case ast_node_type_enumeration_type:
+                {
+                    local_node_type(enumeration_type, field_dereference->reference);
+                    return enumeration_type->item_type;
+                } break;
+                
+                case ast_node_type_variable:
+                {
+                    local_node_type(variable, field_dereference->reference);
+                    return variable->type;
+                } break;
+                */
+                
+                case ast_node_type_enumeration_item:
+                {
+                    local_node_type(enumeration_item, field_dereference->reference);
+                    
+                    //local_node_type(alias_type, enumeration_item->enumeration_type->node.parent);
+                    
+                    return evaluate(enumeration_item->expression);
+                    //complete_type_info type = {};
+                    //type.base_type.node = alias_type->type.base_type.node;
+                    //type.name_type.node = get_base_node(alias_type);
+                    //return type;
+                } break;
+            }
+        } break;
+        
+        case ast_node_type_binary_operator:
+        {
+            local_node_type(binary_operator, expression);
+            
+            auto left  = evaluate(binary_operator->left);
+            auto right = evaluate(binary_operator->left->next);
+            
+            assert(!left.is_signed && !right.is_signed);
+            
+            switch (binary_operator->operator_type)
+            {
+                cases_complete;
+                
+                //case ast_binary_operator_type_or:
+                //case ast_binary_operator_type_and:
+                //case ast_binary_operator_type_xor:
+                
+                //case ast_binary_operator_type_is:
+                //case ast_binary_operator_type_is_not:
+                //case ast_binary_operator_type_is_less:
+                //case ast_binary_operator_type_is_less_equal:
+                //case ast_binary_operator_type_is_greater:
+                //case ast_binary_operator_type_is_greater_equal:
+                
+                //case ast_binary_operator_type_bit_not:
+                //case ast_binary_operator_type_bit_or:
+                //case ast_binary_operator_type_bit_and:
+                //case ast_binary_operator_type_bit_xor:
+                //case ast_binary_operator_type_bit_shift_left:
+                //case ast_binary_operator_type_bit_shift_right:
+                
+                case ast_binary_operator_type_add:
+                {
+                    left.u64_value += right.u64_value;
+                } break;
+                
+                case ast_binary_operator_type_subtract:
+                {
+                    left.u64_value -= right.u64_value;
+                } break;
+                
+                case ast_binary_operator_type_multiply:
+                {
+                    left.u64_value *= right.u64_value;
+                } break;
+                
+                case ast_binary_operator_type_divide:
+                {
+                    left.u64_value /= right.u64_value;
+                } break;
+                
+                case ast_binary_operator_type_modulo:
+                {
+                    left.u64_value %= right.u64_value;
+                } break;
+            }
+            
+            left.bit_count_power_of_two = get_bit_count_power_of_two(left.u64_value);
+            return left;
+        } break;
         
         case ast_node_type_number:
         {
@@ -3203,6 +3366,20 @@ parsed_number evaluate(ast_node *expression)
     }
 
     return {};
+}
+
+get_array_item_count_declaration
+{
+    assert(array_type->item_count_expression);
+    
+    if (!array_type->item_count)
+    {
+        auto value = evaluate(array_type->item_count_expression);
+        assert(!value.is_float && !value.is_signed);
+        array_type->item_count = value.u64_value;
+    }
+        
+    return array_type->item_count;
 }
 
 types_are_compatible_declaration
@@ -3259,13 +3436,13 @@ types_are_compatible_declaration
         if (types_are_compatible(parser, to_array_type->item_type, from_array_type->item_type) != type_compatibility_true)
             return type_compatibility_false;
             
-        if (!to_array_type->count_expression && from_array_type->count_expression)
+        if (!to_array_type->item_count_expression && from_array_type->item_count_expression)
             return type_compatibility_requires_cast;
             
-        if (to_array_type->count_expression && !from_array_type->count_expression)
+        if (to_array_type->item_count_expression && !from_array_type->item_count_expression)
             return type_compatibility_false;
         
-        if (to_array_type->count_expression && from_array_type->count_expression && (evaluate(to_array_type->count_expression).u64_value != evaluate(from_array_type->count_expression).u64_value))
+        if (to_array_type->item_count_expression && from_array_type->item_count_expression && (get_array_item_count(to_array_type) != get_array_item_count(from_array_type)))
             return type_compatibility_false;
     }
     else if (to.base_type.node != from.base_type.node)
@@ -3335,7 +3512,7 @@ maybe_add_cast_declaration
         {
             new_local_node(compound_literal_field, parser->node_locations.base[expression->index].text);
             compound_literal_field->name = s("count");
-            compound_literal_field->expression = clone(parser, array_type->count_expression, get_base_node(compound_literal_field));
+            compound_literal_field->expression = clone(parser, array_type->item_count_expression, get_base_node(compound_literal_field));
             compound_literal->first_field = compound_literal_field;
         }
         
@@ -3411,6 +3588,12 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
     {
         cases_complete;
         
+        case ast_node_type_enumeration_type:
+        {
+            local_node_type(enumeration_type, base_type);
+            return get_type_byte_count(enumeration_type->item_type);
+        } break;
+        
         case ast_node_type_number_type:
         {
             local_node_type(number_type, base_type);
@@ -3422,11 +3605,11 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
         {
             local_node_type(array_type, base_type);
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
             {
                 auto count_and_alignment = get_type_byte_count(array_type->item_type);
                 
-                count_and_alignment.byte_count *= evaluate(array_type->count_expression).u64_value;
+                count_and_alignment.byte_count *= evaluate(array_type->item_count_expression).u64_value;
                 return count_and_alignment;
             }
             else
@@ -3508,8 +3691,8 @@ get_expression_type_declaration
                     local_node_type(array_type, field_dereference->reference);
                     if (field_dereference->name == s("count"))
                     {
-                        if (array_type->count_expression)
-                            return get_expression_type(parser, array_type->count_expression);
+                        if (array_type->item_count_expression)
+                            return get_expression_type(parser, array_type->item_count_expression);
                         else
                             return get_type(parser, lang_base_type_usize);
                     }
@@ -3718,6 +3901,11 @@ get_expression_type_declaration
             return get_type(parser, lang_base_type_string);
         } break;
         
+        case ast_node_type_get_type_info:
+        {
+            return get_type(parser, lang_base_type_lang_type_info);
+        } break;
+        
         case ast_node_type_type_byte_count:
         {
             local_node_type(type_byte_count, node);
@@ -3739,10 +3927,9 @@ get_expression_type_declaration
             local_node_type(array_index, node);
             auto type = get_expression_type(parser, array_index->array_expression);
             
-            if (!type.name_type.node)
+            if (!type.name_type.node || type.base_type.indirection_count || !is_node_type(type.base_type.node, array_type))
                 return {};
             
-            assert(!type.base_type.indirection_count);
             local_node_type(array_type, type.base_type.node);
             
             return array_type->item_type;
@@ -3906,6 +4093,8 @@ void reset(lang_parser *parser)
         
         parser->error_messages.memory = backup.error_messages.memory;
         resize_buffer(&parser->error_messages.memory, 0);
+        
+        parser->lang_internal_source = backup.lang_internal_source;
     }
     
     begin_list(&parser->module_list);
@@ -3944,34 +4133,9 @@ void reset(lang_parser *parser)
         append_list(&statements, &number_type->node);
     }
     
-    string source = s(
-"module lang;" "\r\n"
-"\r\n"
-"def usize type u64;" "\r\n"
-"def ssize type s64;" "\r\n"
-"\r\n"
-"def b8 type u8;" "\r\n"
-"def b32 type u32;" "\r\n"
-"\r\n"
-"def string type u8[];" "\r\n"
-"\r\n"
-"def cstring type u8 ref;" "\r\n"
-"\r\n"
-"def null  = 0 cast(u8 ref);" "\r\n"
-"def false = 0 cast(b8);" "\r\n"
-"def true  = 1 cast(b8);" "\r\n"
-"\r\n"
-"def code_location struct" "\r\n"
-"{" "\r\n"
-"    module   string;" "\r\n"
-"    file     string;" "\r\n"
-"    function string;" "\r\n"
-"    line     u32;" "\r\n"
-"    column   u32;" "\r\n"
-"}" "\r\n"
-);
-
-    lang_require_return_value(parse(parser, source, s("lang_internal")), , source, "internal compiler error");
+    assert(parser->lang_internal_source.count);
+    
+    lang_require_return_value(parse(parser, parser->lang_internal_source, s("lang_internal")), , parser->lang_internal_source, "internal compiler error");
     
     auto file = parser->file_list.first;
     parser->lang_file   = file;
@@ -4334,7 +4498,7 @@ void print_type(lang_parser *parser, string_builder *builder, complete_type_info
             local_node_type(array_type, type.name_type.node);
             print_type(parser, builder, array_type->item_type);
             
-            if (array_type->count_expression)
+            if (array_type->item_count_expression)
                 print(builder, "[x]");
             else
                 print(builder, "[]");
@@ -4792,6 +4956,20 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 entry->node = get_base_node(alias_type);
                 entry->type = &alias_type->type;
                 entry->name = alias_type->type.name;
+            }
+        }
+        
+        for_bucket_item(bucket, index, parser->get_type_info_buckets)
+        {
+            auto get_type_info = &bucket->base[index];
+            
+            if (!get_type_info->type.base_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->node = get_base_node(get_type_info);
+                entry->type = &get_type_info->type;
+                entry->name = get_type_info->type.name;
             }
         }
         
@@ -5370,6 +5548,307 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
     }
 }
 
+void generate_type_info_tables(lang_parser *parser)
+{
+    string_builder builder = {};
+    defer { free_buffer(&builder.memory); };
+
+    // number table
+    {
+        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_number_table]->expression);
+        local_node_type(array_type, array_literal->type.base_type.node);
+        
+        auto location_text = parser->node_locations.base[array_literal->node.index].text;
+        
+        auto type_info_type        = get_type(parser, lang_base_type_lang_type_info_type);
+        auto type_info_number_type = get_type(parser, lang_base_type_lang_type_info_number_type);
+        
+        auto type_info_type_enum        = get_node_type(enumeration_type, type_info_type.base_type.node);
+        auto type_info_number_type_enum = get_node_type(enumeration_type, type_info_number_type.base_type.node);
+        
+        ast_enumeration_item *type_info_type_number = null;
+        for (auto it = type_info_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
+        {
+            if (it->name == s("number"))
+            {
+                type_info_type_number = it;
+                break;
+            }
+        }
+        assert(type_info_type_number);
+        
+        auto array_tail_next = make_tail_next(&array_literal->first_expression);
+        
+        u32 type_index = 0;
+        for_bucket_item(bucket, index, parser->number_type_buckets)
+        {
+            auto number_type = &bucket->base[index];
+        
+            auto compound_literal = begin_new_node(compound_literal, location_text);
+            compound_literal->type = array_type->item_type;
+            
+            append_tail_next(&array_tail_next, compound_literal);
+            
+            auto tail_next = make_tail_next(&compound_literal->first_field);
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("base_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(field_dereference, location_text);
+                
+                new_local_node(name_reference, location_text);
+                name_reference->name      = type_info_type.name;
+                name_reference->reference = type_info_type.name_type.node;
+                
+                field_dereference->name       = type_info_type_number->name;
+                field_dereference->expression = get_base_node(name_reference);
+                field_dereference->reference  = get_base_node(type_info_type_number);
+                field_dereference->type       = type_info_type;
+        
+                compound_literal_field->expression = get_base_node(field_dereference);
+            }
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("number_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                ast_enumeration_item *type_info_number_type_value = null;
+                for (auto it = type_info_number_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
+                {
+                    if (it->name == number_type->name)
+                    {
+                        type_info_number_type_value = it;
+                        break;
+                    }
+                }
+                assert(type_info_number_type_value);
+                
+                new_local_node(field_dereference, location_text);
+                
+                new_local_node(name_reference, location_text);
+                name_reference->name      = type_info_number_type.name;
+                name_reference->reference = type_info_number_type.name_type.node;
+                
+                field_dereference->name       = type_info_number_type_value->name;
+                field_dereference->expression = get_base_node(name_reference);
+                field_dereference->reference  = get_base_node(type_info_number_type_value);
+                field_dereference->type       = type_info_number_type;
+                
+                compound_literal_field->expression = get_base_node(field_dereference);
+            }
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("byte_count");
+                compound_literal_field->expression = get_base_node(new_number_u64(parser, location_text, 1 << (number_type->bit_count_power_of_two - 3)));
+                
+                append_tail_next(&tail_next, compound_literal_field);
+            }
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("is_float");
+                compound_literal_field->expression = get_base_node(new_number_u64(parser, location_text, number_type->is_float));
+                
+                append_tail_next(&tail_next, compound_literal_field);
+            }
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("is_signed");
+                compound_literal_field->expression = get_base_node(new_number_u64(parser, location_text, number_type->is_signed));
+                
+                append_tail_next(&tail_next, compound_literal_field);
+            }
+            
+            end_node(parser, get_base_node(compound_literal), false);
+            compound_literal->node.parent = get_base_node(array_literal);
+            
+            type_index++;
+        }
+        
+        array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
+        array_literal->item_count = type_index;
+    }
+    
+    // array table
+    {
+        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_array_table]->expression);
+        local_node_type(array_type, array_literal->type.base_type.node);
+        auto type = array_type->item_type;
+        
+        auto location_text = parser->node_locations.base[array_literal->node.index].text;
+        
+        auto type_info_type       = get_type(parser, lang_base_type_lang_type_info_type);
+        auto type_info_type_enum  = get_node_type(enumeration_type, type_info_type.base_type.node);
+        
+        ast_enumeration_item *type_info_type_number = null;
+        for (auto it = type_info_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
+        {
+            if (it->name == s("array"))
+            {
+                type_info_type_number = it;
+                break;
+            }
+        }
+        assert(type_info_type_number);
+        
+        auto array_tail_next = make_tail_next(&array_literal->first_expression);
+        
+        u32 type_index = 0;
+        for_bucket_item(bucket, index, parser->array_type_buckets)
+        {
+            auto array_type = &bucket->base[index];
+            
+        #if 0
+            clear(&builder);
+        
+            print_raw(&builder, R"(
+type(lang_type_info_array) {
+    lang_type_info_type.array;
+    type(lang_type_info) { %.*s; %u; %.*s };
+};
+            )");
+        #endif
+        
+            auto compound_literal = begin_new_node(compound_literal, location_text);
+            compound_literal->type = type;
+            
+            append_tail_next(&array_tail_next, compound_literal);
+            
+            auto tail_next = make_tail_next(&compound_literal->first_field);
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("base_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(field_dereference, location_text);
+                
+                new_local_node(name_reference, location_text);
+                name_reference->name      = type_info_type.name;
+                name_reference->reference = type_info_type.name_type.node;
+                
+                field_dereference->name       = type_info_type_number->name;
+                field_dereference->expression = get_base_node(name_reference);
+                field_dereference->reference  = get_base_node(type_info_type_number);
+                field_dereference->type       = type_info_type;
+        
+                compound_literal_field->expression = get_base_node(field_dereference);
+            }
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("item_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(get_type_info, location_text);
+                get_type_info->type = array_type->item_type;
+                
+                compound_literal_field->expression = get_base_node(get_type_info);
+            }
+            
+            // TODO: evaluate constant expressions
+            if (false && array_type->item_count_expression)
+            {
+                auto item_count = evaluate(array_type->item_count_expression).u64_value;
+                
+                {
+                    new_local_node(compound_literal_field, location_text);
+                    compound_literal_field->name = s("item_count");
+                    compound_literal_field->expression = get_base_node(new_number_u64(parser, location_text, item_count));
+                    
+                    append_tail_next(&tail_next, compound_literal_field);
+                }
+                
+                {
+                    new_local_node(compound_literal_field, location_text);
+                    compound_literal_field->name = s("byte_count");
+                    compound_literal_field->expression = get_base_node(new_number_u64(parser, location_text, item_count * get_type_byte_count(array_type->item_type).byte_count));
+                    
+                    append_tail_next(&tail_next, compound_literal_field);
+                }
+            }
+            
+            end_node(parser, get_base_node(compound_literal), false);
+            compound_literal->node.parent = get_base_node(array_literal);
+            
+            type_index++;
+        }
+        
+        array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
+        array_literal->item_count = type_index;
+    }
+    
+    // compound & compound_field table
+    if (0)
+    {
+        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_number_table]->expression);
+        local_node_type(array_type, array_literal->type.base_type.node);
+        
+        auto location_text = parser->node_locations.base[array_literal->node.index].text;
+        
+        auto type_info_type        = get_type(parser, lang_base_type_lang_type_info_type);
+        auto type_info_number_type = get_type(parser, lang_base_type_lang_type_info_number_type);
+        
+        auto type_info_type_enum        = get_node_type(enumeration_type, type_info_type.base_type.node);
+        auto type_info_number_type_enum = get_node_type(enumeration_type, type_info_number_type.base_type.node);
+        
+        ast_enumeration_item *type_info_type_number = null;
+        for (auto it = type_info_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
+        {
+            if (it->name == s("number"))
+            {
+                type_info_type_number = it;
+                break;
+            }
+        }
+        assert(type_info_type_number);
+        
+        auto array_tail_next = make_tail_next(&array_literal->first_expression);
+        
+        u32 type_index = 0;
+        for_bucket_item(bucket, index, parser->number_type_buckets)
+        {
+            auto number_type = &bucket->base[index];
+        
+            auto compound_literal = begin_new_node(compound_literal, location_text);
+            compound_literal->type = array_type->item_type;
+            
+            append_tail_next(&array_tail_next, compound_literal);
+            
+            auto tail_next = make_tail_next(&compound_literal->first_field);
+            
+            {
+                new_local_node(compound_literal_field, location_text);
+                compound_literal_field->name = s("base_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(field_dereference, location_text);
+                
+                new_local_node(name_reference, location_text);
+                name_reference->name      = type_info_type.name;
+                name_reference->reference = type_info_type.name_type.node;
+                
+                field_dereference->name       = type_info_type_number->name;
+                field_dereference->expression = get_base_node(name_reference);
+                field_dereference->reference  = get_base_node(type_info_type_number);
+                field_dereference->type       = type_info_type;
+        
+                compound_literal_field->expression = get_base_node(field_dereference);
+            }
+        }
+    }
+}
+
 void resolve(lang_parser *parser)
 {
     auto root = get_base_node(parser->file_list.first);
@@ -5562,6 +6041,8 @@ void resolve(lang_parser *parser)
     // printf("table used count / count: %llu / %llu\n", resolver.table.used_count, resolver.table.count);
     
     lang_require_call_return_value(resolve_names(parser, &resolver, root), );
+    
+    generate_type_info_tables(parser);
     
     // check for semantic errors
     {
