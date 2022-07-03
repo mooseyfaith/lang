@@ -87,6 +87,7 @@ def init func(renderer render_api ref; platform platform_api ref)
     glBindBuffer(GL_ARRAY_BUFFER, renderer.vertex_buffer);
     
     var info = get_type_info(default_vertex).base_type cast(lang_type_info_compound ref);
+    var fields = info.fields;
     
     loop var i; info.fields.count
     {
@@ -111,26 +112,23 @@ def init func(renderer render_api ref; platform platform_api ref)
         var gl_type GLenum;
         var item_count usize = 1;
         
-        switch field.type.base_type
+        switch field.type.base_type . ;
         case lang_type_info_type.array
         {
             var array_type = field.type.base_type cast(lang_type_info_array ref);
             item_count = array_type.item_count;
             
             assert(array_type.item_type.base_type is lang_type_info_type.number);
-            gl_type = type_map[array_type.item_type.base_type cast(type_info_number ref).number_type];
+            gl_type = type_map[array_type.item_type.base_type cast(lang_type_info_number ref).number_type];
         }
         else
         {
             assert(0);
         }
     
-        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, type_byte_count(default_vertex), info.fields[i].byte_offset cast(u8 ref));
+        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, type_byte_count(default_vertex), info.fields[i].byte_offset cast(usize) cast(u8 ref));
         glEnableVertexAttribArray(i);
     }
-    
-        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, type_byte_count(default_vertex), type_byte_count(vec3) cast(u8 ref));
-    glEnableVertexAttribArray(1);
     
     glBufferData(GL_ARRAY_BUFFER, type_byte_count(default_vertex) * 6 * renderer.quads.count, null, GL_DYNAMIC_DRAW);
     

@@ -30,8 +30,10 @@ def lang_type_info_type enum u32
     compound;
     function;
     array;
+    enumeration;
     
     compound_field;
+    enumeration_item;
 }
 
 def lang_type_info struct
@@ -81,6 +83,7 @@ def lang_type_info_compound_field struct
     base_type      lang_type_info_type;
     type           lang_type_info;
     name           string;
+    byte_offset    u32;
 }
 
 def lang_type_info_array struct
@@ -93,6 +96,20 @@ def lang_type_info_array struct
     byte_count u32;
 }
 
+def lang_type_info_enumeration struct
+{
+    base_type  lang_type_info_type;
+    item_type  lang_type_info;
+    items      lang_type_info_enumeration_item[];
+}
+
+def lang_type_info_enumeration_item struct
+{
+    base_type  lang_type_info_type;
+    name       string;
+    value      u64;
+}
+
 def lang_type_info_any_value struct
 {
     type  lang_type_info;
@@ -100,7 +117,9 @@ def lang_type_info_any_value struct
 }
 
 // placeholders, will be resized
-def lang_type_info_number_table         = type(lang_type_info_number[])         [];
-def lang_type_info_compound_table       = type(lang_type_info_compound[])       [];
-def lang_type_info_compound_field_table = type(lang_type_info_compound_field[]) [];
-def lang_type_info_array_table          = type(lang_type_info_array[])          [];
+def lang_type_info_number_type_table           = type(lang_type_info_number[])           [];
+def lang_type_info_compound_type_table         = type(lang_type_info_compound[])         [];
+def lang_type_info_compound_type_field_table   = type(lang_type_info_compound_field[])   [];
+def lang_type_info_array_type_table            = type(lang_type_info_array[])            [];
+def lang_type_info_enumeration_type_table      = type(lang_type_info_enumeration[])      [];
+def lang_type_info_enumeration_type_item_table = type(lang_type_info_enumeration_item[]) [];

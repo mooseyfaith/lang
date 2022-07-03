@@ -1,22 +1,27 @@
 
 module math;
 
-// w, x, y, z
-def quat type f32[4];
+def quat struct
+{
+    w f32;
+    x f32;
+    y f32;
+    z f32;
+}
 
-def quat_identity = type(quat) [ 1; 0; 0; 0 ];
+def quat_identity = type(quat) { 1; 0; 0; 0 };
 
 def quat_axis_cos_sin func(normalized_rotation_axis vec3; cos_value f32; sin_value f32) (result quat)
 {
     //assert(are_close(length(normalized_rotation_axis), (f32)1));
         
     var result quat =
-    [
+    {
         cos_value;
         normalized_rotation_axis[0] * sin_value;
         normalized_rotation_axis[1] * sin_value;
         normalized_rotation_axis[2] * sin_value;
-    ];
+    };
     
     return result;
 }
@@ -42,7 +47,7 @@ def quat_between_normals func(from_normal vec3; to_normal vec3) (result quat)
 def negate func(value quat) (result quat)
 {
     var result quat = value;
-    result[0] = -result[0];
+    result.w = -result.w;
     
     return result;
 }
@@ -50,27 +55,27 @@ def negate func(value quat) (result quat)
 def mul func(second quat; first quat) (result quat)
 {
     var result quat = 
-    [
-        first[0] * second[0] - first[1] * second[1] - first[2] * second[2] - first[3] * second[3];
-        first[0] * second[1] + first[1] * second[0] + first[2] * second[3] - first[3] * second[2];
-        first[0] * second[2] - first[1] * second[3] + first[2] * second[0] + first[3] * second[1];
-        first[0] * second[3] + first[1] * second[2] - first[2] * second[1] + first[3] * second[0]
-    ];
+    {
+        first.w * second.w - first.x * second.x - first.y * second.y - first.z * second.z;
+        first.w * second.x + first.x * second.w + first.y * second.z - first.z * second.y;
+        first.w * second.y - first.x * second.z + first.y * second.w + first.z * second.x;
+        first.w * second.z + first.x * second.y - first.y * second.x + first.z * second.w
+    };
     
     return result;
 }
 
 def inverse func(value quat) (result quat)
 {
-    var inverse_length_squared = -1.0 / (value[0] * value[0] + value[1] * value[1] + value[2] * value[2] + value[3] * value[3]);
+    var inverse_length_squared = -1.0 / (value.w * value.w + value.x * value.x + value.y * value.y + value.z * value.z);
     
     var result quat =
-    [
-        value[0] * inverse_length_squared;
-        value[1] * inverse_length_squared;
-        value[2] * inverse_length_squared;
-        value[3] * inverse_length_squared;
-    ];
+    {
+        value.w * inverse_length_squared;
+        value.x * inverse_length_squared;
+        value.y * inverse_length_squared;
+        value.z * inverse_length_squared;
+    };
     
     return result;
 }

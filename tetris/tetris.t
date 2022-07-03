@@ -231,7 +231,7 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
     var piece falling_piece;
     piece.type = type;
     
-    switch type
+    switch type;
     case piece_type.o
     {
         var x s32 = board_width / 2 - 1;

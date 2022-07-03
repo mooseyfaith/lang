@@ -169,16 +169,20 @@ string ast_node_type_names[] =
     macro(lang_type_info_compound_field, __VA_ARGS__) \
     macro(lang_type_info_compound, __VA_ARGS__) \
     macro(lang_type_info_array, __VA_ARGS__) \
+    macro(lang_type_info_enumeration, __VA_ARGS__) \
+    macro(lang_type_info_enumeration_item, __VA_ARGS__) \
     macro(lang_type_info_any_value, __VA_ARGS__) \
 
 #define lang_base_constant_list(macro, ...) \
     macro(null, __VA_ARGS__) \
     macro(false, __VA_ARGS__) \
     macro(true, __VA_ARGS__) \
-    macro(lang_type_info_number_table, __VA_ARGS__) \
-    macro(lang_type_info_compound_table, __VA_ARGS__) \
-    macro(lang_type_info_compound_field_table, __VA_ARGS__) \
-    macro(lang_type_info_array_table, __VA_ARGS__) \
+    macro(lang_type_info_number_type_table, __VA_ARGS__) \
+    macro(lang_type_info_compound_type_table, __VA_ARGS__) \
+    macro(lang_type_info_compound_type_field_table, __VA_ARGS__) \
+    macro(lang_type_info_array_type_table, __VA_ARGS__) \
+    macro(lang_type_info_enumeration_type_table, __VA_ARGS__) \
+    macro(lang_type_info_enumeration_type_item_table, __VA_ARGS__) \
 
 enum lang_base_number_type
 {
@@ -293,17 +297,10 @@ struct ast_variable
     ast_node *default_expression;
     string name;
     bool is_global, type_is_declared;
+    u32 field_byte_offset;
 };
 
 struct ast_enumeration_type;
-
-struct ast_enumeration_item
-{
-    ast_base_node node;
-    ast_enumeration_type *enumeration_type;
-    ast_node *expression;
-    string name;
-};
 
 struct parsed_number
 {
@@ -320,6 +317,16 @@ struct parsed_number
         f64 f64_value;
     };
 };
+
+struct ast_enumeration_item
+{
+    ast_base_node node;
+    ast_enumeration_type *enumeration_type;
+    ast_node *expression;
+    string name;
+    u64 value;
+};
+
 
 struct ast_number
 {
@@ -431,8 +438,8 @@ struct ast_compound_type
 {
     ast_base_node node;
     ast_variable  *first_field;
-    u32 byte_count;
-    u32 byte_alignment;
+    u32           byte_count;
+    u32           byte_alignment;
 };
 
 struct ast_compound_literal_field
@@ -440,6 +447,7 @@ struct ast_compound_literal_field
     ast_base_node node;
     string   name;
     ast_node *expression;
+    u32 byte_offset;
 };
 
 struct ast_compound_literal
@@ -1490,6 +1498,7 @@ void resolve_complete_type(lang_parser *parser, complete_type_info *type)
             
             type->base_type = alias_type->type.base_type;
             type->base_type.indirection_count += type->name_type.indirection_count;
+            type->name = alias_type->name;
         } break;
     }
 }
@@ -1534,6 +1543,9 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
         if (try_consume_keyword(parser, s("ref")))
         {
             result.name_type.indirection_count++;
+            
+            if (result.base_type.node)
+                result.base_type.indirection_count++;
         }
         else if (try_consume(parser, s("[")))
         {
@@ -1542,15 +1554,14 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
             auto expression = lang_require_call_return_value(parse_expression(parser, {}), {});
             lang_require_return_value(try_consume(parser, s("]")), {}, parser->iterator, "expected ']' after array count expression");
             
-            if (result.name_type.node == result.base_type.node)
-                result.base_type = result.name_type;
+            resolve_complete_type(parser, &result);
             
             array_type->item_count_expression = expression;
             array_type->item_type = result;
             
             result = {};
             result.name_type.node = get_base_node(array_type);
-            result.base_type = result.name_type;
+            result.base_type      = result.name_type;
         }
         else
         {
@@ -1558,8 +1569,7 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
         }
     }
     
-    if (result.name_type.node == result.base_type.node)
-        result.base_type = result.name_type;
+    resolve_complete_type(parser, &result);
     
     lang_require_return_value(!is_required || result.name_type.node || result.name.count, {}, parser->iterator, "expected type");
     
@@ -2278,8 +2288,8 @@ ast_node * parse_statements(lang_parser *parser)
             else if (token == s("switch"))
             {
                 new_local_node(branch_switch);
-                branch_switch->expression = lang_require_call(parse_expression(parser, {}));
-                lang_require(branch_switch->expression, parser->iterator, "expected expression after 'switch'");
+                lang_require_expression(branch_switch->expression, parser, {});
+                lang_require_consume(";", " after switch expression");
 
                 //lang_require(try_consume(parser, s("{")), parser->iterator, "expected '{' after switch condition");
                 auto case_tail_next = make_tail_next(&branch_switch->first_case);
@@ -3230,6 +3240,9 @@ ast_function_type * get_function_type(lang_parser *parser, ast_function *functio
 #define get_array_item_count_declaration u64 get_array_item_count(ast_array_type *array_type)
 get_array_item_count_declaration;
 
+#define get_enumeration_item_value_declaration u64 get_enumeration_item_value(ast_enumeration_item *enumeration_item)
+get_enumeration_item_value_declaration;
+
 parsed_number evaluate(ast_node *expression)
 {
     switch (expression->node_type)
@@ -3286,13 +3299,10 @@ parsed_number evaluate(ast_node *expression)
                 {
                     local_node_type(enumeration_item, field_dereference->reference);
                     
-                    //local_node_type(alias_type, enumeration_item->enumeration_type->node.parent);
-                    
-                    return evaluate(enumeration_item->expression);
-                    //complete_type_info type = {};
-                    //type.base_type.node = alias_type->type.base_type.node;
-                    //type.name_type.node = get_base_node(alias_type);
-                    //return type;
+                    parsed_number value = {};
+                    value.u64_value = get_enumeration_item_value(enumeration_item);
+                    value.bit_count_power_of_two = get_bit_count_power_of_two(value.u64_value);
+                    return value;
                 } break;
             }
         } break;
@@ -3380,6 +3390,18 @@ get_array_item_count_declaration
     }
         
     return array_type->item_count;
+}
+
+get_enumeration_item_value_declaration
+{
+    if (!enumeration_item->value)
+    {
+        auto value = evaluate(enumeration_item->expression);
+        assert(!value.is_float && !value.is_signed);
+        enumeration_item->value = value.u64_value;
+    }
+        
+    return enumeration_item->value;
 }
 
 types_are_compatible_declaration
@@ -3588,6 +3610,13 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
     {
         cases_complete;
         
+        // HACK:
+        // is same as pointer for now...
+        case ast_node_type_function_type:
+        {
+            return { 8, 8 };
+        } break;
+        
         case ast_node_type_enumeration_type:
         {
             local_node_type(enumeration_type, base_type);
@@ -3633,6 +3662,7 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
                     auto count_and_alignment = get_type_byte_count(field->type);
                     auto mask = count_and_alignment.byte_alignment - 1;
                     byte_count = (byte_count + mask) & ~mask;
+                    field->field_byte_offset = byte_count;
                     byte_count += count_and_alignment.byte_count;
                     byte_alignment = maximum(byte_alignment, count_and_alignment.byte_alignment);
                 }
@@ -4457,6 +4487,15 @@ struct resolve_name_entry
 
 buffer_type(resolve_name_buffer, resolve_name_array, resolve_name_entry);
 
+complete_type_info to_type(lang_parser *parser, ast_node *name_type)
+{
+    assert(name_type->node_type <= ast_node_type_alias_type);
+    complete_type_info type = {};
+    type.name_type.node = name_type;
+    resolve_complete_type(parser, &type);
+    
+    return type;
+}
 
 void print_type(lang_parser *parser, string_builder *builder, complete_type_info type)
 {
@@ -4499,7 +4538,7 @@ void print_type(lang_parser *parser, string_builder *builder, complete_type_info
             print_type(parser, builder, array_type->item_type);
             
             if (array_type->item_count_expression)
-                print(builder, "[x]");
+                print(builder, "[!]");
             else
                 print(builder, "[]");
         } break;
@@ -4513,6 +4552,19 @@ void print_type(lang_parser *parser, string_builder *builder, complete_type_info
     
     for (u32 i = 0; i < type.name_type.indirection_count; i++)
         print(builder, " ref");
+}
+
+void print_name(lang_parser *parser, string_builder *builder, ast_node *node)
+{
+    if (node->node_type <= ast_node_type_alias_type)
+    {
+        print_type(parser, builder, to_type(parser, node));
+    }
+    else
+    {
+        auto name = get_name(node);
+        print(builder, "%.*s", fs(name));
+    }
 }
 
 ast_function * _find_matching_function(lang_parser *parser, ast_function_overloads *function_overloads, ast_node *first_call_argument)
@@ -4749,7 +4801,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                 // argument stays the same
 
                 input_variable = (ast_variable *) input_variable->node.next;
-                *input_pointer = input_variable;
+                *input_pointer = (ast_variable *) input_variable;
                 
                 return true;
             } break;
@@ -4789,7 +4841,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                 // argument stays the same
 
                 input_variable = (ast_variable *) input_variable->node.next;
-                *input_pointer = input_variable;
+                *input_pointer = (ast_variable *) input_variable;
                 
                 return true;
             } break;
@@ -4810,7 +4862,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     // argument stays the same
         
                     input_variable = (ast_variable *) input_variable->node.next;
-                    *input_pointer = input_variable;
+                    *input_pointer = (ast_variable *) input_variable;
                     
                     return true;
                 }
@@ -5555,7 +5607,7 @@ void generate_type_info_tables(lang_parser *parser)
 
     // number table
     {
-        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_number_table]->expression);
+        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_number_type_table]->expression);
         local_node_type(array_type, array_literal->type.base_type.node);
         
         auto location_text = parser->node_locations.base[array_literal->node.index].text;
@@ -5580,11 +5632,25 @@ void generate_type_info_tables(lang_parser *parser)
         auto array_tail_next = make_tail_next(&array_literal->first_expression);
         
         u32 type_index = 0;
+        defer
+        {
+            array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
+            array_type->item_count_expression->parent = get_base_node(array_type);
+            array_literal->item_count = type_index;
+        };
+        
         for_bucket_item(bucket, index, parser->number_type_buckets)
         {
             auto number_type = &bucket->base[index];
         
             auto compound_literal = begin_new_node(compound_literal, location_text);
+            defer
+            {
+                end_node(parser, get_base_node(compound_literal), false);
+                compound_literal->node.parent = get_base_node(array_literal);
+                type_index++;
+            };
+            
             compound_literal->type = array_type->item_type;
             
             append_tail_next(&array_tail_next, compound_literal);
@@ -5665,20 +5731,12 @@ void generate_type_info_tables(lang_parser *parser)
                 
                 append_tail_next(&tail_next, compound_literal_field);
             }
-            
-            end_node(parser, get_base_node(compound_literal), false);
-            compound_literal->node.parent = get_base_node(array_literal);
-            
-            type_index++;
         }
-        
-        array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
-        array_literal->item_count = type_index;
     }
     
     // array table
     {
-        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_array_table]->expression);
+        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_array_type_table]->expression);
         local_node_type(array_type, array_literal->type.base_type.node);
         auto type = array_type->item_type;
         
@@ -5701,22 +5759,26 @@ void generate_type_info_tables(lang_parser *parser)
         auto array_tail_next = make_tail_next(&array_literal->first_expression);
         
         u32 type_index = 0;
+        defer
+        {
+            array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
+            array_type->item_count_expression->parent = get_base_node(array_type);
+            array_literal->item_count = type_index;
+        };
+        
         for_bucket_item(bucket, index, parser->array_type_buckets)
         {
             auto array_type = &bucket->base[index];
-            
-        #if 0
-            clear(&builder);
-        
-            print_raw(&builder, R"(
-type(lang_type_info_array) {
-    lang_type_info_type.array;
-    type(lang_type_info) { %.*s; %u; %.*s };
-};
-            )");
-        #endif
         
             auto compound_literal = begin_new_node(compound_literal, location_text);
+            defer
+            {
+                end_node(parser, get_base_node(compound_literal), false);
+                compound_literal->node.parent = get_base_node(array_literal);
+                
+                type_index++;
+            };
+            
             compound_literal->type = type;
             
             append_tail_next(&array_tail_next, compound_literal);
@@ -5755,8 +5817,7 @@ type(lang_type_info_array) {
                 compound_literal_field->expression = get_base_node(get_type_info);
             }
             
-            // TODO: evaluate constant expressions
-            if (false && array_type->item_count_expression)
+            if (array_type->item_count_expression)
             {
                 auto item_count = evaluate(array_type->item_count_expression).u64_value;
                 
@@ -5776,74 +5837,505 @@ type(lang_type_info_array) {
                     append_tail_next(&tail_next, compound_literal_field);
                 }
             }
-            
-            end_node(parser, get_base_node(compound_literal), false);
-            compound_literal->node.parent = get_base_node(array_literal);
-            
-            type_index++;
         }
-        
-        array_type->item_count_expression = get_base_node(new_number_u64(parser, location_text, type_index));
-        array_literal->item_count = type_index;
     }
     
     // compound & compound_field table
-    if (0)
     {
-        local_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_number_table]->expression);
-        local_node_type(array_type, array_literal->type.base_type.node);
+        auto compound_table = get_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_compound_type_table]->expression);
         
-        auto location_text = parser->node_locations.base[array_literal->node.index].text;
+        auto compound_field_table_constant = parser->base_constants[lang_base_constant_lang_type_info_compound_type_field_table];
+        auto compound_field_table = get_node_type(array_literal, compound_field_table_constant->expression);
         
-        auto type_info_type        = get_type(parser, lang_base_type_lang_type_info_type);
-        auto type_info_number_type = get_type(parser, lang_base_type_lang_type_info_number_type);
+        auto compound_table_type       = get_node_type(array_type, compound_table->type.base_type.node);
+        auto compound_field_table_type = get_node_type(array_type, compound_field_table->type.base_type.node);
         
-        auto type_info_type_enum        = get_node_type(enumeration_type, type_info_type.base_type.node);
-        auto type_info_number_type_enum = get_node_type(enumeration_type, type_info_number_type.base_type.node);
+        auto compound_location_text       = parser->node_locations.base[compound_table->node.index].text;
+        auto compound_field_location_text = parser->node_locations.base[compound_field_table->node.index].text;
         
-        ast_enumeration_item *type_info_type_number = null;
+        auto type_info_type      = get_type(parser, lang_base_type_lang_type_info_type);
+        auto type_info_type_enum = get_node_type(enumeration_type, type_info_type.base_type.node);
+        
+        ast_enumeration_item *type_info_type_compound       = null;
+        ast_enumeration_item *type_info_type_compound_field = null;
         for (auto it = type_info_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
         {
-            if (it->name == s("number"))
+            if (it->name == s("compound"))
             {
-                type_info_type_number = it;
-                break;
+                type_info_type_compound = it;
+            }
+            else if (it->name == s("compound_field"))
+            {
+                type_info_type_compound_field = it;
             }
         }
-        assert(type_info_type_number);
+        assert(type_info_type_compound);
+        assert(type_info_type_compound_field);
         
-        auto array_tail_next = make_tail_next(&array_literal->first_expression);
-        
-        u32 type_index = 0;
-        for_bucket_item(bucket, index, parser->number_type_buckets)
+        complete_type_info type_info_compound_fields_type = {};
         {
-            auto number_type = &bucket->base[index];
+            local_node_type(compound_type, compound_table_type->item_type.base_type.node);
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                if (field->name == s("fields"))
+                {
+                    type_info_compound_fields_type = field->type;
+                    break;
+                }
+            }
+        }
+        assert(type_info_compound_fields_type.base_type.node);
         
-            auto compound_literal = begin_new_node(compound_literal, location_text);
-            compound_literal->type = array_type->item_type;
+        auto compound_tail_next       = make_tail_next(&compound_table->first_expression);
+        auto compound_field_tail_next = make_tail_next(&compound_field_table->first_expression);
+        
+        u32 compound_index = 0;
+        u32 compound_field_index = 0;
+        
+        defer 
+        {
+            compound_table_type->item_count_expression = get_base_node(new_number_u64(parser, compound_location_text, compound_index));
+            compound_table_type->item_count_expression->parent = get_base_node(compound_table_type);
+            compound_table->item_count = compound_index;
             
-            append_tail_next(&array_tail_next, compound_literal);
+            compound_field_table_type->item_count_expression = get_base_node(new_number_u64(parser, compound_location_text, compound_field_index));
+            compound_field_table_type->item_count_expression->parent = get_base_node(compound_field_table_type);
+            compound_field_table->item_count = compound_field_index;
+        };
+        
+        for_bucket_item(bucket, index, parser->compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            
+            // add fields
+            u32 first_field_index = compound_field_index;
+            u32 field_count = 0;
+            {
+                for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+                {
+                    auto compound_literal = begin_new_node(compound_literal, compound_field_location_text);
+                    defer {            
+                        end_node(parser, get_base_node(compound_literal), false);
+                        compound_literal->node.parent = get_base_node(compound_field_table);
+                        compound_field_index++;
+                        field_count++;
+                    };
+                    
+                    compound_literal->type = compound_field_table_type->item_type;
+                    
+                    append_tail_next(&compound_field_tail_next, compound_literal);
+                    
+                    auto tail_next = make_tail_next(&compound_literal->first_field);
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_field_location_text);
+                        compound_literal_field->name = s("base_type");
+                
+                        append_tail_next(&tail_next, compound_literal_field);
+                
+                        new_local_node(field_dereference, compound_field_location_text);
+                        
+                        new_local_node(name_reference, compound_field_location_text);
+                        name_reference->name      = type_info_type.name;
+                        name_reference->reference = type_info_type.name_type.node;
+                        
+                        field_dereference->name       = type_info_type_compound_field->name;
+                        field_dereference->expression = get_base_node(name_reference);
+                        field_dereference->reference  = get_base_node(type_info_type_compound_field);
+                        field_dereference->type       = type_info_type;
+                
+                        compound_literal_field->expression = get_base_node(field_dereference);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_field_location_text);
+                        compound_literal_field->name = s("type");
+                
+                        append_tail_next(&tail_next, compound_literal_field);
+                
+                        new_local_node(get_type_info, compound_field_location_text);
+                        get_type_info->type = field->type;
+                        
+                        compound_literal_field->expression = get_base_node(get_type_info);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_field_location_text);
+                        compound_literal_field->name = s("name");
+                        
+                        append_tail_next(&tail_next, compound_literal_field);
+                        
+                        auto string_node = new_leaf_node(string, compound_field_location_text);
+                        string_node->text = field->name;
+                        
+                        compound_literal_field->expression = get_base_node(string_node);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_field_location_text);
+                        compound_literal_field->name = s("byte_offset");
+                        compound_literal_field->expression = get_base_node(new_number_u64(parser, compound_location_text, field->field_byte_offset));
+                        
+                        append_tail_next(&tail_next, compound_literal_field);
+                    }
+                }
+            }
+            
+            auto compound_literal = begin_new_node(compound_literal, compound_location_text);
+            defer {            
+                end_node(parser, get_base_node(compound_literal), false);
+                compound_literal->node.parent = get_base_node(compound_table);
+                compound_index++;
+            };
+            
+            compound_literal->type = compound_table_type->item_type;
+            
+            append_tail_next(&compound_tail_next, compound_literal);
             
             auto tail_next = make_tail_next(&compound_literal->first_field);
             
             {
-                new_local_node(compound_literal_field, location_text);
+                new_local_node(compound_literal_field, compound_location_text);
                 compound_literal_field->name = s("base_type");
         
                 append_tail_next(&tail_next, compound_literal_field);
         
-                new_local_node(field_dereference, location_text);
+                new_local_node(field_dereference, compound_location_text);
                 
-                new_local_node(name_reference, location_text);
+                new_local_node(name_reference, compound_location_text);
                 name_reference->name      = type_info_type.name;
                 name_reference->reference = type_info_type.name_type.node;
                 
-                field_dereference->name       = type_info_type_number->name;
+                field_dereference->name       = type_info_type_compound->name;
                 field_dereference->expression = get_base_node(name_reference);
-                field_dereference->reference  = get_base_node(type_info_type_number);
+                field_dereference->reference  = get_base_node(type_info_type_compound);
                 field_dereference->type       = type_info_type;
         
                 compound_literal_field->expression = get_base_node(field_dereference);
+            }
+            
+            {
+                new_local_node(compound_literal_field, compound_location_text);
+                compound_literal_field->name = s("fields");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+                
+                {
+                    auto fields_compound_literal = begin_new_node(compound_literal, compound_location_text);
+                    defer { end_node(parser, get_base_node(fields_compound_literal), false); };
+                    
+                    fields_compound_literal->type = type_info_compound_fields_type;
+                    
+                    auto fields_compound_tail_next = make_tail_next(&fields_compound_literal->first_field);
+                    
+                    compound_literal_field->expression = get_base_node(fields_compound_literal);
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_location_text);
+                        compound_literal_field->name = s("count");
+                        compound_literal_field->expression = get_base_node(new_number_u64(parser, compound_location_text, field_count));
+            
+                        append_tail_next(&fields_compound_tail_next, compound_literal_field);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, compound_location_text);
+                        compound_literal_field->name = s("base");
+                
+                        auto cast = begin_new_node(unary_operator, compound_location_text);
+                        defer { end_node(parser, get_base_node(cast), false); };
+                
+                        new_local_node(unary_operator, compound_location_text);
+                        
+                        new_local_node(array_index, compound_location_text);
+                        
+                        new_local_leaf_node(name_reference, compound_location_text);
+                        name_reference->name      = compound_field_table_constant->name;
+                        name_reference->reference = get_base_node(compound_field_table_constant);
+                        
+                        array_index->array_expression = get_base_node(name_reference);
+                        array_index->index_expression = get_base_node(new_number_u64(parser, compound_location_text, first_field_index));
+                        
+                        unary_operator->operator_type = ast_unary_operator_type_take_reference;
+                        unary_operator->expression    = get_base_node(array_index);
+                        unary_operator->type          = compound_field_table_type->item_type;
+                        unary_operator->type.base_type.indirection_count++;
+                        unary_operator->type.name_type.indirection_count++;
+                        
+                        // C requires a cast here, I don't know whats its issues
+                        cast->operator_type = ast_unary_operator_type_cast;
+                        cast->expression    = get_base_node(unary_operator);
+                        cast->type          = compound_field_table_type->item_type;
+                        cast->type.base_type.indirection_count++;
+                        cast->type.name_type.indirection_count++;
+                        
+                        compound_literal_field->expression = get_base_node(cast);
+                        
+                        append_tail_next(&fields_compound_tail_next, compound_literal_field);
+                    }
+                }
+            }
+            
+            complete_type_info type = {};
+            type.base_type.node = get_base_node(compound_type);
+            type.name_type.node = type.base_type.node;
+            auto byte_and_alignment = get_type_byte_count(type);
+            
+            {
+                new_local_node(compound_literal_field, compound_location_text);
+                compound_literal_field->name = s("byte_count");
+                compound_literal_field->expression = get_base_node(new_number_u64(parser, compound_location_text, byte_and_alignment.byte_count));
+                
+                append_tail_next(&tail_next, compound_literal_field);
+            }
+            
+            {
+                new_local_node(compound_literal_field, compound_location_text);
+                compound_literal_field->name = s("byte_alignment");
+                compound_literal_field->expression = get_base_node(new_number_u64(parser, compound_location_text, byte_and_alignment.byte_alignment));
+                
+                append_tail_next(&tail_next, compound_literal_field);
+            }
+        }
+    }
+    
+    // enumeration & enumeration item
+    {
+        auto enumeration_table = get_node_type(array_literal, parser->base_constants[lang_base_constant_lang_type_info_enumeration_type_table]->expression);
+        
+        auto enumeration_item_table_constant = parser->base_constants[lang_base_constant_lang_type_info_enumeration_type_item_table];
+        auto enumeration_item_table = get_node_type(array_literal, enumeration_item_table_constant->expression);
+        
+        auto enumeration_table_type      = get_node_type(array_type, enumeration_table->type.base_type.node);
+        auto enumeration_item_table_type = get_node_type(array_type, enumeration_item_table->type.base_type.node);
+        
+        auto enumeration_location_text       = parser->node_locations.base[enumeration_table->node.index].text;
+        auto enumeration_item_location_text = parser->node_locations.base[enumeration_item_table->node.index].text;
+        
+        auto type_info_type      = get_type(parser, lang_base_type_lang_type_info_type);
+        auto type_info_type_enum = get_node_type(enumeration_type, type_info_type.base_type.node);
+        
+        ast_enumeration_item *type_info_type_enumeration       = null;
+        ast_enumeration_item *type_info_type_enumeration_item = null;
+        for (auto it = type_info_type_enum->first_item; it; it = (ast_enumeration_item *) it->node.next)
+        {
+            if (it->name == s("enumeration"))
+            {
+                type_info_type_enumeration = it;
+            }
+            else if (it->name == s("enumeration_item"))
+            {
+                type_info_type_enumeration_item = it;
+            }
+        }
+        assert(type_info_type_enumeration);
+        assert(type_info_type_enumeration_item);
+        
+        complete_type_info type_info_enumeration_items_type = {};
+        {
+            local_node_type(compound_type, enumeration_table_type->item_type.base_type.node);
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                if (field->name == s("items"))
+                {
+                    type_info_enumeration_items_type = field->type;
+                    break;
+                }
+            }
+        }
+        assert(type_info_enumeration_items_type.base_type.node);
+        
+        auto enumeration_tail_next       = make_tail_next(&enumeration_table->first_expression);
+        auto enumeration_item_tail_next = make_tail_next(&enumeration_item_table->first_expression);
+        
+        u32 enumeration_index = 0;
+        u32 enumeration_item_index = 0;
+        
+        defer 
+        {
+            enumeration_table_type->item_count_expression = get_base_node(new_number_u64(parser, enumeration_location_text, enumeration_index));
+            enumeration_table_type->item_count_expression->parent = get_base_node(enumeration_table_type);
+            enumeration_table->item_count = enumeration_index;
+            
+            enumeration_item_table_type->item_count_expression = get_base_node(new_number_u64(parser, enumeration_location_text, enumeration_item_index));
+            enumeration_item_table_type->item_count_expression->parent = get_base_node(enumeration_item_table_type);
+            enumeration_item_table->item_count = enumeration_item_index;
+        };
+        
+        for_bucket_item(bucket, index, parser->enumeration_type_buckets)
+        {
+            auto enumeration_type = &bucket->base[index];
+            
+            // add fields
+            u32 first_item_index = enumeration_item_index;
+            u32 item_count = 0;
+            {
+                for (auto item = enumeration_type->first_item; item; item = (ast_enumeration_item *) item->node.next)
+                {
+                    auto compound_literal = begin_new_node(compound_literal, enumeration_item_location_text);
+                    defer {            
+                        end_node(parser, get_base_node(compound_literal), false);
+                        compound_literal->node.parent = get_base_node(enumeration_item_table);
+                        enumeration_item_index++;
+                        item_count++;
+                    };
+                    
+                    compound_literal->type = enumeration_item_table_type->item_type;
+                    
+                    append_tail_next(&enumeration_item_tail_next, compound_literal);
+                    
+                    auto tail_next = make_tail_next(&compound_literal->first_field);
+                    
+                    {
+                        new_local_node(compound_literal_field, enumeration_item_location_text);
+                        compound_literal_field->name = s("base_type");
+                
+                        append_tail_next(&tail_next, compound_literal_field);
+                
+                        new_local_node(field_dereference, enumeration_item_location_text);
+                        
+                        new_local_node(name_reference, enumeration_item_location_text);
+                        name_reference->name      = type_info_type.name;
+                        name_reference->reference = type_info_type.name_type.node;
+                        
+                        field_dereference->name       = type_info_type_enumeration_item->name;
+                        field_dereference->expression = get_base_node(name_reference);
+                        field_dereference->reference  = get_base_node(type_info_type_enumeration_item);
+                        field_dereference->type       = type_info_type;
+                
+                        compound_literal_field->expression = get_base_node(field_dereference);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, enumeration_item_location_text);
+                        compound_literal_field->name = s("name");
+                        
+                        append_tail_next(&tail_next, compound_literal_field);
+                        
+                        auto string_node = new_leaf_node(string, enumeration_item_location_text);
+                        string_node->text = item->name;
+                        
+                        compound_literal_field->expression = get_base_node(string_node);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, enumeration_item_location_text);
+                        compound_literal_field->name = s("value");
+                        compound_literal_field->expression = get_base_node(new_number_u64(parser, enumeration_item_location_text, evaluate(item->expression).u64_value));
+                        
+                        append_tail_next(&tail_next, compound_literal_field);
+                        
+                        auto string_node = new_leaf_node(string, enumeration_item_location_text);
+                        string_node->text = item->name;
+                    }
+                }
+            }
+            
+            auto compound_literal = begin_new_node(compound_literal, enumeration_location_text);
+            defer {            
+                end_node(parser, get_base_node(compound_literal), false);
+                compound_literal->node.parent = get_base_node(enumeration_table);
+                enumeration_index++;
+            };
+            
+            compound_literal->type = enumeration_table_type->item_type;
+            
+            append_tail_next(&enumeration_tail_next, compound_literal);
+            
+            auto tail_next = make_tail_next(&compound_literal->first_field);
+            
+            {
+                new_local_node(compound_literal_field, enumeration_location_text);
+                compound_literal_field->name = s("base_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(field_dereference, enumeration_location_text);
+                
+                new_local_node(name_reference, enumeration_location_text);
+                name_reference->name      = type_info_type.name;
+                name_reference->reference = type_info_type.name_type.node;
+                
+                field_dereference->name       = type_info_type_enumeration->name;
+                field_dereference->expression = get_base_node(name_reference);
+                field_dereference->reference  = get_base_node(type_info_type_enumeration);
+                field_dereference->type       = type_info_type;
+        
+                compound_literal_field->expression = get_base_node(field_dereference);
+            }
+            
+            {
+                new_local_node(compound_literal_field, enumeration_location_text);
+                compound_literal_field->name = s("item_type");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+        
+                new_local_node(get_type_info, enumeration_location_text);
+                get_type_info->type = enumeration_type->item_type;
+                
+                compound_literal_field->expression = get_base_node(get_type_info);
+            }
+            
+            {
+                new_local_node(compound_literal_field, enumeration_location_text);
+                compound_literal_field->name = s("items");
+        
+                append_tail_next(&tail_next, compound_literal_field);
+                
+                {
+                    auto fields_compound_literal = begin_new_node(compound_literal, enumeration_location_text);
+                    defer { end_node(parser, get_base_node(fields_compound_literal), false); };
+                    
+                    fields_compound_literal->type = type_info_enumeration_items_type;
+                    
+                    auto fields_compound_tail_next = make_tail_next(&fields_compound_literal->first_field);
+                    
+                    compound_literal_field->expression = get_base_node(fields_compound_literal);
+                    
+                    {
+                        new_local_node(compound_literal_field, enumeration_location_text);
+                        compound_literal_field->name = s("count");
+                        compound_literal_field->expression = get_base_node(new_number_u64(parser, enumeration_location_text, item_count));
+            
+                        append_tail_next(&fields_compound_tail_next, compound_literal_field);
+                    }
+                    
+                    {
+                        new_local_node(compound_literal_field, enumeration_location_text);
+                        compound_literal_field->name = s("base");
+                
+                        auto cast = begin_new_node(unary_operator, enumeration_location_text);
+                        defer { end_node(parser, get_base_node(cast), false); };
+                
+                        new_local_node(unary_operator, enumeration_location_text);
+                        
+                        new_local_node(array_index, enumeration_location_text);
+                        
+                        new_local_leaf_node(name_reference, enumeration_location_text);
+                        name_reference->name      = enumeration_item_table_constant->name;
+                        name_reference->reference = get_base_node(enumeration_item_table_constant);
+                        
+                        array_index->array_expression = get_base_node(name_reference);
+                        array_index->index_expression = get_base_node(new_number_u64(parser, enumeration_location_text, first_item_index));
+                        
+                        unary_operator->operator_type = ast_unary_operator_type_take_reference;
+                        unary_operator->expression    = get_base_node(array_index);
+                        unary_operator->type          = enumeration_item_table_type->item_type;
+                        unary_operator->type.base_type.indirection_count++;
+                        unary_operator->type.name_type.indirection_count++;
+                        
+                        // C requires a cast here, I don't know whats its issues
+                        cast->operator_type = ast_unary_operator_type_cast;
+                        cast->expression    = get_base_node(unary_operator);
+                        cast->type          = enumeration_item_table_type->item_type;
+                        cast->type.base_type.indirection_count++;
+                        cast->type.name_type.indirection_count++;
+                        
+                        compound_literal_field->expression = get_base_node(cast);
+                        
+                        append_tail_next(&fields_compound_tail_next, compound_literal_field);
+                    }
+                }
             }
         }
     }

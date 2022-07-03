@@ -141,7 +141,7 @@ def platform_handle_messages func(platform platform_api ref) (result b8)
     var msg MSG;
     while PeekMessageA(msg ref, null, 0, 0, PM_REMOVE)
     {
-        switch msg.message
+        switch msg.message;
         case WM_QUIT
         {
             return false;
@@ -176,7 +176,7 @@ def platform_update_time func(platform platform_api ref)
 
 def platform_window_callback func WNDPROC
 {
-    switch msg
+    switch msg;
     case WM_DESTROY
     {
         PostQuitMessage(0);

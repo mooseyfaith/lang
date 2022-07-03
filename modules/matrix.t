@@ -36,18 +36,18 @@ def multiply func(second mat4; first mat4) (result mat4)
 def mat4_transform func(rotation = quat_identity; translation vec3 = {}; scale vec3 = [ 1; 1; 1 ]) (transform mat4)
 {
     var result mat4;
-    var xx = rotation[1] * rotation[1];
-    var xy = rotation[1] * rotation[2];
-    var xz = rotation[1] * rotation[3];
+    var xx = rotation.x * rotation.x;
+    var xy = rotation.x * rotation.y;
+    var xz = rotation.x * rotation.z;
     
-    var yy = rotation[2] * rotation[2];
-    var yz = rotation[2] * rotation[3];
+    var yy = rotation.y * rotation.y;
+    var yz = rotation.y * rotation.z;
     
-    var zz = rotation[3] * rotation[3];
+    var zz = rotation.z * rotation.z;
     
-    var wx = rotation[0] * rotation[1];
-    var wy = rotation[0] * rotation[2];
-    var wz = rotation[0] * rotation[3];
+    var wx = rotation.w * rotation.x;
+    var wy = rotation.w * rotation.y;
+    var wz = rotation.w * rotation.z;
     
     result[0][0] = (1 - (2 * (yy + zz))) 	* scale[0];
     result[1][0] =       2 * (xy - wz) 		  * scale[1];
