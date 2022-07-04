@@ -52,7 +52,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         
         gl_win32_window_init_3_3(gl_3_3_device_context);
         
-        var context_attributes = type (s32[])
+        var context_attributes = type (u32[])
         [
             WGL_CONTEXT_MAJOR_VERSION_ARB; 3;
             WGL_CONTEXT_MINOR_VERSION_ARB; 3;
@@ -64,7 +64,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         if backwards_compatible
             { context_attributes[7] = WGL_CONTEXT_COMPATIBILITY_PROFILE_BIT_ARB; }
             
-        var gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes[0] ref);
+        var gl_3_3_context = wglCreateContextAttribsARB(gl_3_3_device_context, null, context_attributes[0] ref cast(s32 ref));
         
         if gl_3_3_context
         {
@@ -144,7 +144,7 @@ def gl_win32_window_init_1 func(device_context HDC)
 
 def gl_win32_window_init_3_3 func(device_context HDC)
 {
-    var pixel_format_attributes = type(s32[])
+    var pixel_format_attributes = type(u32[])
     [
         WGL_DRAW_TO_WINDOW_ARB; GL_TRUE;
         WGL_SUPPORT_OPENGL_ARB; GL_TRUE;
@@ -163,7 +163,7 @@ def gl_win32_window_init_3_3 func(device_context HDC)
     
     var pixel_format s32;
     var pixel_format_count u32;
-    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes[0] ref, null, 1, pixel_format ref, pixel_format_count ref));
+    platform_require(wglChoosePixelFormatARB(device_context, pixel_format_attributes[0] ref cast(s32 ref), null, 1, pixel_format ref, pixel_format_count ref));
     platform_require(SetPixelFormat(device_context, pixel_format, null));
 }
 

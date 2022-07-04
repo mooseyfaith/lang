@@ -118,7 +118,7 @@ def init func(renderer render_api ref; platform platform_api ref)
             var array_type = field.type.base_type cast(lang_type_info_array ref);
             item_count = array_type.item_count;
             
-            assert(array_type.item_type.base_type is lang_type_info_type.number);
+            assert((array_type.item_type.base_type.) is lang_type_info_type.number);
             gl_type = type_map[array_type.item_type.base_type cast(lang_type_info_number ref).number_type];
         }
         else

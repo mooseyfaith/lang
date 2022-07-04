@@ -5600,6 +5600,57 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
     }
 }
 
+ast_node * add_table_entry_pointer(lang_parser *parser, ast_constant *table, ast_variable *base_type, u32 index, string location_text)
+{
+    //new_local_node(compound_literal_field, enumeration_location_text);
+    //compound_literal_field->name = s("base");
+
+    auto cast = begin_new_node(unary_operator, location_text);
+    defer { end_node(parser, get_base_node(cast), false); };
+
+    new_local_node(unary_operator, location_text);
+    
+    //new_local_node(field_dereference, location_text);
+    
+    new_local_node(array_index, location_text);
+    
+    new_local_leaf_node(name_reference, location_text);
+    
+    name_reference->name      = table->name;
+    name_reference->reference = get_base_node(table);
+    
+    array_index->array_expression = get_base_node(name_reference);
+    array_index->index_expression = get_base_node(new_number_u64(parser, location_text, index));
+    
+#if 0
+    field_dereference->name       = base_type->name;
+    field_dereference->expression = get_base_node(array_index);
+    field_dereference->reference  = get_base_node(base_type);
+    field_dereference->type       = base_type->type;
+#endif
+    
+    auto type = get_expression_type(parser, table->expression);
+    local_node_type(array_type, type.base_type.node);
+    
+    unary_operator->operator_type = ast_unary_operator_type_take_reference;
+    //unary_operator->expression    = get_base_node(field_dereference);
+    //unary_operator->type          = field_dereference->type;
+    unary_operator->expression    = get_base_node(array_index);
+    unary_operator->type          = array_type->item_type;
+    
+    unary_operator->type.base_type.indirection_count++;
+    unary_operator->type.name_type.indirection_count++;
+    
+    // we need a cast to cast const away, thanks c++
+    cast->operator_type = ast_unary_operator_type_cast;
+    //cast->expression    = get_base_node(field_dereference);
+    //cast->type          = field_dereference->type;
+    cast->expression    = get_base_node(unary_operator);
+    cast->type          = unary_operator->type;
+    
+    return get_base_node(cast);
+}
+
 void generate_type_info_tables(lang_parser *parser)
 {
     string_builder builder = {};
@@ -5886,6 +5937,20 @@ void generate_type_info_tables(lang_parser *parser)
         }
         assert(type_info_compound_fields_type.base_type.node);
         
+        ast_variable *compound_type_field_base_type = null;
+        {
+            local_node_type(compound_type, compound_field_table_type->item_type.base_type.node);
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                if (field->name == s("base_type"))
+                {
+                    compound_type_field_base_type = field;
+                    break;
+                }
+            }
+        }
+        assert(compound_type_field_base_type);
+        
         auto compound_tail_next       = make_tail_next(&compound_table->first_expression);
         auto compound_field_tail_next = make_tail_next(&compound_field_table->first_expression);
         
@@ -6041,35 +6106,7 @@ void generate_type_info_tables(lang_parser *parser)
                     {
                         new_local_node(compound_literal_field, compound_location_text);
                         compound_literal_field->name = s("base");
-                
-                        auto cast = begin_new_node(unary_operator, compound_location_text);
-                        defer { end_node(parser, get_base_node(cast), false); };
-                
-                        new_local_node(unary_operator, compound_location_text);
-                        
-                        new_local_node(array_index, compound_location_text);
-                        
-                        new_local_leaf_node(name_reference, compound_location_text);
-                        name_reference->name      = compound_field_table_constant->name;
-                        name_reference->reference = get_base_node(compound_field_table_constant);
-                        
-                        array_index->array_expression = get_base_node(name_reference);
-                        array_index->index_expression = get_base_node(new_number_u64(parser, compound_location_text, first_field_index));
-                        
-                        unary_operator->operator_type = ast_unary_operator_type_take_reference;
-                        unary_operator->expression    = get_base_node(array_index);
-                        unary_operator->type          = compound_field_table_type->item_type;
-                        unary_operator->type.base_type.indirection_count++;
-                        unary_operator->type.name_type.indirection_count++;
-                        
-                        // C requires a cast here, I don't know whats its issues
-                        cast->operator_type = ast_unary_operator_type_cast;
-                        cast->expression    = get_base_node(unary_operator);
-                        cast->type          = compound_field_table_type->item_type;
-                        cast->type.base_type.indirection_count++;
-                        cast->type.name_type.indirection_count++;
-                        
-                        compound_literal_field->expression = get_base_node(cast);
+                        compound_literal_field->expression = add_table_entry_pointer(parser, compound_field_table_constant, compound_type_field_base_type, first_field_index, compound_location_text);
                         
                         append_tail_next(&fields_compound_tail_next, compound_literal_field);
                     }
@@ -6144,6 +6181,20 @@ void generate_type_info_tables(lang_parser *parser)
             }
         }
         assert(type_info_enumeration_items_type.base_type.node);
+        
+        ast_variable *enumeration_type_item_base_type = null;
+        {
+            local_node_type(compound_type, enumeration_table_type->item_type.base_type.node);
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                if (field->name == s("base_type"))
+                {
+                    enumeration_type_item_base_type = field;
+                    break;
+                }
+            }
+        }
+        assert(enumeration_type_item_base_type);
         
         auto enumeration_tail_next       = make_tail_next(&enumeration_table->first_expression);
         auto enumeration_item_tail_next = make_tail_next(&enumeration_item_table->first_expression);
@@ -6303,35 +6354,7 @@ void generate_type_info_tables(lang_parser *parser)
                     {
                         new_local_node(compound_literal_field, enumeration_location_text);
                         compound_literal_field->name = s("base");
-                
-                        auto cast = begin_new_node(unary_operator, enumeration_location_text);
-                        defer { end_node(parser, get_base_node(cast), false); };
-                
-                        new_local_node(unary_operator, enumeration_location_text);
-                        
-                        new_local_node(array_index, enumeration_location_text);
-                        
-                        new_local_leaf_node(name_reference, enumeration_location_text);
-                        name_reference->name      = enumeration_item_table_constant->name;
-                        name_reference->reference = get_base_node(enumeration_item_table_constant);
-                        
-                        array_index->array_expression = get_base_node(name_reference);
-                        array_index->index_expression = get_base_node(new_number_u64(parser, enumeration_location_text, first_item_index));
-                        
-                        unary_operator->operator_type = ast_unary_operator_type_take_reference;
-                        unary_operator->expression    = get_base_node(array_index);
-                        unary_operator->type          = enumeration_item_table_type->item_type;
-                        unary_operator->type.base_type.indirection_count++;
-                        unary_operator->type.name_type.indirection_count++;
-                        
-                        // C requires a cast here, I don't know whats its issues
-                        cast->operator_type = ast_unary_operator_type_cast;
-                        cast->expression    = get_base_node(unary_operator);
-                        cast->type          = enumeration_item_table_type->item_type;
-                        cast->type.base_type.indirection_count++;
-                        cast->type.name_type.indirection_count++;
-                        
-                        compound_literal_field->expression = get_base_node(cast);
+                        compound_literal_field->expression = add_table_entry_pointer(parser, enumeration_item_table_constant, enumeration_type_item_base_type, first_item_index, enumeration_location_text);
                         
                         append_tail_next(&fields_compound_tail_next, compound_literal_field);
                     }

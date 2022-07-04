@@ -185,6 +185,7 @@ bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
     auto builder = &buffer->builder;
     
     print(builder, " = ");
+    
     print_scope_open(builder);
     
     if (is_node_type(expression, compound_literal))
@@ -210,6 +211,9 @@ bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
         local_node_type(array_literal, expression)
         local_node_type(array_type, array_literal->type.base_type.node);
         
+        // open two scopes since we wrap arrays into struct
+        print_scope_open(builder);
+        
         if (array_literal->first_expression)
         {
             print_expression(buffer, array_literal->first_expression);
@@ -221,6 +225,8 @@ bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
             
             pending_newline(builder);
         }
+        
+        print_scope_close(builder, false);
     }
     
     print_scope_close(builder, false);
@@ -304,7 +310,10 @@ print_expression_declaration
         {
             local_node_type(array_literal, node);
             
-            print_type(buffer, array_literal->type);
+            // print_type(buffer, array_literal->type);
+            
+            // double "{", since our arrays are wrapped in structs
+            print(builder, " { ");
             print(builder, " { ");
             
             for (auto it = array_literal->first_expression; it; it = it->next)
@@ -317,6 +326,7 @@ print_expression_declaration
                     print(builder, " ");
             }
             print(builder, "}");
+            print(builder, "}");
             
             //print(builder, "_array_literal_%x", node->index);
         } break;
@@ -325,7 +335,7 @@ print_expression_declaration
         {
             local_node_type(compound_literal, node);
             
-            print_type(buffer, compound_literal->type);
+            //print_type(buffer, compound_literal->type);
             print(builder, " { ");
             
             // TODO: sort by field name
@@ -551,6 +561,11 @@ print_expression_declaration
                         
                         assert(unary_operator->operator_type < carray_count(c_symbols));
                 
+                        // TODO get if its a const value and add cast to remove const
+                        if (unary_operator->operator_type == ast_unary_operator_type_take_reference)
+                        {
+                        }
+                
                         print(builder, "%.*s", fs(c_symbols[unary_operator->operator_type]));
                         print_expression(buffer, unary_operator->expression);
                     }
@@ -619,7 +634,11 @@ print_expression_declaration
 #define NORMAL_CONST_ARRAY
 
             #if defined NORMAL_CONST_ARRAY
+                // cast const away
                 print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
+                
+                //print(builder, "lang_type_info { &lang_type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
+                
             #else
                 print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_info_%.*s_table[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
                 
