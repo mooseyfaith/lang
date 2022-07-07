@@ -89,9 +89,11 @@ def print func(type_info lang_type_info; expand_next = false; expand = true; dep
         }
     }
     
-    while type_info.indirection_count
+    loop var i; type_info.indirection_count
         { print(" ref"); }
 }
+
+def A = type(f32[]) [ 1; 2; 3; 4 ];
 
 var a = type(f32[]) [ 1; 2; 3; 4 ];
 var b f32[] = a;

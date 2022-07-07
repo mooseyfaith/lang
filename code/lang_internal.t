@@ -1,7 +1,7 @@
 
 module lang;
 
-def usize type u64; 
+def usize type u64;
 def ssize type s64; 
 
 def b8  type u8; 
@@ -11,9 +11,9 @@ def string type u8[];
 
 def cstring type u8 ref; 
 
-def null  = 0 cast(u8 ref); 
-def false = 0 cast(b8); 
-def true  = 1 cast(b8); 
+def null  = 0 cast(u8 ref);
+def false = 0 cast(b8);
+def true  = 1 cast(b8);
 
 def code_location struct 
 { 
@@ -39,8 +39,8 @@ def lang_type_info_type enum u32
 def lang_type_info struct
 {
     base_type         lang_type_info_type ref;
-    indirection_count u32;
     alias             string;
+    indirection_count u32;
     byte_count        u32;
     byte_alignment    u32;
 }
@@ -93,7 +93,7 @@ def lang_type_info_array struct
     
     // 0 means is not fixed size
     item_count usize;
-    byte_count u32;
+    byte_count usize;
 }
 
 def lang_type_info_enumeration struct
@@ -116,10 +116,25 @@ def lang_type_info_any_value struct
     value u8 ref;
 }
 
+// placeholders, arrays will be fixed size, not dynamic
+def lang_type_info_table struct
+{
+    number_types           lang_type_info_number[];
+    array_types            lang_type_info_array[];
+//  function_types         lang_type_info_function[];
+    compound_types         lang_type_info_compound[];
+    compound_field_types   lang_type_info_compound_field[];
+    
+    enumerations_type      lang_type_info_enumeration[];
+    enumeration_item_types lang_type_info_enumeration_item[];
+}
+
+def lang_type_table = type(lang_type_info_table) {};
+
 // placeholders, will be resized
-def lang_type_info_number_type_table           = type(lang_type_info_number[])           [];
-def lang_type_info_compound_type_table         = type(lang_type_info_compound[])         [];
-def lang_type_info_compound_type_field_table   = type(lang_type_info_compound_field[])   [];
-def lang_type_info_array_type_table            = type(lang_type_info_array[])            [];
-def lang_type_info_enumeration_type_table      = type(lang_type_info_enumeration[])      [];
-def lang_type_info_enumeration_type_item_table = type(lang_type_info_enumeration_item[]) [];
+//def lang_type_info_number_type_table           = type(lang_type_info_number[])           [];
+//def lang_type_info_compound_type_table         = type(lang_type_info_compound[])         [];
+//def lang_type_info_compound_type_field_table   = type(lang_type_info_compound_field[])   [];
+//def lang_type_info_array_type_table            = type(lang_type_info_array[])            [];
+//def lang_type_info_enumeration_type_table      = type(lang_type_info_enumeration[])      [];
+//def lang_type_info_enumeration_type_item_table = type(lang_type_info_enumeration_item[]) [];

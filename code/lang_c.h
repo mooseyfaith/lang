@@ -176,6 +176,58 @@ void print_type(lang_c_buffer *buffer, ast_node *base_type, string variable_name
     print_type(buffer, type, variable_name);
 }
 
+void print_array_literal(lang_c_buffer *buffer, ast_array_literal *array_literal)
+{
+    auto builder = &buffer->builder;
+    
+    local_node_type(array_type, array_literal->type.base_type.node);
+    
+    // open two scopes since we wrap arrays into struct
+    print_scope_open(builder);
+    print_scope_open(builder);
+    
+    if (array_literal->first_expression)
+    {
+        print_expression(buffer, array_literal->first_expression);
+        for (auto expression = array_literal->first_expression->next; expression; expression = expression->next)
+        {
+            print_line(builder, ",");
+            print_expression(buffer,  expression);
+        }
+        
+        pending_newline(builder);
+    }
+    
+    print_scope_close(builder);
+    print_scope_close(builder, false);
+}
+
+void print_compound_literal(lang_c_buffer *buffer, ast_compound_literal *compound_literal)
+{
+    auto builder = &buffer->builder;
+    
+    print_scope_open(builder, false);
+    
+    if (compound_literal->first_field)
+    {
+        // print(builder, "%.*s: ", fs(compound_literal->first_field->name)); C could do this
+        print(builder, " ");
+        print_expression(buffer, compound_literal->first_field->expression);
+        for (auto field = (ast_compound_literal_field *) compound_literal->first_field->node.next; field; field = (ast_compound_literal_field *) field->node.next)
+        {
+            print(builder, ", ");
+            // print(builder, "%.*s: ", fs(field->name)); C could do this
+            print_expression(buffer, field->expression);
+        }
+        
+        //print_newline(builder);
+        print(builder, " ");
+    }
+
+    print_scope_close(builder, false);
+}
+
+#if 0
 bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
 {
     if (!is_node_type(expression, compound_literal) && !is_node_type(expression, array_literal))
@@ -191,48 +243,19 @@ bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
     if (is_node_type(expression, compound_literal))
     {
         local_node_type(compound_literal, expression);
-        
-        if (compound_literal->first_field)
-        {
-            // print(builder, "%.*s: ", fs(compound_literal->first_field->name)); C could do this
-            print_expression(buffer, compound_literal->first_field->expression);
-            for (auto field = (ast_compound_literal_field *) compound_literal->first_field->node.next; field; field = (ast_compound_literal_field *) field->node.next)
-            {
-                print_line(builder, ",");
-                // print(builder, "%.*s: ", fs(field->name)); C could do this
-                print_expression(buffer, field->expression);
-            }
-            
-            print_newline(builder);
-         }
+        print_compound_literal(buffer, compound_literal);
     }
     else
     {
         local_node_type(array_literal, expression)
-        local_node_type(array_type, array_literal->type.base_type.node);
-        
-        // open two scopes since we wrap arrays into struct
-        print_scope_open(builder);
-        
-        if (array_literal->first_expression)
-        {
-            print_expression(buffer, array_literal->first_expression);
-            for (auto expression = array_literal->first_expression->next; expression; expression = expression->next)
-            {
-                print_line(builder, ",");
-                print_expression(buffer,  expression);
-            }
-            
-            pending_newline(builder);
-        }
-        
-        print_scope_close(builder, false);
+        print_array_literal(buffer, array_literal);
     }
     
-    print_scope_close(builder, false);
+   
     
     return true;
 }
+#endif
 
 void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
 {
@@ -268,6 +291,10 @@ print_expression_declaration
     switch (node->node_type)
     {
         cases_complete_message("unhandled expression type %.*s", fnode_type_name(node));
+        
+        // nothing to do
+        case ast_node_type_base_node:
+        break;
         
         case ast_node_type_number:
         {
@@ -309,46 +336,14 @@ print_expression_declaration
         case ast_node_type_array_literal:
         {
             local_node_type(array_literal, node);
-            
-            // print_type(buffer, array_literal->type);
-            
-            // double "{", since our arrays are wrapped in structs
-            print(builder, " { ");
-            print(builder, " { ");
-            
-            for (auto it = array_literal->first_expression; it; it = it->next)
-            {
-                print_expression(buffer, it);
-                
-                if (it->next)
-                    print(builder, ", ");
-                else
-                    print(builder, " ");
-            }
-            print(builder, "}");
-            print(builder, "}");
-            
+            print_array_literal(buffer, array_literal);
             //print(builder, "_array_literal_%x", node->index);
         } break;
         
         case ast_node_type_compound_literal:
         {
             local_node_type(compound_literal, node);
-            
-            //print_type(buffer, compound_literal->type);
-            print(builder, " { ");
-            
-            // TODO: sort by field name
-            for (auto it = compound_literal->first_field; it; it = (ast_compound_literal_field *) it->node.next)
-            {
-                print_expression(buffer, it->expression);
-                
-                if (it->node.next)
-                    print(builder, ", ");
-                else
-                    print(builder, " ");
-            }
-            print(builder, "}");
+            print_compound_literal(buffer, compound_literal);
         } break;
         
         case ast_node_type_name_reference:
@@ -593,31 +588,7 @@ print_expression_declaration
                 break;
             }
             
-            u32 type_index = 0;
-            u32 type_byte_count = ast_node_type_byte_counts[base_type->node_type];
-            
-            bool found = false;
-            for (auto bucket = parser->bucket_arrays[base_type->node_type]; bucket; bucket = bucket->next)
-            {
-                auto index = ((u8 *) base_type - (u8 *) bucket->base) / type_byte_count;
-                if (index < ast_bucket_item_count)
-                {
-                    type_index += index;
-                    found = true;
-                    break;
-                }
-                
-                type_index += ast_bucket_item_count;
-            }
-            
-            if (!found)
-            {
-                print_comment_begin(buffer);
-                print(builder, "unkown type %.*s", fs(get_type_info->type.name));
-                print_comment_end(buffer);
-                print(builder, "lang_type_info {}");
-                break;
-            }
+            u32 type_index = base_type->type_index;
             
             auto count_and_alignment = get_type_byte_count(get_type_info->type);
             
@@ -635,7 +606,7 @@ print_expression_declaration
 
             #if defined NORMAL_CONST_ARRAY
                 // cast const away
-                print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
+                print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_table.%.*ss.base[%u].base_type, string { %llu, (u8 *) \"%.*s\" }, %u, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.name.count, fs(get_type_info->type.name), get_type_info->type.base_type.indirection_count, count_and_alignment.byte_count, count_and_alignment.byte_alignment);
                 
                 //print(builder, "lang_type_info { &lang_type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
                 
@@ -727,13 +698,40 @@ void print_constant_declaration(lang_c_buffer *buffer, ast_constant *constant)
     print(builder, "const ");
     print_type(buffer, type, constant->name);
     
-    if (!try_print_literal_assignment(buffer, constant->expression))
+    //if (!try_print_literal_assignment(buffer, constant->expression))
     {
         print(builder, " = ");
         print_expression(buffer, constant->expression);
     }
     
     print_line(builder, ";");
+}
+
+void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable)
+{
+    auto builder = &buffer->builder;
+    
+    print_declaration(buffer, variable);
+    
+    if (variable->default_expression)
+    {
+        //if (!try_print_literal_assignment(buffer, variable->default_expression))
+        {
+            print(builder, " = ");
+            print_expression(buffer, variable->default_expression);
+        }
+    }
+    else
+    {
+        if (variable->type.base_type.indirection_count)
+            print(builder, " = null");
+        else if (is_node_type(variable->type.base_type.node, number_type))
+            print(builder, " = 0");
+        else
+            print(builder, " = {}");
+    }
+    
+    print(builder, ";");
 }
 
 void print_statement(lang_c_buffer *buffer, ast_node *node)
@@ -812,22 +810,8 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             if (variable->is_global)
                 return;
             
-            print_declaration(buffer, variable);
-            
-            if (variable->default_expression)
-            {
-                if (!try_print_literal_assignment(buffer, variable->default_expression))
-                {
-                    print(builder, " = ");
-                    print_expression(buffer, variable->default_expression);
-                }
-            }
-            else
-            {
-                print(builder, " = {}");
-            }
-            
-            print_line(builder, ";");
+            print_variable_statement(buffer, variable);
+            print_newline(builder);
         } break;
         
         case ast_node_type_assignment:
@@ -1256,15 +1240,15 @@ struct dependency_node
 
 buffer_type(dependency_node_buffer, dependency_node_array, dependency_node);
 
-bucket_type(u32_list_entry_bucket, u32_list_entry, 1024);
+bucket_array_type(u32_list_entry_bucket, u32_list_entry, 1024);
 
 struct dependency_graph
 {
     lang_parser *parser;
     dependency_node_buffer nodes;
-    u32_list_entry_bucket *index_buckets;
+    u32_list_entry_bucket_array index_buckets;
     
-    ast_array_type_bucket *unique_array_type_buckets;
+    ast_array_type_bucket_array unique_array_type_buckets;
     
     ast_node_buffer sorted_dependencies;
 };
@@ -1588,17 +1572,17 @@ void free_graph(dependency_graph *graph)
 {
     free_buffer(&graph->nodes);
         
-    while(graph->index_buckets)
+    while (graph->index_buckets.first)
     {
-        auto bucket = graph->index_buckets;
-        graph->index_buckets = graph->index_buckets->next;
+        auto bucket = graph->index_buckets.first;
+        graph->index_buckets.first = graph->index_buckets.first->next;
         platform_free_bytes((u8 *) bucket);
     }
     
-    while(graph->unique_array_type_buckets)
+    while (graph->unique_array_type_buckets.first)
     {
-        auto bucket = graph->unique_array_type_buckets;
-        graph->unique_array_type_buckets = graph->unique_array_type_buckets->next;
+        auto bucket = graph->unique_array_type_buckets.first;
+        graph->unique_array_type_buckets.first = graph->unique_array_type_buckets.first->next;
         platform_free_bytes((u8 *) bucket);
     }
     
@@ -1608,6 +1592,8 @@ void free_graph(dependency_graph *graph)
 dependency_graph sort_declaration_dependencies(lang_parser *parser)
 {
     dependency_graph graph = {};
+    graph.index_buckets.tail_next             = &graph.index_buckets.first;
+    graph.unique_array_type_buckets.tail_next = &graph.unique_array_type_buckets.first;
     graph.parser = parser;
     
     // collect
@@ -2071,40 +2057,37 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
     {
         maybe_print_blank_line(builder);
         
-        for (auto bucket = parser->function_buckets; bucket; bucket = bucket->next)
+        for_bucket_item(bucket, index, parser->function_buckets)
         {
-            for (u32 i = 0; i < bucket->count; i++)
+            auto function = &bucket->base[index];
+            
+            if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
             {
-                auto function = &bucket->base[i];
-                
-                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
+                local_node_type(external_binding, function->first_statement);
+                string library_name = external_binding->library_name;
+            
+                bool found = false;
+                for (auto it = first_external_binding; it; it = it->next)
                 {
-                    local_node_type(external_binding, function->first_statement);
-                    string library_name = external_binding->library_name;
-                
-                    bool found = false;
-                    for (auto it = first_external_binding; it; it = it->next)
-                    {
-                        local_node_type(external_binding, it->node);
-                        
-                        if (library_name == external_binding->library_name)
-                        {
-                            found = true;
-                            break;
-                        }
-                    }
+                    local_node_type(external_binding, it->node);
                     
-                    if (!found)
+                    if (library_name == external_binding->library_name)
                     {
-                        auto new_entry = new ast_list_entry;
-                        *new_entry = {};
-                        new_entry->node  = get_base_node(external_binding);
-                        
-                        *external_binding_tail_next = new_entry;
-                        external_binding_tail_next = &new_entry->next;
-                        
-                        print_line(builder, "#pragma comment(lib, \"%.*s\")", fs(external_binding->library_name));
+                        found = true;
+                        break;
                     }
+                }
+                
+                if (!found)
+                {
+                    auto new_entry = new ast_list_entry;
+                    *new_entry = {};
+                    new_entry->node  = get_base_node(external_binding);
+                    
+                    *external_binding_tail_next = new_entry;
+                    external_binding_tail_next = &new_entry->next;
+                    
+                    print_line(builder, "#pragma comment(lib, \"%.*s\")", fs(external_binding->library_name));
                 }
             }
         }
@@ -2182,8 +2165,9 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                 {
                     local_node_type(variable, node);
                     assert(variable->is_global);
-                
-                    print_statement(&buffer, node);
+                    
+                    print_variable_statement(&buffer, variable);
+                    print_newline(builder);
                 } break;
             
                 case ast_node_type_array_type:
@@ -2299,12 +2283,13 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     auto type = get_expression_type(parser, constant->expression);
                     
                     // "forward declare" arrays
-                    if (is_node_type(type.base_type.node, array_type))
+                    if (false && is_node_type(type.base_type.node, array_type))
                     {
                         maybe_print_blank_line(builder);
                         
                     #if defined NORMAL_CONST_ARRAY
-                        print(builder, "extern \"C\" const ");
+                        //print(builder, "extern \"C\" const ");
+                        print(builder, "const ");
                         print_type(&buffer, type, constant->name);
                         print_line(builder, ";");
                     #else
@@ -2323,28 +2308,6 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         }
     }
     
-    // declare all global variables
-    {
-        maybe_print_blank_line(builder);
-    
-        local_buffer(queue, ast_queue);
-        enqueue(&queue, &root);
-        
-        ast_node *node;
-        while (next(&node, &queue))
-        {
-            if (node->node_type == ast_node_type_variable)
-            {
-                local_node_type(variable, node);
-                if (!variable->is_global)
-                    continue;
-                
-                print_declaration(&buffer, variable);
-                print_line(builder, ";");
-            }
-        }
-    }
-
     // declare all functions
     {
         local_buffer(queue, ast_queue);
@@ -2396,6 +2359,8 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print_scope_close(builder);
     }
     
+    // using extern forward declaration of arrays is super slow on c compile time
+#if 0
     // declare all global arrays with content
     
     for_bucket_item(bucket, index, parser->constant_buckets)
@@ -2429,6 +2394,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print_line(builder, ";");
     #endif
     }
+#endif
     
     return buffer;
 }

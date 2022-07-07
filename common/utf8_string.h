@@ -374,14 +374,16 @@ void print_line(string_builder *builder, cstring format, ...)
     print_newline(builder);
 }
 
-void print_scope_open(string_builder *builder)
+void print_scope_open(string_builder *builder, bool with_newline = true, cstring symbol = "{")
 {
-    if (!builder->previous_was_newline)
+    if (with_newline && !builder->previous_was_newline)
         print_newline(builder);
     
-    print(builder, "{");
+    print(builder, symbol);
     builder->indent++;
-    print_newline(builder);
+    
+    if (with_newline)
+        print_newline(builder);
     
     builder->previous_was_scope_open = true;
 }
@@ -403,17 +405,16 @@ void pending_newline(string_builder *builder)
     builder->pending_newline = true;
 }
 
-void print_scope_close(string_builder *builder, bool with_newline = true)
+void print_scope_close(string_builder *builder, bool with_newline = true, cstring symbol = "}")
 {
     assert(builder->indent);
     
     --builder->indent;
     
-    maybe_print_newline(builder);
-    
-    builder->pending_newline = false;
+    if (with_newline)
+        maybe_print_newline(builder);
         
-    print(builder, "}");
+    print(builder, symbol);
     
     if (with_newline)
         print_newline(builder);
