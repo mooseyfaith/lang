@@ -568,6 +568,12 @@ print_expression_declaration
             }
         } break;
         
+        case ast_node_type_get_function_reference:
+        {
+            local_node_type(get_function_reference, node);
+            print(builder, "%.*s", fs(get_function_reference->name));
+        } break;
+        
         case ast_node_type_get_type_info:
         {
             local_node_type(get_type_info, node);
@@ -1235,7 +1241,7 @@ struct dependency_node
 {
     ast_node       *node;
     u32_list_entry *children;
-    bool is_root;
+    bool is_root, is_required;
 };
 
 buffer_type(dependency_node_buffer, dependency_node_array, dependency_node);
@@ -1250,7 +1256,8 @@ struct dependency_graph
     
     ast_array_type_bucket_array unique_array_type_buckets;
     
-    ast_node_buffer sorted_dependencies;
+    //ast_node_buffer sorted_dependencies;
+    u32_buffer sorted_dependencies;
 };
 
 ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
@@ -1318,20 +1325,67 @@ ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
     }
 }
 
-u32 insert_node(dependency_graph *graph, ast_node *node)
+struct find_node_result
 {
-    node = get_unique_node(graph, node);
+    ast_node *unique_node;
+    u32 index;
+};
 
+find_node_result find_node(dependency_graph *graph, ast_node *node)
+{
+    find_node_result result = {};
+    result.index = -1;
+    result.unique_node = get_unique_node(graph, node);
+    
     for (u32 i = 0; i < graph->nodes.count; i++)
     {
-        if (graph->nodes.base[i].node == node)
-            return i;
+        if (graph->nodes.base[i].node == result.unique_node)
+        {
+            result.index = i;
+            return result;
+        }
     }
     
+    return result;
+}
+
+void set_is_required(dependency_graph *graph, u32 index)
+{
+    assert(index < graph->nodes.count);
+    
+    auto node = &graph->nodes.base[index];
+    if (!node->is_required)
+    {
+        node->is_required = true;
+        
+        for (u32 parent_index = 0; parent_index < graph->nodes.count; parent_index++)
+        {
+            auto parent = &graph->nodes.base[parent_index];
+            if ((parent != node) && !parent->is_required)
+            {
+                for (auto child = parent->children; child; child = child->next)
+                {
+                    if (child->value == index)
+                    {
+                        set_is_required(graph, parent_index);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+u32 insert_node(dependency_graph *graph, ast_node *node)
+{
+    auto result = find_node(graph, node);
+    if (result.index != -1)
+        return result.index;
+        
     resize_buffer(&graph->nodes, graph->nodes.count + 1);
     auto entry = &graph->nodes.base[graph->nodes.count - 1];
     *entry = {};
-    entry->node    = node;
+    entry->node    = result.unique_node;
     entry->is_root = true;
     
     return graph->nodes.count - 1;
@@ -1701,7 +1755,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             
             if (function_type->output.base_type.node)
             {
-                auto output  = get_node_type(compound_type, function_type->output.base_type.node);
+                auto output = get_node_type(compound_type, function_type->output.base_type.node);
                 insert_compound_dependency(&graph, get_base_node(function), output);
             }
             
@@ -1714,10 +1768,8 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
     if (parser->error)
         return graph;
     
-    //local_buffer(stack, u32_buffer);
-    
     // sort
-    ast_node_buffer sorted_dependencies = {};
+    u32_buffer sorted_dependencies = {};
     {
         local_buffer(stack, u32_buffer);
         
@@ -1736,7 +1788,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             
             // depth first search per root
             
-            // printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
+            //printf("dependency root [0x%p] '%.*s' %.*s\n", root->node, fs(get_name(root->node)), fs(ast_node_type_names[root->node->node_type]));
             
             resize_buffer(&stack, 1);
             stack.base[0] = root_index;
@@ -1772,9 +1824,8 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             {
                 if (node_depths.base[i] == depth)
                 {
-                    auto entry = graph.nodes.base[i];
                     resize_buffer(&sorted_dependencies, sorted_dependencies.count + 1);
-                    sorted_dependencies.base[sorted_dependencies.count - 1] = entry.node;
+                    sorted_dependencies.base[sorted_dependencies.count - 1] = i;
                 }
             }
         }
@@ -1783,18 +1834,21 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
         {
             assert(graph.nodes.count == sorted_dependencies.count);
         
-            for (u32 i = 0; i < graph.nodes.count; i++)
+            string_builder print_builder = {};
+            defer { free_buffer(&print_builder.memory); };
+        
+            for (u32 parent_index = 0; parent_index < graph.nodes.count; parent_index++)
             {
                 // children depend on parent
                 // so all its chilren must be inserted before the parent
                 
-                auto entry = graph.nodes.base[i];
+                auto entry = graph.nodes.base[parent_index];
                 auto parent = entry.node;
                 
                 u32 ordered_parent_index = 0;
                 for (; ordered_parent_index < sorted_dependencies.count; ordered_parent_index++)
                 {
-                    if (sorted_dependencies.base[ordered_parent_index] == parent)
+                    if (sorted_dependencies.base[ordered_parent_index] == parent_index)
                         break;
                 }
                 
@@ -1809,11 +1863,123 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                     u32 ordered_child_index = ordered_parent_index + 1;
                     for (; ordered_child_index < sorted_dependencies.count; ordered_child_index++)
                     {
-                        if (sorted_dependencies.base[ordered_child_index] == child)
+                        if (sorted_dependencies.base[ordered_child_index] == child_index)
                             break;
                     }
                     
-                    assert(ordered_parent_index < ordered_child_index,"'%.*s' (%.*s) [%i] depends on '%.*s' (%.*s) [%i], but is in wrong order", fs(get_name(child)), fnode_type_name(child), node_depths.base[child_index], fs(get_name(parent)), fnode_type_name(parent), node_depths.base[i]);
+                #if 0
+                    clear(&print_builder);
+                    print_dependency(parser, &print_builder, child, parent);
+                    printf("%.*s", fs(print_builder.memory.array));
+                #endif
+                    
+                    assert(ordered_parent_index < ordered_child_index,"'%.*s' (%.*s) [%i] depends on '%.*s' (%.*s) [%i], but is in wrong order", fs(get_name(child)), fnode_type_name(child), node_depths.base[child_index], fs(get_name(parent)), fnode_type_name(parent), node_depths.base[parent_index]);
+                }
+            }
+        }
+    }
+    
+    {
+        local_buffer(required_functions, ast_node_buffer);
+        
+        for (auto file = parser->file_list.first; file; file = (ast_file *) file->node.next)
+        {
+            resize_buffer(&required_functions, required_functions.count + 1);
+            required_functions.base[required_functions.count - 1] = get_base_node(file);
+        }
+        
+        while (required_functions.count)
+        {
+            auto scope = required_functions.base[required_functions.count - 1];
+            resize_buffer(&required_functions, required_functions.count - 1);
+            
+            local_buffer(queue, ast_queue);
+            enqueue(&queue, &scope);
+            
+            ast_node *node;
+            while (next(&node, &queue))
+            {
+                u32 node_index = -1;
+                
+                switch (node->node_type)
+                {
+                    // skip global declarations
+                    case ast_node_type_enumeration_type:
+                    case ast_node_type_alias_type:
+                    case ast_node_type_file:
+                    case ast_node_type_function:
+                    case ast_node_type_number_type:
+                    case ast_node_type_function_type:
+                    case ast_node_type_compound_type:
+                    {
+                        continue;
+                    } break;
+                    
+                    case ast_node_type_name_reference:
+                    {
+                        local_node_type(name_reference, node);
+                        
+                        if (name_reference->reference)
+                            node_index = find_node(&graph, name_reference->reference).index;
+                    } break;
+                    
+                    case ast_node_type_variable:
+                    {
+                        local_node_type(variable, node);
+                        
+                        if (variable->is_global)
+                            continue;
+                            
+                        if (variable->type.name_type.node)
+                            node_index = find_node(&graph, variable->type.name_type.node).index;
+                    } break;
+                    
+                    case ast_node_type_constant:
+                    {
+                        local_node_type(constant, node);
+                        
+                        auto type = get_expression_type(parser, constant->expression);
+                        if (type.name_type.node)
+                            node_index = find_node(&graph, type.name_type.node).index;
+                    } break;
+                    
+                    case ast_node_type_get_function_reference:
+                    {
+                        local_node_type(get_function_reference, node);
+                        
+                        if (get_function_reference->function)
+                            node_index = find_node(&graph, get_base_node(get_function_reference->function)).index;
+                    } break;
+                    
+                    case ast_node_type_unary_operator:
+                    {
+                        local_node_type(unary_operator, node);
+                        if (unary_operator->function)
+                            node_index = find_node(&graph, get_base_node(unary_operator->function)).index;
+                    } break;
+                    
+                    case ast_node_type_binary_operator:
+                    {
+                        local_node_type(binary_operator, node);
+                        if (binary_operator->function)
+                            node_index = find_node(&graph, get_base_node(binary_operator->function)).index;
+                    } break;
+                    
+                    default:
+                    {
+                        node_index = find_node(&graph, node).index;
+                    }
+                }
+                
+                if (node_index != -1)
+                {
+                    if (!graph.nodes.base[node_index].is_required && is_node_type(graph.nodes.base[node_index].node, function))
+                    {
+                        resize_buffer(&required_functions, required_functions.count + 1);
+                        required_functions.base[required_functions.count - 1] = graph.nodes.base[node_index].node;
+                    }
+                    
+                    set_is_required(&graph, node_index);
                 }
             }
         }
@@ -2093,11 +2259,11 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         }
     }
     
+    auto graph = lang_require_call_return_value(sort_declaration_dependencies(parser), buffer);
+    auto sorted_dependencies = graph.sorted_dependencies;
+    defer { free_graph(&graph); };
+    
     {
-        auto graph = lang_require_call_return_value(sort_declaration_dependencies(parser), buffer);
-        auto sorted_dependencies = graph.sorted_dependencies;
-        defer { free_graph(&graph); };
-        
     #if 0
         for (u32 i = 0; i < sorted_dependencies.count; i++)
         {
@@ -2113,11 +2279,23 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         
         // printf("ordered dependencies\n");
         
+        string_builder print_builder = {};
+        defer { free_buffer(&print_builder.memory); };
+        
         for (u32 i = 0; i < sorted_dependencies.count; i++)
         {
-            auto node = sorted_dependencies.base[i]; //sorted_dependencies.count - 1 - i];
-
+            auto node_index = sorted_dependencies.base[i]; //sorted_dependencies.count - 1 - i];
+            if (!graph.nodes.base[node_index].is_required)
+                continue;
+            
+            auto node = graph.nodes.base[node_index].node;
+            
         #if 0
+            clear(&print_builder);
+            print(&print_builder, "%u %u ", i, node_index);
+            print_name(parser, &print_builder, node);
+            printf("%.*s\n", fs(print_builder.memory.array));
+        
             printf("dependency [0x%p] '%.*s' %.*s", node, fnode_name(node), fnode_type_name(node));
             if (node->parent)
                 printf(" ,parent [0x%p] '%.*s' %.*s\n", node->parent, fnode_name(node->parent), fnode_type_name(node->parent));
@@ -2309,34 +2487,30 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
     }
     
     // declare all functions
+    for_bucket_item(bucket, index, parser->function_buckets)
     {
-        local_buffer(queue, ast_queue);
-        enqueue(&queue, &root);
+        auto function = &bucket->base[index];
+                
+        if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
+            continue;
         
-        ast_node *node;
-        while (next(&node, &queue))
-        {
-            if (node->node_type == ast_node_type_function)
-            {
-                local_node_type(function, node);
-                
-                if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
-                    continue;
-                
-                auto function_type = get_function_type(parser, function);
-                
-                maybe_print_blank_line(builder);
-                
-                print_function_type(&buffer, function_type, function->name, false);
-                
-                print_scope_open(builder);
+        auto graph_index = find_node(&graph, get_base_node(function)).index;
+        assert(graph_index != null);
+        if (!graph.nodes.base[graph_index].is_required)
+            continue;
     
-                if (function->first_statement)
-                    print_statements(&buffer, function->first_statement);
-    
-                print_scope_close(builder);
-            }
-        }
+        auto function_type = get_function_type(parser, function);
+        
+        maybe_print_blank_line(builder);
+        
+        print_function_type(&buffer, function_type, function->name, false);
+        
+        print_scope_open(builder);
+
+        if (function->first_statement)
+            print_statements(&buffer, function->first_statement);
+
+        print_scope_close(builder);
     }
 
     {

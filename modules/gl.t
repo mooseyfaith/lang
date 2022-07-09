@@ -17,7 +17,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
 {
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
-    window_class.lpfnWndProc   = DefWindowProcA;
+    window_class.lpfnWndProc   = get_function_reference(DefWindowProcA WNDPROC);
     window_class.hbrBackground = COLOR_BACKGROUND cast(usize) cast(HBRUSH);
     window_class.lpszClassName = "gl dummy window class".base cast(cstring);
     window_class.style         = CS_OWNDC;
@@ -97,7 +97,7 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generated in function call scope
-        glDebugMessageCallback(gl_debug_message_callback, null);
+        glDebugMessageCallback(get_function_reference(gl_debug_message_callback GLDEBUGPROC), null);
     }
 }
 

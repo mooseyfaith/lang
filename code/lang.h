@@ -47,6 +47,7 @@
     macro(field_dereference, __VA_ARGS__) \
     macro(get_type_info, __VA_ARGS__) \
     macro(type_byte_count, __VA_ARGS__) \
+    macro(get_function_reference, __VA_ARGS__) \
     macro(get_call_location, __VA_ARGS__) \
     macro(get_call_argument_text, __VA_ARGS__) \
     macro(unary_operator, __VA_ARGS__) \
@@ -261,8 +262,9 @@ struct complete_type_info
 enum type_compatibility 
 {
     type_compatibility_false,
-    type_compatibility_true,
     type_compatibility_requires_cast,
+    type_compatibility_implicit,
+    type_compatibility_equal,
 };
 
 struct ast_module;
@@ -507,6 +509,14 @@ struct ast_type_byte_count
     ast_base_node      node;
     complete_type_info type;
     parsed_number      byte_count;
+};
+
+struct ast_get_function_reference
+{
+    ast_base_node      node;
+    string             name;
+    complete_type_info type;
+    ast_function       *function;
 };
 
 typedef ast_base_node ast_get_call_location;
@@ -1641,6 +1651,47 @@ complete_type_info parse_type(lang_parser *parser, bool is_required)
     return result;
 }
 
+// assumes start pattern was allready parsed
+#define parse_arguments_declaration ast_compound_type * parse_arguments(lang_parser *parser, string end_pattern)
+parse_arguments_declaration;
+
+complete_type_info parse_function_type(lang_parser *parser)
+{
+    complete_type_info type = {};
+
+    if (try_consume(parser, s("(")))
+    {
+        new_local_node(function_type);
+        
+        function_type->input.name_type.node = (ast_node *) lang_require_call_return_value(parse_arguments(parser, s(")")), {});
+        function_type->input.base_type = function_type->input.name_type;
+        
+        if (try_consume(parser, s("(")))
+        {
+            function_type->output.name_type.node = (ast_node *) lang_require_call_return_value(parse_arguments(parser, s(")")), {});
+            function_type->output.base_type = function_type->output.name_type;
+        }
+        
+        if (try_consume_keyword(parser, s("calling_convention")))
+        {
+            bool ok = lang_require_call_return_value(parse_quoted_string(&function_type->calling_convention, parser), {});
+            lang_require_return_value(ok && function_type->calling_convention.count, {}, parser->iterator, "expected calling convention in quoates (\"...\") after 'calling_convention'");
+        }
+        
+        type.name_type.node = get_base_node(function_type);
+        type.base_type      = type.name_type;
+    }
+    else
+    {
+        auto function_type_name = consume_name(parser);
+        lang_require_return_value(function_type_name.count, {}, parser->iterator, "expected explicit function type starting with '(' or function type name after function name");
+        
+        type.name = function_type_name;
+    }
+    
+    return type;
+}
+
 ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
 {
     ast_node *root = null;
@@ -1836,6 +1887,21 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 
                 lang_require_consume_return_value(")", {}, "after type_byte_count type");
                 expression = get_base_node(type_byte_count);
+            }
+            else if (name == s("get_function_reference"))
+            {
+                new_local_node(get_function_reference);
+                
+                lang_require_consume_return_value("(", {}, "after 'get_function_reference'");
+            
+                get_function_reference->name = consume_name(parser);
+                lang_require_return_value(get_function_reference->name.count, {}, parser->iterator, "exected function name after 'get_function_reference'");
+                
+                get_function_reference->type = parse_function_type(parser);
+                
+                lang_require_consume_return_value(")", {}, "after get_function_reference expression");
+                
+                expression = get_base_node(get_function_reference);
             }
             else
             {
@@ -2236,8 +2302,7 @@ ast_variable * parse_declaration(base_list_tail_next *tail_next, lang_parser *pa
     return variable;
 }
 
-// assumes start pattern was allready parsed
-ast_compound_type * parse_arguments(lang_parser *parser, string end_pattern)
+parse_arguments_declaration
 {
     base_list_tail_next tail_next = null;
     ast_compound_type *compound_type = null;
@@ -2429,38 +2494,8 @@ ast_node * parse_statements(lang_parser *parser)
                 else if (try_consume_keyword(parser, s("func")))
                 {
                     ast_node *statement = null;
-                    complete_type_info type = {};
                     
-                    if (try_consume(parser, s("(")))
-                    {
-                        new_local_node(function_type);
-                        
-                        function_type->input.name_type.node = (ast_node *) lang_require_call(parse_arguments(parser, s(")")));
-                        function_type->input.base_type = function_type->input.name_type;
-                        
-                        if (try_consume(parser, s("(")))
-                        {
-                            function_type->output.name_type.node = (ast_node *) lang_require_call(parse_arguments(parser, s(")")));
-                            function_type->output.base_type = function_type->output.name_type;
-                        }
-                        
-                        if (try_consume_keyword(parser, s("calling_convention")))
-                        {
-                            bool ok = lang_require_call(parse_quoted_string(&function_type->calling_convention, parser));
-                            lang_require(ok && function_type->calling_convention.count, parser->iterator, "expected calling convention in quoates (\"...\") after 'calling_convention'");
-                        }
-                        
-                        
-                        type.name_type.node = get_base_node(function_type);
-                        type.base_type      = type.name_type;
-                    }
-                    else
-                    {
-                        auto function_type_name = consume_name(parser);
-                        lang_require(function_type_name.count, parser->iterator, "expected explicit function type starting with '(' or function type name after function name");
-                        
-                        type.name = function_type_name;
-                    }
+                    auto type = parse_function_type(parser);
                     
                     if (try_consume_keyword(parser, s("extern_binding")))
                     {
@@ -2900,6 +2935,14 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_external_binding:
         case ast_node_type_get_call_location:
         {
+        } break;
+        
+        case ast_node_type_get_function_reference:
+        {
+            local_node_type(get_function_reference, node);
+            
+            if (get_function_reference->type.base_type.node && (get_function_reference->type.base_type.node->parent == node))
+                enqueue(queue, node, &get_function_reference->type.base_type.node);
         } break;
         
         case ast_node_type_get_call_argument_text:
@@ -3483,6 +3526,9 @@ types_are_compatible_declaration
     if (to.base_type.indirection_count != from.base_type.indirection_count)
         return type_compatibility_false;
         
+    if (to.name_type.node == from.name_type.node)
+        return type_compatibility_equal;
+        
     // implicit cast to and from u8 pointer
     if ((to.base_type.node != from.base_type.node) && to.base_type.indirection_count && ((to.base_type.node == get_type(parser, lang_base_type_u8).base_type.node) || (from.base_type.node == get_type(parser, lang_base_type_u8).base_type.node)))
         return type_compatibility_requires_cast;
@@ -3523,7 +3569,7 @@ types_are_compatible_declaration
         auto to_array_type   = get_node_type(array_type, to.base_type.node);
         auto from_array_type = get_node_type(array_type, from.base_type.node);
         
-        if (types_are_compatible(parser, to_array_type->item_type, from_array_type->item_type) != type_compatibility_true)
+        if (types_are_compatible(parser, to_array_type->item_type, from_array_type->item_type) != type_compatibility_equal)
             return type_compatibility_false;
             
         if (!to_array_type->item_count_expression && from_array_type->item_count_expression)
@@ -3540,7 +3586,7 @@ types_are_compatible_declaration
         return type_compatibility_false;
     }
 
-    return type_compatibility_true;
+    return type_compatibility_equal;
 }
 
 maybe_add_cast_declaration
@@ -4101,6 +4147,12 @@ get_expression_type_declaration
         {
             return get_type(parser, lang_base_type_string);
         } break;
+        
+        case ast_node_type_get_function_reference:
+        {
+            local_node_type(get_function_reference, node);
+            return get_function_reference->type;
+        } break;
     }
     
     return {};
@@ -4615,9 +4667,9 @@ void print_type(lang_parser *parser, string_builder *builder, complete_type_info
             local_node_type(array_type, type.name_type.node);
             print_type(parser, builder, array_type->item_type);
             
-            //if (array_type->item_count_expression)
-                //print(builder, "[!]");
-            //else
+            if (array_type->item_count_expression)
+                print(builder, "[!]");
+            else
                 print(builder, "[]");
         } break;
 
@@ -4770,6 +4822,122 @@ ast_function * find_matching_function(lang_resolver *resolver, ast_node *scope, 
         if (function_overloads)
         {
             auto matching_function = _find_matching_function(resolver->parser, function_overloads, first_call_argument);
+            if (matching_function)
+                return matching_function;
+        }
+    }
+    
+    return null;
+}
+
+bool compound_types_match(lang_parser *parser, ast_compound_type *left, ast_compound_type *right)
+{
+    auto right_field = right->first_field;
+    for (auto left_field = left->first_field; left_field; left_field = (ast_variable *) left_field->node.next)
+    {
+        if (!right_field)
+            return false;
+        
+        if (types_are_compatible(parser, left_field->type, right_field->type) != type_compatibility_equal)
+            return false;
+        
+        right_field = (ast_variable *) right_field->node.next;
+    }
+
+    if (right_field)
+        return false;
+    
+    return true;
+}
+
+ast_function * find_matching_function(lang_parser *parser, ast_function_overloads *function_overloads, ast_function_type *function_type)
+{
+    ast_function *matching_function = null;
+    
+    ast_compound_type *input = null;
+    if (function_type->input.base_type.node)
+    {
+        input = get_node_type(compound_type, function_type->input.base_type.node);
+    }
+    
+    ast_compound_type *output = null;
+    if (function_type->output.base_type.node)
+    {
+        output = get_node_type(compound_type, function_type->output.base_type.node);
+    }
+    
+    for (auto function_reference = function_overloads->first_function_reference; function_reference; function_reference = (ast_function_reference *) function_reference->node.next)
+    {
+        auto function = function_reference->function;
+        auto overload_function_type = get_node_type(function_type, function->type.base_type.node);
+        
+        ast_compound_type *overload_input = null;
+        if (overload_function_type->input.base_type.node)
+        {
+            overload_input = get_node_type(compound_type, overload_function_type->input.base_type.node);
+        }
+        
+        if (!input != !overload_input)
+            return false;
+        
+        ast_compound_type *overload_output = null;
+        if (overload_function_type->output.base_type.node)
+        {
+            overload_output = get_node_type(compound_type, overload_function_type->output.base_type.node);
+        }
+        
+        if (!output != !overload_output)
+            return false;
+        
+        
+        if ((!input || compound_types_match(parser, input, overload_input)) && (!output || compound_types_match(parser, output, overload_output)))
+            return function;
+    }
+    
+    return null;
+}
+
+// same as find_matching_function with arguments, but with function type instead
+ast_function * find_matching_function(lang_resolver *resolver, ast_node *scope, string name, ast_function_type *function_type)
+{
+    auto file = get_file_scope(scope);
+    
+    // check overloads in file by scope
+    while (scope)
+    {
+        auto function_overloads = (ast_function_overloads *) get(resolver->table, name, scope);
+        if (function_overloads)
+        {
+            auto matching_function = find_matching_function(resolver->parser, function_overloads, function_type);
+            if (matching_function)
+                return matching_function;
+        }
+        
+        scope = scope->parent;
+    }
+    
+    // check overloads in same module
+    {
+        auto function_overloads = (ast_function_overloads *) get(resolver->table, name, get_base_node(file->module));
+    
+        if (function_overloads)
+        {
+            auto matching_function = find_matching_function(resolver->parser, function_overloads, function_type);
+            if (matching_function)
+                return matching_function;
+        }
+    }
+    
+    // check overloads in other modules
+    for (auto module_it = file->first_module_dependency; module_it; module_it = (ast_module_reference *) module_it->node.next)
+    {
+        auto module = module_it->module;
+        
+        auto function_overloads = (ast_function_overloads *) get(resolver->table, name, get_base_node(module));
+    
+        if (function_overloads)
+        {
+            auto matching_function = find_matching_function(resolver->parser, function_overloads, function_type);
             if (matching_function)
                 return matching_function;
         }
@@ -4961,6 +5129,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
     local_buffer(unresolved_function_calls, ast_node_buffer);
     local_buffer(unresolved_unary_operations, ast_node_buffer);
     local_buffer(unresolved_binary_operations, ast_node_buffer);
+    local_buffer(unresolved_get_function_references, ast_node_buffer);
 
     // collect
     {
@@ -5157,6 +5326,23 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 entry->type = &unary_operator->type;
                 entry->name = unary_operator->type.name;
             }
+        }
+        
+        for_bucket_item(bucket, index, parser->get_function_reference_buckets)
+        {
+            auto get_function_reference = &bucket->base[index];
+            
+            if (!get_function_reference->type.base_type.node)
+            {
+                resize_buffer(&unresolved_types, unresolved_types.count + 1);
+                auto entry = &unresolved_types.base[unresolved_types.count - 1];
+                entry->node = get_base_node(get_function_reference);
+                entry->type = &get_function_reference->type;
+                entry->name = get_function_reference->type.name;
+            }
+            
+            resize_buffer(&unresolved_get_function_references, unresolved_get_function_references.count + 1);
+            unresolved_get_function_references.base[unresolved_get_function_references.count - 1] = get_base_node(get_function_reference);
         }
     }
     
@@ -5356,6 +5542,28 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 
                     unresolved_binary_operations.base[i] = unresolved_binary_operations.base[--unresolved_binary_operations.count];
                     resize_buffer(&unresolved_binary_operations, unresolved_binary_operations.count);
+                    did_resolve_entry = true;
+                    i--; // repeat index
+                }
+            }
+            
+            for (u32 i = 0; i < unresolved_get_function_references.count; i++)
+            {
+                auto node = unresolved_get_function_references.base[i];
+                local_node_type(get_function_reference, node);
+                
+                if (!get_function_reference->type.base_type.node)
+                    continue;
+                
+                local_node_type(function_type, get_function_reference->type.base_type.node);
+                
+                auto matching_function = find_matching_function(resolver, node->parent, get_function_reference->name, function_type);
+                if (matching_function) 
+                {
+                    get_function_reference->function = matching_function;
+                
+                    unresolved_get_function_references.base[i] = unresolved_get_function_references.base[--unresolved_get_function_references.count];
+                    resize_buffer(&unresolved_get_function_references, unresolved_get_function_references.count);
                     did_resolve_entry = true;
                     i--; // repeat index
                 }
@@ -5907,6 +6115,12 @@ void generate_type_info_tables(lang_parser *parser)
     assert(!parser->error && type_table->expression && !type_table->expression->next && is_node_type(type_table->expression, compound_literal));
     
     type_table->expression->parent = get_base_node(type_table);
+    
+    // remove dummy constant
+    {
+        (*parser->constant_buckets.tail_next)->count--;
+        parser->constant_buckets.item_count--;
+    }
     
     return;
 

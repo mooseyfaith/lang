@@ -90,7 +90,7 @@ def platform_init func(platform platform_api ref)
     
     var window_class WNDCLASSA;
     window_class.hInstance     = platform.win32_instance;
-    window_class.lpfnWndProc   = platform_window_callback;
+    window_class.lpfnWndProc   = get_function_reference(platform_window_callback WNDPROC);
     window_class.hbrBackground = COLOR_BACKGROUND cast(ssize) cast(HBRUSH);
     window_class.lpszClassName = platform.window_class_name;
     window_class.style         = CS_OWNDC;
