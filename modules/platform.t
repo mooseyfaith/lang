@@ -2,6 +2,7 @@ module platform;
 
 import platform_win32;
 import random;
+import string;
 
 def platform_api struct
 {
@@ -74,14 +75,6 @@ def platform_button_update func(button platform_button ref; is_active b8)
 //    half_transition_count           u6;
 //    half_transition_count_over_flow u1;
 //}
-
-def print_value func(value u64; text string = get_call_argument_text(value); in_hex b8 = false)
-{
-    if in_hex 
-        { printf("%.*s = 0x%llX\n\0".base cast(cstring), text.count cast(s32), text.base, value); }
-    else
-        { printf("%.*s = %llu\n\0".base cast(cstring), text.count cast(s32), text.base, value); }
-}
 
 def platform_init func(platform platform_api ref)
 {
@@ -188,19 +181,30 @@ def platform_window_callback func WNDPROC
 
 def print_location func(location code_location)
 {
-    printf("%.*s/%.*s %.*s(%i,%i)\0".base cast(cstring), location.module.count cast(s32), location.module.base, location.function.count cast(s32), location.function.base, location.file.count cast(s32), location.file.base, location.line, location.column);
+    print(location.module); print("/"); print(location.function); print(" "); print(location.file); print("("); print_u64(location.line); print(","); print_u64(location.column); print(")"); 
+    
+    //printf("%.*s/%.*s %.*s(%i,%i)\0".base cast(cstring), location.module.count cast(s32), location.module.base, location.function.count cast(s32), location.function.base, location.file.count cast(s32), location.file.base, location.line, location.column);
+    
 }
 
 def platform_fatal_error_message func(label string; message string; location code_location; condition_text string)
 {
-    printf("\n\0".base cast(cstring));
-    print_location(location);
-    printf(": %.*s\n\n\0".base cast(cstring), label.count cast(s32), label.base);
-    
+    print("\n");
+    print_location(location); print(": "); print(label); print("\n\n");
+
     if message.count
-        { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+        { print("\t"); print(message); print("\n\n"); }
     
-    printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
+    print("\tCondition '"); print(condition_text); print("' is false.\n\n");
+
+    //printf("\n\0".base cast(cstring));
+    //print_location(location);
+    //printf(": %.*s\n\n\0".base cast(cstring), label.count cast(s32), label.base);
+    
+    //if message.count
+//        { printf("\t%.*s\n\n\0".base cast(cstring), message.count cast(s32), message.base); }
+    
+    //printf("\tCondition '%.*s' is false.\n\n\0".base cast(cstring), condition_text.count cast(s32), condition_text.base);
 }
 
 def platform_require func(condition b8; message = ""; location code_location = get_call_location(); condition_text string = get_call_argument_text(condition))
@@ -208,7 +212,9 @@ def platform_require func(condition b8; message = ""; location code_location = g
     if not condition
     {
         platform_fatal_error_message("Platform Win32 Requirement Failed", message, location, condition_text);
-        printf("\tGetLastError() = 0x%x\n\0".base cast(cstring), GetLastError());
+        print("\tGetLastError() = 0x");
+        print_hex(GetLastError());
+        print("\n");
         __debugbreak();
         ExitProcess(0);
     }
@@ -344,4 +350,12 @@ def platform_write_entire_file func(platform platform_api ref; path string; data
     CloseHandle(file_handle);
     
     return true;
+}
+
+
+// for convenience
+def as_cstring func(text string; location = get_call_location()) (result cstring)
+{
+    assert(text[text.count - 1] is 0, "text needs to be 0-terminated", location);
+    return text.base cast(cstring);
 }

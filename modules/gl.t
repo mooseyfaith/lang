@@ -2,6 +2,7 @@ module gl;
 
 import platform;
 import platform_win32;
+import string;
 
 def gl_api struct
 {
@@ -19,12 +20,12 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     window_class.hInstance     = platform.win32_instance;
     window_class.lpfnWndProc   = get_function_reference(DefWindowProcA WNDPROC);
     window_class.hbrBackground = COLOR_BACKGROUND cast(usize) cast(HBRUSH);
-    window_class.lpszClassName = "gl dummy window class".base cast(cstring);
+    window_class.lpszClassName = as_cstring("gl dummy window class\0");
     window_class.style         = CS_OWNDC;
     window_class.hCursor       = LoadCursorA(null, IDC_ARROW);
     platform_require(RegisterClassA(window_class ref));
 
-    var window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
+    var window_handle = CreateWindowExA(0, window_class.lpszClassName, as_cstring("gl dummy window\0"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
     platform_require(window_handle is_not null);
 
     var device_context = GetDC(window_handle);
@@ -37,14 +38,13 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     
     platform_require(wglMakeCurrent(device_context, gl_context));
     
-    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB\0".base cast(cstring))    cast(wglChoosePixelFormatARB_signature);
-    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB\0".base cast(cstring)) cast(wglCreateContextAttribsARB_signature);
+    gl_load_bindings();
     
     if wglChoosePixelFormatARB and wglCreateContextAttribsARB
     {
         platform_require(wglMakeCurrent(null, null));
     
-        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, "gl dummy window".base cast(cstring), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
+        var gl_3_3_window_handle = CreateWindowExA(0, window_class.lpszClassName, as_cstring("gl dummy window\0"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 128, 128, null, null, window_class.hInstance, null);
         platform_require(gl_3_3_window_handle is_not INVALID_HANDLE_VALUE);
 
         var gl_3_3_device_context = GetDC(gl_3_3_window_handle);
@@ -91,16 +91,12 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     gl.win32_init_window_handle  = window_handle;
     gl.win32_init_device_context = device_context;
     
-    glDebugMessageCallback = wglGetProcAddress("glDebugMessageCallback\0".base cast(cstring)) cast(glDebugMessageCallback_signature);
-    
     if glDebugMessageCallback
     {
         glEnable(GL_DEBUG_OUTPUT);
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generated in function call scope
         glDebugMessageCallback(get_function_reference(gl_debug_message_callback GLDEBUGPROC), null);
     }
-    
-    gl_init_bindings();
 }
 
 def gl_window_init func(platform platform_api ref; gl gl_api ref; window platform_window ref)
@@ -191,11 +187,11 @@ def create_shader_object func(gl gl_api ref; is_fragment_shader b8; source strin
     {
         if not is_fragment_shader
         { 
-            printf("GLSL Compile Error: could not compile vertex shader '%.*s'\n:\0".base cast(cstring), source.count cast(s32), source.base cast(cstring));
+            print("GLSL Compile Error: could not compile vertex shader '"); print(source); print("'\n");
         }
         else
         { 
-            printf("GLSL Compile Error: could not compile fragment shader '%.*s'\n:\0".base cast(cstring), source.count cast(s32), source.base cast(cstring));
+            print("GLSL Compile Error: could not compile fragment shader '"); print(source); print("'\n");
         }
         
         var message_buffer u8[4096];
@@ -206,7 +202,8 @@ def create_shader_object func(gl gl_api ref; is_fragment_shader b8; source strin
             { info_length = message_buffer.count; }
         
         glGetShaderInfoLog(shader_object, info_length, info_length ref cast(GLsizei ref), message_buffer.base cast(GLchar ref));
-        printf("%.*s\n\0".base cast(cstring), info_length, message_buffer.base cast(cstring));
+        var message = type(string) { info_length cast(usize); message_buffer.base };
+        print(message); print("\n");
         
         glDeleteShader(shader_object);
         return 0;
@@ -249,7 +246,7 @@ def create_program_end func(gl gl_api ref; program_object u32) (program_object u
     glGetProgramiv(program_object, GL_LINK_STATUS, is_linked ref);
     if not is_linked
     {
-        printf("GLSL Error: Could not link gl program:\n\n\0".base cast(cstring));
+        print("GLSL Error: Could not link gl program:\n\n");
     
         var message_buffer u8[4096];
         var info_length GLint;
@@ -259,7 +256,8 @@ def create_program_end func(gl gl_api ref; program_object u32) (program_object u
             { info_length = message_buffer.count; }
         
         glGetProgramInfoLog(program_object, info_length, info_length ref cast(GLsizei ref), message_buffer.base cast(GLchar ref));
-        printf("%.*s\n\0".base cast(cstring), info_length, message_buffer.base cast(cstring));
+        var message = type(string) { info_length cast(usize); message_buffer.base };
+        print(message); print("\n");
         
         glDeleteProgram(program_object);
         
@@ -283,16 +281,20 @@ def starts_with func(text string; prefix string) (result b8)
     return true;
 }
 
-def gl_init_bindings func()
+// if we compile with minimal dependencies, this list will only include gl calls, that are actually used
+def gl_load_bindings func()
 {
     loop var i; lang_global_variables.count
     {
         var variable = lang_global_variables[i];
-        if starts_with(variable.name, "gl") or starts_with(variable.name, "wgl")
+        if ((variable.type.base_type.) is lang_type_info_type.function) and not variable.type.indirection_count and starts_with(variable.name, "gl") or starts_with(variable.name, "wgl")
         {
+            // wglGetProcAddress expects 0-terminated string
+            var buffer u8[256];
+            sprintf_s(buffer.base cast(cstring), buffer.count cast(s32), "%.*s\0".base cast(cstring), variable.name.count cast(s32), variable.name.base cast(cstring));
+            
             // cast to u8 ref ref, since we know, they are function pointers
-            // HACK: for now C backend generates 0 terminated strings
-            variable.base cast(u8 ref ref) . = wglGetProcAddress(variable.name.base cast(cstring));
+            variable.base cast(u8 ref ref) . = wglGetProcAddress(buffer.base cast(cstring));
         }
     }
 }

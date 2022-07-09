@@ -27,10 +27,10 @@ def code_location struct
 def lang_type_info_type enum u32
 {
     number;
+    enumeration;
+    array;
     compound;
     function;
-    array;
-    enumeration;
     
     compound_field;
     enumeration_item;
@@ -86,6 +86,13 @@ def lang_type_info_compound_field struct
     byte_offset    u32;
 }
 
+def lang_type_info_function struct
+{
+    base_type lang_type_info_type;
+    input     lang_type_info_compound ref;
+    output    lang_type_info_compound ref;
+}
+
 def lang_type_info_array struct
 {
     base_type  lang_type_info_type;
@@ -120,13 +127,16 @@ def lang_type_info_any_value struct
 def lang_type_info_table struct
 {
     number_types           lang_type_info_number[];
-    array_types            lang_type_info_array[];
-//  function_types         lang_type_info_function[];
-    compound_types         lang_type_info_compound[];
-    compound_field_types   lang_type_info_compound_field[];
     
     enumerations_type      lang_type_info_enumeration[];
     enumeration_item_types lang_type_info_enumeration_item[];
+    
+    array_types            lang_type_info_array[];
+    
+    compound_types         lang_type_info_compound[];
+    compound_field_types   lang_type_info_compound_field[];
+    
+    function_types         lang_type_info_function[];
 }
 
 def lang_type_table = type(lang_type_info_table) {};
@@ -139,11 +149,3 @@ def lang_variable_info struct
 }
 
 def lang_global_variables = type(lang_variable_info[]) [];
-
-// placeholders, will be resized
-//def lang_type_info_number_type_table           = type(lang_type_info_number[])           [];
-//def lang_type_info_compound_type_table         = type(lang_type_info_compound[])         [];
-//def lang_type_info_compound_type_field_table   = type(lang_type_info_compound_field[])   [];
-//def lang_type_info_array_type_table            = type(lang_type_info_array[])            [];
-//def lang_type_info_enumeration_type_table      = type(lang_type_info_enumeration[])      [];
-//def lang_type_info_enumeration_type_item_table = type(lang_type_info_enumeration_item[]) [];

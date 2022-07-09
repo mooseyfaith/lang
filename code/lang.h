@@ -1819,7 +1819,7 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
         {
             for (u32 i = 0; i < lang_base_constant_count; i++)
             {
-                if (parser->base_constants[i]->name == keyword)
+                if (lang_base_constant_names[i] == keyword)
                 {
                     new_local_node(name_reference);
                     name_reference->name = keyword;
@@ -5682,7 +5682,7 @@ void resolve_names(lang_parser *parser, lang_resolver *resolver, ast_node *root)
                 string black_list[] =
                 {
                     s("__debugbreak"),
-                    s("printf"),
+                    //s("printf"),
                     s("sprintf_s"),
                     s("break"),
                     s("continue")

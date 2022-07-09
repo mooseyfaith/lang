@@ -34,6 +34,7 @@ struct dependency_graph
     
     ast_array_type_bucket_array    unique_array_type_buckets;
     ast_compound_type_bucket_array unique_compound_type_buckets;
+    ast_function_type_bucket_array unique_function_type_buckets;
     
     u32_buffer sorted_dependencies;
 };
@@ -98,9 +99,6 @@ print_statements_declaration;
 void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_name = {})
 {
     auto builder = &buffer->builder;
-    
-    // TEMP
-    //type = get_unique_type(buffer, type);
     
     auto name_type = type.name_type;
     if (name_type.node)
@@ -322,12 +320,53 @@ ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
     {
         case ast_node_type_number_type:
         case ast_node_type_enumeration_type:
-        case ast_node_type_function_type:
         case ast_node_type_expression_reference_type:
         case ast_node_type_alias_type:
         default:
         {
             return node;
+        } break;
+        
+        case ast_node_type_function_type:
+        {
+            local_node_type(function_type, node);
+            
+            ast_node *input = null;
+            if (function_type->input.name_type.node)
+                input = get_unique_node(graph, function_type->input.name_type.node);
+                
+            ast_node *output = null;
+            if (function_type->output.name_type.node)
+                output = get_unique_node(graph, function_type->output.name_type.node);
+            
+            ast_function_type *unique_function_type = null;
+            for_bucket_item(bucket, index, graph->unique_function_type_buckets)
+            {
+                auto other_function_type = &bucket->base[index];
+                
+                if ((input == other_function_type->input.name_type.node) && (output == other_function_type->output.name_type.node))
+                {
+                    unique_function_type = other_function_type;
+                    break;
+                }
+            }
+            
+            if (!unique_function_type)
+            {
+                unique_function_type = new_bucket_item(&graph->unique_function_type_buckets);
+                *unique_function_type = *function_type;
+                unique_function_type->node.type_index = graph->unique_function_type_buckets.item_count - 1;
+                
+                unique_function_type->input = {};
+                unique_function_type->input.name_type.node  = input;
+                resolve_complete_type(parser, &unique_function_type->input);
+                
+                unique_function_type->output = {};
+                unique_function_type->output.name_type.node  = output;
+                resolve_complete_type(parser, &unique_function_type->output);
+            }
+            
+            return get_base_node(unique_function_type);
         } break;
         
         case ast_node_type_compound_type:
@@ -500,21 +539,6 @@ void print_type_info(lang_c_buffer *buffer, complete_type_info type)
 {
     auto builder = &buffer->builder;
     
-#if 0
-    auto name_type = type.name_type.node;
-    if (!name_type)
-    {
-        print(builder, "lang_type_info {}");
-        return;
-    }
-    
-    type = {};
-    name_type = find_node(&buffer->graph, name_type).unique_node;
-    type.name_type.node = name_type;
-    resolve_complete_type(buffer->parser, &type);
-    auto base_type = type.base_type.node;
-#else
-
     if (!type.base_type.node)
     {
         print(builder, "lang_type_info {}");
@@ -522,13 +546,11 @@ void print_type_info(lang_c_buffer *buffer, complete_type_info type)
     }
 
     auto base_type = find_node(&buffer->graph, type.base_type.node).unique_node;
-
-#endif
-
     auto type_index = base_type->type_index;
     
     auto count_and_alignment = get_type_byte_count(type);
     
+    /*
     if (is_node_type(base_type, function_type))
     {
         print_comment_begin(buffer);
@@ -537,6 +559,7 @@ void print_type_info(lang_c_buffer *buffer, complete_type_info type)
         print(builder, "lang_type_info {}");
     }
     else
+    */
     {
     #if 0
         // cast const away
@@ -1181,7 +1204,19 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             maybe_print_blank_line(builder);
             
             print(builder, "for (");
-            print_statement(buffer, loop_with_counter->first_counter_statement);
+            
+            if (is_node_type(loop_with_counter->first_counter_statement, variable))
+            {
+                local_node_type(variable, loop_with_counter->first_counter_statement);
+                print_variable_statement(buffer, variable);
+            }
+            else
+            {
+                print_expression(buffer, loop_with_counter->first_counter_statement);
+                print(builder, ";");
+            }
+            
+            //print_statement(buffer, loop_with_counter->first_counter_statement);
             
             string counter_name = get_name(loop_with_counter->first_counter_statement);
             assert(counter_name.count);
@@ -1626,9 +1661,12 @@ void insert_expression_dependency(dependency_graph *graph, ast_node *child, ast_
 
 void insert_compound_dependency(dependency_graph *graph, ast_node *child, ast_compound_type *compound_type)
 {
+    insert_dependency(graph, child, get_base_node(compound_type));
+    
     for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
     {
-        insert_type_dependency(graph, child, field->type);
+        insert_type_dependency(graph, get_base_node(compound_type), field->type);
+        //insert_type_dependency(graph, child, field->type);
     }
 }
 
@@ -1664,30 +1702,28 @@ insert_type_dependency_declaration
         {
             local_node_type(function_type, name_type);
     
+            insert_dependency(graph, child, name_type);
+    
             if (function_type->input.base_type.node)
             {
                 auto input = get_node_type(compound_type, function_type->input.base_type.node);
-                insert_compound_dependency(graph, child, input);
+                //insert_compound_dependency(graph, child, input);
                 
-                //insert_compound_dependency(graph, name_type, input);
+                insert_compound_dependency(graph, name_type, input);
             }
             
             if (function_type->output.base_type.node)
             {
                 auto output  = get_node_type(compound_type, function_type->output.base_type.node);
-                insert_compound_dependency(graph, child, output);
+                //insert_compound_dependency(graph, child, output);
                 
-                //insert_compound_dependency(graph, name_type, output);
+                insert_compound_dependency(graph, name_type, output);
             }
         } break;
         
         case ast_node_type_compound_type:
         {
             local_node_type(compound_type, name_type);
-            
-            // while child does not depend on compound itself, we still need to add the comound to resolve unique compound types
-            insert_node(graph, name_type);
-            
             insert_compound_dependency(graph, child, compound_type);
             
             // we compound_type depends on its children
@@ -1739,6 +1775,13 @@ void free_graph(dependency_graph *graph)
         platform_free_bytes((u8 *) bucket);
     }
     
+    while (graph->unique_function_type_buckets.first)
+    {
+        auto bucket = graph->unique_function_type_buckets.first;
+        graph->unique_function_type_buckets.first = graph->unique_function_type_buckets.first->next;
+        platform_free_bytes((u8 *) bucket);
+    }
+    
     free_buffer(&graph->sorted_dependencies);
 }
 
@@ -1749,6 +1792,7 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
     graph->index_buckets.tail_next                = &graph->index_buckets.first;
     graph->unique_array_type_buckets.tail_next    = &graph->unique_array_type_buckets.first;
     graph->unique_compound_type_buckets.tail_next = &graph->unique_compound_type_buckets.first;
+    graph->unique_function_type_buckets.tail_next = &graph->unique_function_type_buckets.first;
     graph->parser = parser;
     
     // collect
@@ -2095,6 +2139,67 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
     }
     
     graph->sorted_dependencies = sorted_dependencies;
+    
+    {
+        auto type_index = 0;
+        for_bucket_item(bucket, index, graph->unique_array_type_buckets)
+        {
+            auto array_type = &bucket->base[index];
+            auto graph_index = find_node(graph, get_base_node(array_type)).index;
+            assert(graph_index != -1);
+            if (graph->nodes.base[graph_index].is_required)
+            {
+                array_type->node.type_index = type_index;
+                type_index++;
+            }
+            else
+            {
+                array_type->node.type_index = -1;
+            }
+        }
+        graph->unique_array_type_buckets.item_count = type_index;
+    }
+    
+    {
+        auto type_index = 0;
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            auto graph_index = find_node(graph, get_base_node(compound_type)).index;
+            assert(graph_index != -1);
+            if (graph->nodes.base[graph_index].is_required)
+            {
+                compound_type->node.type_index = type_index;
+                type_index++;
+            }
+            else
+            {
+                compound_type->node.type_index = -1;
+            }
+        }
+        graph->unique_compound_type_buckets.item_count = type_index;
+    }
+    
+    {
+        auto type_index = 0;
+        for_bucket_item(bucket, index, graph->unique_function_type_buckets)
+        {
+            auto function_type = &bucket->base[index];
+            auto graph_index = find_node(graph, get_base_node(function_type)).index;
+            assert(graph_index != -1);
+            if (graph->nodes.base[graph_index].is_required)
+            {
+                function_type->node.type_index = type_index;
+                type_index++;
+            }
+            else
+            {
+                function_type->node.type_index = -1;
+            }
+        }
+        graph->unique_function_type_buckets.item_count = type_index;
+    }
+    
     return;
 }
 
@@ -2626,6 +2731,12 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
         {
             auto compound_type = &bucket->base[index];
+            
+            auto graph_index = find_node(graph, get_base_node(compound_type)).index;
+            assert(graph_index != -1);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+                
             compound_field_count += compound_type->field_count;
         }
         
@@ -2639,12 +2750,13 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print(builder, "const struct");
         print_scope_open(builder);
         print_line(builder, "lang_type_info_number           number_types[%u];", parser->number_type_buckets.item_count);
-        print_line(builder, "lang_type_info_array            array_types[%u];", graph->unique_array_type_buckets.item_count);
-        //print_line(builder, "lang_type_info_function         function_types[%u];");
-        print_line(builder, "lang_type_info_compound         compound_types[%u];", graph->unique_compound_type_buckets.item_count);
-        print_line(builder, "lang_type_info_compound_field   compound_fields[%u];", compound_field_count);
         print_line(builder, "lang_type_info_enumeration      enumeration_types[%u];", parser->enumeration_type_buckets.item_count);
         print_line(builder, "lang_type_info_enumeration_item enumeration_items[%u];", enumeration_item_count);
+        print_line(builder, "lang_type_info_array            array_types[%u];", graph->unique_array_type_buckets.item_count);
+        print_line(builder, "lang_type_info_compound         compound_types[%u];", graph->unique_compound_type_buckets.item_count);
+        print_line(builder, "lang_type_info_compound_field   compound_fields[%u];", compound_field_count);
+        print_line(builder, "lang_type_info_function         function_types[%u];",  graph->unique_function_type_buckets.item_count);
+        
         print_scope_close(builder, false);
         
         print_line(builder, " lang_type_table =");
@@ -2663,54 +2775,6 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         {
             auto number_type = &bucket->base[index];
             print_line(builder, "{ lang_type_info_type_number, lang_type_info_number_type_%.*s, %u, %.*s, %.*s },", fs(number_type->name), 1 << (number_type->bit_count_power_of_two - 3), fs(bool_names[number_type->is_float]), fs(bool_names[number_type->is_signed]));
-        }
-        print_scope_close(builder, false);
-        print_line(builder, ",");
-        
-        // array types
-        print_scope_open(builder);
-        for_bucket_item(bucket, index, graph->unique_array_type_buckets)
-        {
-            auto array_type = &bucket->base[index];
-            print(builder, "{ lang_type_info_type_array, ");
-            print_type_info(&buffer, array_type->item_type);
-            
-            usize item_count = 0;
-            if (array_type->item_count_expression)
-                item_count = get_array_item_count(array_type);
-            
-            print_line(builder, ", %llu, %llu },", item_count, item_count * get_type_byte_count(array_type->item_type).byte_count);
-        }
-        print_scope_close(builder, false);
-        print_line(builder, ",");
-        
-        // compound types
-        u32 compound_field_offset = 0;
-        print_scope_open(builder);
-        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
-        {
-            auto compound_type = &bucket->base[index];
-            
-            print_line(builder, "{ lang_type_info_type_compound, { %u, (lang_type_info_compound_field *) &lang_type_table.compound_fields[%u] }, %u, %u },", compound_type->field_count, compound_field_offset, compound_type->byte_count, compound_type->byte_alignment);
-            compound_field_offset += compound_type->field_count;
-        }
-        assert(compound_field_offset == compound_field_count);
-        print_scope_close(builder, false);
-        print_line(builder, ",");
-        
-        // compound fields
-        print_scope_open(builder);
-        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
-        {
-            auto compound_type = &bucket->base[index];
-            
-            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
-            {
-                print(builder, "{ lang_type_info_type_compound_field, ");
-                print_type_info(&buffer, field->type);
-            
-                print_line(builder, ", { %llu, (u8 *) \"%.*s\" }, %u },", field->name.count, fs(field->name), field->field_byte_offset);
-            }
         }
         print_scope_close(builder, false);
         print_line(builder, ",");
@@ -2739,6 +2803,102 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
             {
                 print_line(builder, "{ lang_type_info_type_enumeration_item, { %llu, (u8 *) \"%.*s\" }, %llu },", item->name.count, fs(item->name), get_enumeration_item_value(item));
             }
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // array types
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_array_type_buckets)
+        {
+            auto array_type = &bucket->base[index];
+            
+            auto graph_index = find_node(graph, get_base_node(array_type)).index;
+            assert(graph_index != -1);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            print(builder, "{ lang_type_info_type_array, ");
+            print_type_info(&buffer, array_type->item_type);
+            
+            usize item_count = 0;
+            if (array_type->item_count_expression)
+                item_count = get_array_item_count(array_type);
+            
+            print_line(builder, ", %llu, %llu },", item_count, item_count * get_type_byte_count(array_type->item_type).byte_count);
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // compound types
+        u32 compound_field_offset = 0;
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            
+            auto graph_index = find_node(graph, get_base_node(compound_type)).index;
+            assert(graph_index != -1);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            print_line(builder, "{ lang_type_info_type_compound, { %u, (lang_type_info_compound_field *) &lang_type_table.compound_fields[%u] }, %u, %u },", compound_type->field_count, compound_field_offset, compound_type->byte_count, compound_type->byte_alignment);
+            compound_field_offset += compound_type->field_count;
+        }
+        assert(compound_field_offset == compound_field_count);
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // compound fields
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            
+            auto graph_index = find_node(graph, get_base_node(compound_type)).index;
+            assert(graph_index != -1);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                print(builder, "{ lang_type_info_type_compound_field, ");
+                print_type_info(&buffer, field->type);
+            
+                print_line(builder, ", { %llu, (u8 *) \"%.*s\" }, %u },", field->name.count, fs(field->name), field->field_byte_offset);
+            }
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // function types
+        print_scope_open(builder);
+        for_bucket_item(bucket, index,  graph->unique_function_type_buckets)
+        {
+            auto function_type = &bucket->base[index];
+            
+            auto graph_index = find_node(graph, get_base_node(function_type)).index;
+            assert(graph_index != -1);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            print(builder, "{ lang_type_info_type_function, ");
+            
+            if (function_type->input.base_type.node)
+            {
+                auto base_type = find_node(&buffer.graph, function_type->input.base_type.node).unique_node;
+                print(builder, "(lang_type_info_compound *) &lang_type_table.compound_types[%u], ", base_type->type_index);
+            }
+            else
+                print(builder, "null, ");
+                
+            if (function_type->output.base_type.node)
+            {
+                auto base_type = find_node(&buffer.graph, function_type->output.base_type.node).unique_node;
+                print_line(builder, "(lang_type_info_compound *) &lang_type_table.compound_types[%u] },", base_type->type_index);
+            }
+            else
+                print_line(builder, "null },");
         }
         print_scope_close(builder, false);
         print_line(builder, ",");
@@ -2781,6 +2941,16 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print_line(builder, ";");
         
         print_newline(builder);
+    }
+    
+    // HACK: some print functions
+    {
+        print_newline(builder);
+        print_line(builder, "void print(string text) { printf(\"%%.*s\", (s32) text.count, (cstring) text.base); }");
+        print_newline(builder);
+        print_line(builder, "void print_u64(u64 value) { printf(\"%%llu\", value); }");
+        print_newline(builder);
+        print_line(builder, "void print_hex(u64 value) { printf(\"%%llx\", value); }");
     }
     
     // declare all functions
