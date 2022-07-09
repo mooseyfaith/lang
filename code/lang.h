@@ -179,6 +179,7 @@ string ast_node_type_names[] =
     macro(false, __VA_ARGS__) \
     macro(true, __VA_ARGS__) \
     macro(lang_type_table, __VA_ARGS__) \
+    macro(lang_global_variables, __VA_ARGS__) \
     
 #if 0
     macro(lang_type_info_number_type_table, __VA_ARGS__) \
@@ -335,7 +336,6 @@ struct ast_enumeration_item
     u64 value;
 };
 
-
 struct ast_number
 {
     ast_base_node node;
@@ -446,6 +446,7 @@ struct ast_compound_type
 {
     ast_base_node node;
     ast_variable  *first_field;
+    u32           field_count;
     u32           byte_count;
     u32           byte_alignment;
 };
@@ -2307,6 +2308,7 @@ parse_arguments_declaration
     base_list_tail_next tail_next = null;
     ast_compound_type *compound_type = null;
 
+    u32 field_count = 0;
     bool consumed_semicolon = true;
     while (consumed_semicolon)
     {
@@ -2323,7 +2325,7 @@ parse_arguments_declaration
         }
     
         auto variable = lang_require_call(parse_declaration(&tail_next, parser));
-        
+        field_count++;
         consumed_semicolon = try_consume(parser, s(";"));
     }
     
@@ -2331,6 +2333,7 @@ parse_arguments_declaration
     
     if (compound_type)
     {
+        compound_type->field_count = field_count;
         end_node(parser, get_base_node(compound_type));
     }
     
@@ -4830,6 +4833,7 @@ ast_function * find_matching_function(lang_resolver *resolver, ast_node *scope, 
     return null;
 }
 
+// in layout, not by names
 bool compound_types_match(lang_parser *parser, ast_compound_type *left, ast_compound_type *right)
 {
     auto right_field = right->first_field;
@@ -4837,6 +4841,9 @@ bool compound_types_match(lang_parser *parser, ast_compound_type *left, ast_comp
     {
         if (!right_field)
             return false;
+        
+        //if (left_field->name != right_field->name)
+            //return false;
         
         if (types_are_compatible(parser, left_field->type, right_field->type) != type_compatibility_equal)
             return false;
@@ -7015,10 +7022,12 @@ void resolve(lang_parser *parser)
     
     lang_require_call_return_value(resolve_names(parser, &resolver, root), );
     
+    // backend generates type table
+#if 0
     generate_type_info_tables(parser);
     resolve_names(parser, &resolver, root);
     assert(!parser->error);
-    
+#endif
     
     // check for semantic errors
     {

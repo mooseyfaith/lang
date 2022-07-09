@@ -131,6 +131,15 @@ def lang_type_info_table struct
 
 def lang_type_table = type(lang_type_info_table) {};
 
+def lang_variable_info struct
+{
+    type lang_type_info;
+    name string;
+    base u8 ref;
+}
+
+def lang_global_variables = type(lang_variable_info[]) [];
+
 // placeholders, will be resized
 //def lang_type_info_number_type_table           = type(lang_type_info_number[])           [];
 //def lang_type_info_compound_type_table         = type(lang_type_info_compound[])         [];

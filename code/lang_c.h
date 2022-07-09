@@ -8,10 +8,41 @@ struct lang_c_compile_settings
     bool use_default_types;
 };
 
+
+struct u32_list_entry
+{
+    u32_list_entry *next;
+    u32 value;
+};
+
+struct dependency_node
+{
+    ast_node       *node;
+    u32_list_entry *children;
+    bool is_root, is_required;
+};
+
+buffer_type(dependency_node_buffer, dependency_node_array, dependency_node);
+
+bucket_array_type(u32_list_entry_bucket, u32_list_entry, 1024);
+
+struct dependency_graph
+{
+    lang_parser *parser;
+    dependency_node_buffer nodes;
+    u32_list_entry_bucket_array index_buckets;
+    
+    ast_array_type_bucket_array    unique_array_type_buckets;
+    ast_compound_type_bucket_array unique_compound_type_buckets;
+    
+    u32_buffer sorted_dependencies;
+};
+
 struct lang_c_buffer
 {
     lang_parser *parser;
     lang_c_compile_settings settings;
+    dependency_graph graph;
     string_builder builder;
     u32 comment_depth;
 };
@@ -281,6 +312,240 @@ usize get_string_c_count(string text)
     }
     
     return count;
+}
+
+ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
+{
+    auto parser = graph->parser;
+    
+    switch (node->node_type)
+    {
+        case ast_node_type_number_type:
+        case ast_node_type_enumeration_type:
+        case ast_node_type_function_type:
+        case ast_node_type_expression_reference_type:
+        case ast_node_type_alias_type:
+        default:
+        {
+            return node;
+        } break;
+        
+        case ast_node_type_compound_type:
+        {
+            local_node_type(compound_type, node);
+            
+            ast_compound_type *unique_compound_type = null;
+            for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+            {
+                auto other_compound_type = &bucket->base[index];
+                
+                if (compound_type->field_count != other_compound_type->field_count)
+                    continue;
+                
+                bool do_match = true;
+                
+                auto right_field = compound_type->first_field;
+                for (auto left_field = other_compound_type->first_field; left_field; left_field = (ast_variable *) left_field->node.next)
+                {
+                    if (left_field->name != right_field->name)
+                    {
+                        do_match = false;
+                        break;
+                    }
+                        
+                    auto unique_right_type = get_unique_node(graph, right_field->type.name_type.node);
+                    
+                    if (left_field->type.name_type.node != unique_right_type)
+                    {
+                        do_match = false;
+                        break;
+                    }
+                    
+                    right_field = (ast_variable *) right_field->node.next;
+                }
+                
+                if (do_match)
+                {
+                    unique_compound_type = other_compound_type;
+                    break;
+                }
+            }
+            
+            if (!unique_compound_type)
+            {
+                unique_compound_type = new_bucket_item(&graph->unique_compound_type_buckets);
+                *unique_compound_type = *compound_type;
+                unique_compound_type->node.type_index = graph->unique_compound_type_buckets.item_count -1;
+                
+                unique_compound_type->first_field = null;
+                auto tail_next = make_tail_next(&unique_compound_type->first_field);
+                
+                for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+                {
+                    new_local_leaf_node(variable, parser->node_locations.base[field->node.index].text);
+                    *variable = *field;
+                    variable->node.parent = get_base_node(unique_compound_type);
+                    
+                    variable->type.name_type.node = get_unique_node(graph, field->type.name_type.node);
+                    resolve_complete_type(parser, &variable->type);
+                    
+                    variable->node.next = null;
+                    append_tail_next(&tail_next, &variable->node);
+                }
+            }
+            
+            return get_base_node(unique_compound_type);
+        } break;
+        
+        case ast_node_type_array_type:
+        {
+            local_node_type(array_type, node);
+            
+            auto unique_item_type = get_unique_node(graph, array_type->item_type.name_type.node);
+            
+            u64 item_count = 0;
+            if (array_type->item_count_expression)
+                item_count = get_array_item_count(array_type);
+            
+            ast_array_type *unique_array_type = null;
+            for_bucket_item(bucket, index, graph->unique_array_type_buckets)
+            {
+                auto other_array_type = &bucket->base[index];
+                
+                if (unique_item_type != other_array_type->item_type.name_type.node)
+                    continue;
+                
+                if (!array_type->item_count_expression != !other_array_type->item_count_expression)
+                    continue;
+                
+                if (array_type->item_count_expression && (item_count != get_array_item_count(other_array_type)))
+                    continue;
+                
+                unique_array_type = other_array_type;
+                break;
+            }
+            
+            if (!unique_array_type)
+            {
+                unique_array_type = new_bucket_item(&graph->unique_array_type_buckets);
+                *unique_array_type = *array_type;
+                unique_array_type->node.type_index = graph->unique_array_type_buckets.item_count -1;
+                unique_array_type->item_type.name                        = array_type->item_type.name;
+                unique_array_type->item_type.name_type.node              = unique_item_type;
+                unique_array_type->item_type.name_type.indirection_count = array_type->item_type.name_type.indirection_count;
+                
+                if (array_type->item_type.base_type.node == array_type->item_type.name_type.node)
+                    unique_array_type->item_type.base_type = unique_array_type->item_type.name_type;
+                else
+                    unique_array_type->item_type.base_type = array_type->item_type.base_type;
+            }
+            
+            return get_base_node(unique_array_type);
+        } break;
+    }
+}
+
+struct find_node_result
+{
+    ast_node *unique_node;
+    u32 index;
+};
+
+find_node_result find_node(dependency_graph *graph, ast_node *node)
+{
+    find_node_result result = {};
+    result.index = -1;
+    result.unique_node = get_unique_node(graph, node);
+    
+    for (u32 i = 0; i < graph->nodes.count; i++)
+    {
+        if (graph->nodes.base[i].node == result.unique_node)
+        {
+            result.index = i;
+            return result;
+        }
+    }
+    
+    return result;
+}
+
+void set_is_required(dependency_graph *graph, u32 index)
+{
+    assert(index < graph->nodes.count);
+    
+    auto node = &graph->nodes.base[index];
+    if (!node->is_required)
+    {
+        node->is_required = true;
+        
+        for (u32 parent_index = 0; parent_index < graph->nodes.count; parent_index++)
+        {
+            auto parent = &graph->nodes.base[parent_index];
+            if ((parent != node) && !parent->is_required)
+            {
+                for (auto child = parent->children; child; child = child->next)
+                {
+                    if (child->value == index)
+                    {
+                        set_is_required(graph, parent_index);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+void print_type_info(lang_c_buffer *buffer, complete_type_info type)
+{
+    auto builder = &buffer->builder;
+    
+#if 0
+    auto name_type = type.name_type.node;
+    if (!name_type)
+    {
+        print(builder, "lang_type_info {}");
+        return;
+    }
+    
+    type = {};
+    name_type = find_node(&buffer->graph, name_type).unique_node;
+    type.name_type.node = name_type;
+    resolve_complete_type(buffer->parser, &type);
+    auto base_type = type.base_type.node;
+#else
+
+    if (!type.base_type.node)
+    {
+        print(builder, "lang_type_info {}");
+        return;
+    }
+
+    auto base_type = find_node(&buffer->graph, type.base_type.node).unique_node;
+
+#endif
+
+    auto type_index = base_type->type_index;
+    
+    auto count_and_alignment = get_type_byte_count(type);
+    
+    if (is_node_type(base_type, function_type))
+    {
+        print_comment_begin(buffer);
+        print(builder, "function type table not implemented");
+        print_comment_end(buffer);
+        print(builder, "lang_type_info {}");
+    }
+    else
+    {
+    #if 0
+        // cast const away
+        print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_table.%.*ss.base[%u].base_type, string { %llu, (u8 *) \"%.*s\" }, %u, %u, %u }", fnode_type_name(base_type), type_index, type.name.count, fs(type.name), type.base_type.indirection_count, count_and_alignment.byte_count, count_and_alignment.byte_alignment);
+    #else
+        // cast const away
+        print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_table.%.*ss[%u].base_type, string { %llu, (u8 *) \"%.*s\" }, %u, %u, %u }", fnode_type_name(base_type), type_index, type.name.count, fs(type.name), type.base_type.indirection_count, count_and_alignment.byte_count, count_and_alignment.byte_alignment);
+    #endif
+    }
 }
 
 print_expression_declaration
@@ -586,41 +851,9 @@ print_expression_declaration
             
             print_comment_end(buffer);
             
-            auto base_type = get_type_info->type.base_type.node;
-            
-            if (!base_type)
-            {
-                print(builder, "lang_type_info {}");
-                break;
-            }
-            
-            u32 type_index = base_type->type_index;
-            
-            auto count_and_alignment = get_type_byte_count(get_type_info->type);
-            
-            if (is_node_type(get_type_info->type.base_type.node, function_type))
-            {
-                print_comment_begin(buffer);
-                print(builder, "function type table not implemented");
-                print_comment_end(buffer);
-                print(builder, "lang_type_info {}");
-            }
-            else
-            {
-            
 #define NORMAL_CONST_ARRAY
 
-            #if defined NORMAL_CONST_ARRAY
-                // cast const away
-                print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_table.%.*ss.base[%u].base_type, string { %llu, (u8 *) \"%.*s\" }, %u, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.name.count, fs(get_type_info->type.name), get_type_info->type.base_type.indirection_count, count_and_alignment.byte_count, count_and_alignment.byte_alignment);
-                
-                //print(builder, "lang_type_info { &lang_type_info_%.*s_table.base[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
-                
-            #else
-                print(builder, "lang_type_info { (lang_type_info_type *) &lang_type_info_%.*s_table[%u].base_type, %u, string { %llu, (u8 *) \"%.*s\" }, %u, %u }", fnode_type_name(get_type_info->type.base_type.node), type_index, get_type_info->type.base_type.indirection_count, get_type_info->type.name.count, fs(get_type_info->type.name), count_and_alignment.byte_count, count_and_alignment.byte_alignment);
-                
-            #endif
-            }
+            print_type_info(buffer, get_type_info->type);
         } break;
         
         case ast_node_type_type_byte_count:
@@ -729,7 +962,7 @@ void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable)
     }
     else
     {
-        if (variable->type.base_type.indirection_count)
+        if (variable->type.base_type.indirection_count || is_node_type(variable->type.base_type.node, function_type))
             print(builder, " = null");
         else if (is_node_type(variable->type.base_type.node, number_type))
             print(builder, " = 0");
@@ -1231,151 +1464,6 @@ void print_function_type(lang_c_buffer *buffer, ast_function_type *function_type
     print(builder, ")");
 }
 
-struct u32_list_entry
-{
-    u32_list_entry *next;
-    u32 value;
-};
-
-struct dependency_node
-{
-    ast_node       *node;
-    u32_list_entry *children;
-    bool is_root, is_required;
-};
-
-buffer_type(dependency_node_buffer, dependency_node_array, dependency_node);
-
-bucket_array_type(u32_list_entry_bucket, u32_list_entry, 1024);
-
-struct dependency_graph
-{
-    lang_parser *parser;
-    dependency_node_buffer nodes;
-    u32_list_entry_bucket_array index_buckets;
-    
-    ast_array_type_bucket_array unique_array_type_buckets;
-    
-    //ast_node_buffer sorted_dependencies;
-    u32_buffer sorted_dependencies;
-};
-
-ast_node * get_unique_node(dependency_graph *graph, ast_node *node)
-{
-    switch (node->node_type)
-    {
-        case ast_node_type_number_type:
-        case ast_node_type_alias_type:
-        case ast_node_type_enumeration_type:
-        case ast_node_type_function_type:
-        case ast_node_type_expression_reference_type:
-        case ast_node_type_compound_type:
-        default:
-        {
-            return node;
-        } break;
-        
-        case ast_node_type_array_type:
-        {
-            local_node_type(array_type, node);
-            
-            //if (array_type->item_count_expression)
-                //return node;
-            
-            auto unique_item_type = get_unique_node(graph, array_type->item_type.name_type.node);
-            
-            u64 item_count = 0;
-            if (array_type->item_count_expression)
-                item_count = get_array_item_count(array_type);
-            
-            ast_array_type *unique_array_type = null;
-            for_bucket_item(bucket, index, graph->unique_array_type_buckets)
-            {
-                auto other_array_type = &bucket->base[index];
-                
-                if (unique_item_type != other_array_type->item_type.name_type.node)
-                    continue;
-                
-                if (!array_type->item_count_expression != !other_array_type->item_count_expression)
-                    continue;
-                
-                if (array_type->item_count_expression && (item_count != get_array_item_count(other_array_type)))
-                    continue;
-                
-                unique_array_type = other_array_type;
-                break;
-            }
-            
-            if (!unique_array_type)
-            {
-                unique_array_type = new_bucket_item(&graph->unique_array_type_buckets);
-                *unique_array_type = *array_type;
-                unique_array_type->item_type.name                        = array_type->item_type.name;
-                unique_array_type->item_type.name_type.node              = unique_item_type;
-                unique_array_type->item_type.name_type.indirection_count = array_type->item_type.name_type.indirection_count;
-                
-                if (array_type->item_type.base_type.node == array_type->item_type.name_type.node)
-                    unique_array_type->item_type.base_type = unique_array_type->item_type.name_type;
-                else
-                    unique_array_type->item_type.base_type = array_type->item_type.base_type;
-            }
-            
-            return get_base_node(unique_array_type);
-        } break;
-    }
-}
-
-struct find_node_result
-{
-    ast_node *unique_node;
-    u32 index;
-};
-
-find_node_result find_node(dependency_graph *graph, ast_node *node)
-{
-    find_node_result result = {};
-    result.index = -1;
-    result.unique_node = get_unique_node(graph, node);
-    
-    for (u32 i = 0; i < graph->nodes.count; i++)
-    {
-        if (graph->nodes.base[i].node == result.unique_node)
-        {
-            result.index = i;
-            return result;
-        }
-    }
-    
-    return result;
-}
-
-void set_is_required(dependency_graph *graph, u32 index)
-{
-    assert(index < graph->nodes.count);
-    
-    auto node = &graph->nodes.base[index];
-    if (!node->is_required)
-    {
-        node->is_required = true;
-        
-        for (u32 parent_index = 0; parent_index < graph->nodes.count; parent_index++)
-        {
-            auto parent = &graph->nodes.base[parent_index];
-            if ((parent != node) && !parent->is_required)
-            {
-                for (auto child = parent->children; child; child = child->next)
-                {
-                    if (child->value == index)
-                    {
-                        set_is_required(graph, parent_index);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
 u32 insert_node(dependency_graph *graph, ast_node *node)
 {
     auto result = find_node(graph, node);
@@ -1596,6 +1684,10 @@ insert_type_dependency_declaration
         case ast_node_type_compound_type:
         {
             local_node_type(compound_type, name_type);
+            
+            // while child does not depend on compound itself, we still need to add the comound to resolve unique compound types
+            insert_node(graph, name_type);
+            
             insert_compound_dependency(graph, child, compound_type);
             
             // we compound_type depends on its children
@@ -1640,15 +1732,24 @@ void free_graph(dependency_graph *graph)
         platform_free_bytes((u8 *) bucket);
     }
     
+    while (graph->unique_compound_type_buckets.first)
+    {
+        auto bucket = graph->unique_compound_type_buckets.first;
+        graph->unique_compound_type_buckets.first = graph->unique_compound_type_buckets.first->next;
+        platform_free_bytes((u8 *) bucket);
+    }
+    
     free_buffer(&graph->sorted_dependencies);
 }
 
-dependency_graph sort_declaration_dependencies(lang_parser *parser)
+void sort_declaration_dependencies(lang_c_buffer *buffer)
 {
-    dependency_graph graph = {};
-    graph.index_buckets.tail_next             = &graph.index_buckets.first;
-    graph.unique_array_type_buckets.tail_next = &graph.unique_array_type_buckets.first;
-    graph.parser = parser;
+    auto parser = buffer->parser;
+    auto graph = &buffer->graph;
+    graph->index_buckets.tail_next                = &graph->index_buckets.first;
+    graph->unique_array_type_buckets.tail_next    = &graph->unique_array_type_buckets.first;
+    graph->unique_compound_type_buckets.tail_next = &graph->unique_compound_type_buckets.first;
+    graph->parser = parser;
     
     // collect
     {
@@ -1657,8 +1758,8 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             auto variable = &bucket->base[index];
             if (variable->is_global)
             {
-                insert_type_dependency(&graph, get_base_node(variable), variable->type);
-                //insert_expression_dependency(&graph, get_base_node(constant), variable->default_expression);
+                insert_type_dependency(graph, get_base_node(variable), variable->type);
+                //insert_expression_dependency(graph, get_base_node(constant), variable->default_expression);
             }
             else
             {
@@ -1668,7 +1769,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             
                 assert(parent && is_node_type(parent, file));
                 local_node_type(file, parent);
-                insert_type_dependency(&graph, get_base_node(file->module), variable->type);
+                insert_type_dependency(graph, get_base_node(file->module), variable->type);
             }
         }
         
@@ -1678,26 +1779,29 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             
             if (!is_node_type(constant->node.parent, file))
                 continue;
+                
+            if (constant->node.parent == get_base_node(parser->lang_file))
+                continue;
             
             auto type = get_expression_type(parser, constant->expression);
-            insert_type_dependency(&graph, get_base_node(constant), type);
-            //insert_expression_dependency(&graph, get_base_node(constant), constant->expression);
+            insert_type_dependency(graph, get_base_node(constant), type);
+            //insert_expression_dependency(graph, get_base_node(constant), constant->expression);
         }
         
         for_bucket_item(bucket, index, parser->array_type_buckets)
         {
             auto array_type = &bucket->base[index];
-            insert_type_dependency(&graph, get_base_node(array_type), array_type->item_type);
+            insert_type_dependency(graph, get_base_node(array_type), array_type->item_type);
         }
         
     #if 0
         for_bucket_item(bucket, index, parser->enumeration_type_buckets)
         {
             auto enumeration_type = &bucket->base[index];
-            insert_type_dependency(&graph, get_base_node(enumeration_type), enumeration_type->item_type);
+            insert_type_dependency(graph, get_base_node(enumeration_type), enumeration_type->item_type);
             
             for (auto item = enumeration_type->first_item; item; item = (ast_enumeration_item *) item->node.next)
-                insert_expression_dependency(&graph, get_base_node(enumeration_type), item->expression);
+                insert_expression_dependency(graph, get_base_node(enumeration_type), item->expression);
         }
     #endif
         
@@ -1714,14 +1818,14 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                     case ast_node_type_function_type:
                     case ast_node_type_compound_type:
                     {
-                        insert_dependency(&graph, get_base_node(alias_type), name_type);
+                        insert_dependency(graph, get_base_node(alias_type), name_type);
                     } break;
                     
                     case ast_node_type_array_type:
                     {
                         local_node_type(array_type, name_type);
                         //// skip dependency on array type
-                        insert_type_dependency(&graph, get_base_node(alias_type), array_type->item_type);
+                        insert_type_dependency(graph, get_base_node(alias_type), array_type->item_type);
                     } break;
                 }
             }
@@ -1729,12 +1833,12 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
         
             if (alias_type->type.name_type.indirection_count)
             {
-                insert_node(&graph, get_base_node(alias_type));
-                insert_node(&graph, alias_type->type.name_type.node);
+                insert_node(graph, get_base_node(alias_type));
+                insert_node(graph, alias_type->type.name_type.node);
             }
             else
             {
-                insert_type_dependency(&graph, get_base_node(alias_type), alias_type->type);
+                insert_type_dependency(graph, get_base_node(alias_type), alias_type->type);
             }
         }
         
@@ -1750,23 +1854,23 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             if (function_type->input.base_type.node)
             {
                 auto input = get_node_type(compound_type, function_type->input.base_type.node);
-                insert_compound_dependency(&graph, get_base_node(function), input);
+                insert_compound_dependency(graph, get_base_node(function), input);
             }
             
             if (function_type->output.base_type.node)
             {
                 auto output = get_node_type(compound_type, function_type->output.base_type.node);
-                insert_compound_dependency(&graph, get_base_node(function), output);
+                insert_compound_dependency(graph, get_base_node(function), output);
             }
             
             // add functions with no input and output as nodes, otherweise they won't be forward declared
             if (!function_type->input.base_type.node && !function_type->output.base_type.node)
-                insert_node(&graph, get_base_node(function));
+                insert_node(graph, get_base_node(function));
         }
     }
     
     if (parser->error)
-        return graph;
+        return;
     
     // sort
     u32_buffer sorted_dependencies = {};
@@ -1774,15 +1878,15 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
         local_buffer(stack, u32_buffer);
         
         local_buffer(node_depths, u8_buffer);
-        resize_buffer(&node_depths, graph.nodes.count);
+        resize_buffer(&node_depths, graph->nodes.count);
         
         // set all depths to 0
         memset(node_depths.base, 0, sizeof(node_depths.base[0]) * node_depths.count);
         
         u32 max_depth = 0;
-        for (u32 root_index = 0; root_index < graph.nodes.count; root_index++)
+        for (u32 root_index = 0; root_index < graph->nodes.count; root_index++)
         {
-            auto root = &graph.nodes.base[root_index];
+            auto root = &graph->nodes.base[root_index];
             if (!root->is_root)
                 continue;
             
@@ -1797,12 +1901,12 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             while (stack.count)
             {
                 auto index = stack.base[--stack.count];
-                auto entry = graph.nodes.base[index];
+                auto entry = graph->nodes.base[index];
             
                 for (auto child_entry = entry.children; child_entry; child_entry = child_entry->next)
                 {
                     auto child_index = child_entry->value;
-                    auto child = &graph.nodes.base[child_index];
+                    auto child = &graph->nodes.base[child_index];
                     
                     assert(!child->is_root);
                     
@@ -1820,7 +1924,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
         
         for (u32 depth = 0; depth <= max_depth; depth++)
         {
-            for (u32 i = 0; i < graph.nodes.count; i++)
+            for (u32 i = 0; i < graph->nodes.count; i++)
             {
                 if (node_depths.base[i] == depth)
                 {
@@ -1832,17 +1936,17 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
     
         // check if sorted_dependencies are correct
         {
-            assert(graph.nodes.count == sorted_dependencies.count);
+            assert(graph->nodes.count == sorted_dependencies.count);
         
             string_builder print_builder = {};
             defer { free_buffer(&print_builder.memory); };
         
-            for (u32 parent_index = 0; parent_index < graph.nodes.count; parent_index++)
+            for (u32 parent_index = 0; parent_index < graph->nodes.count; parent_index++)
             {
                 // children depend on parent
                 // so all its chilren must be inserted before the parent
                 
-                auto entry = graph.nodes.base[parent_index];
+                auto entry = graph->nodes.base[parent_index];
                 auto parent = entry.node;
                 
                 u32 ordered_parent_index = 0;
@@ -1857,7 +1961,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                 for (auto child_entry = entry.children; child_entry; child_entry = child_entry->next)
                 {
                     auto child_index = child_entry->value;
-                    auto child = graph.nodes.base[child_index].node;
+                    auto child = graph->nodes.base[child_index].node;
                     
                     // child must come after the parent
                     u32 ordered_child_index = ordered_parent_index + 1;
@@ -1894,9 +1998,14 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
             resize_buffer(&required_functions, required_functions.count - 1);
             
             local_buffer(queue, ast_queue);
+            
             enqueue(&queue, &scope);
             
+            // ignore scope node
             ast_node *node;
+            if (!next(&node, &queue))
+                continue;
+            
             while (next(&node, &queue))
             {
                 u32 node_index = -1;
@@ -1906,12 +2015,12 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                     // skip global declarations
                     case ast_node_type_enumeration_type:
                     case ast_node_type_alias_type:
-                    case ast_node_type_file:
-                    case ast_node_type_function:
                     case ast_node_type_number_type:
                     case ast_node_type_function_type:
                     case ast_node_type_compound_type:
+                    case ast_node_type_function:
                     {
+                        skip_children(&queue, node);
                         continue;
                     } break;
                     
@@ -1920,7 +2029,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                         local_node_type(name_reference, node);
                         
                         if (name_reference->reference)
-                            node_index = find_node(&graph, name_reference->reference).index;
+                            node_index = find_node(graph, name_reference->reference).index;
                     } break;
                     
                     case ast_node_type_variable:
@@ -1931,7 +2040,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                             continue;
                             
                         if (variable->type.name_type.node)
-                            node_index = find_node(&graph, variable->type.name_type.node).index;
+                            node_index = find_node(graph, variable->type.name_type.node).index;
                     } break;
                     
                     case ast_node_type_constant:
@@ -1940,7 +2049,7 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                         
                         auto type = get_expression_type(parser, constant->expression);
                         if (type.name_type.node)
-                            node_index = find_node(&graph, type.name_type.node).index;
+                            node_index = find_node(graph, type.name_type.node).index;
                     } break;
                     
                     case ast_node_type_get_function_reference:
@@ -1948,45 +2057,45 @@ dependency_graph sort_declaration_dependencies(lang_parser *parser)
                         local_node_type(get_function_reference, node);
                         
                         if (get_function_reference->function)
-                            node_index = find_node(&graph, get_base_node(get_function_reference->function)).index;
+                            node_index = find_node(graph, get_base_node(get_function_reference->function)).index;
                     } break;
                     
                     case ast_node_type_unary_operator:
                     {
                         local_node_type(unary_operator, node);
                         if (unary_operator->function)
-                            node_index = find_node(&graph, get_base_node(unary_operator->function)).index;
+                            node_index = find_node(graph, get_base_node(unary_operator->function)).index;
                     } break;
                     
                     case ast_node_type_binary_operator:
                     {
                         local_node_type(binary_operator, node);
                         if (binary_operator->function)
-                            node_index = find_node(&graph, get_base_node(binary_operator->function)).index;
+                            node_index = find_node(graph, get_base_node(binary_operator->function)).index;
                     } break;
                     
                     default:
                     {
-                        node_index = find_node(&graph, node).index;
+                        node_index = find_node(graph, node).index;
                     }
                 }
                 
                 if (node_index != -1)
                 {
-                    if (!graph.nodes.base[node_index].is_required && is_node_type(graph.nodes.base[node_index].node, function))
+                    if (!graph->nodes.base[node_index].is_required && is_node_type(graph->nodes.base[node_index].node, function))
                     {
                         resize_buffer(&required_functions, required_functions.count + 1);
-                        required_functions.base[required_functions.count - 1] = graph.nodes.base[node_index].node;
+                        required_functions.base[required_functions.count - 1] = graph->nodes.base[node_index].node;
                     }
                     
-                    set_is_required(&graph, node_index);
+                    set_is_required(graph, node_index);
                 }
             }
         }
     }
     
-    graph.sorted_dependencies = sorted_dependencies;
-    return graph;
+    graph->sorted_dependencies = sorted_dependencies;
+    return;
 }
 
 void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, string name = {})
@@ -2259,9 +2368,34 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         }
     }
     
-    auto graph = lang_require_call_return_value(sort_declaration_dependencies(parser), buffer);
-    auto sorted_dependencies = graph.sorted_dependencies;
-    defer { free_graph(&graph); };
+    lang_require_call_return_value(sort_declaration_dependencies(&buffer), buffer);
+    auto graph = &buffer.graph;
+    auto sorted_dependencies = graph->sorted_dependencies;
+    defer { free_graph(graph); };
+    
+    // compute and set global variable count for lang_global_variables
+    u32 global_variable_count = 0;
+    {
+        for_bucket_item(bucket, index, parser->variable_buckets)
+        {
+            auto variable = &bucket->base[index];
+            if (!variable->is_global)
+                continue;
+            
+            auto graph_index = find_node(graph, get_base_node(variable)).index;
+            assert(graph_index != null);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            global_variable_count++;
+        }
+        
+        auto global_variables = parser->base_constants[lang_base_constant_lang_global_variables];
+        auto type = get_expression_type(parser, global_variables->expression);
+        local_node_type(array_type, type.base_type.node);
+        array_type->item_count_expression = get_base_node(new_number_u64(parser, parser->node_locations.base[array_type->node.index].text, global_variable_count));
+        array_type->item_count_expression->parent = get_base_node(array_type);
+    }
     
     {
     #if 0
@@ -2285,10 +2419,10 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         for (u32 i = 0; i < sorted_dependencies.count; i++)
         {
             auto node_index = sorted_dependencies.base[i]; //sorted_dependencies.count - 1 - i];
-            if (!graph.nodes.base[node_index].is_required)
+            if (!graph->nodes.base[node_index].is_required)
                 continue;
             
-            auto node = graph.nodes.base[node_index].node;
+            auto node = graph->nodes.base[node_index].node;
             
         #if 0
             clear(&print_builder);
@@ -2486,6 +2620,169 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         }
     }
     
+    // declare type table
+    {
+        u32 compound_field_count = 0;
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            compound_field_count += compound_type->field_count;
+        }
+        
+        u32 enumeration_item_count = 0;
+        for_bucket_item(bucket, index, parser->enumeration_type_buckets)
+        {
+            auto enumeration_type = &bucket->base[index];
+            enumeration_item_count += enumeration_type->item_count;
+        }
+    
+        print(builder, "const struct");
+        print_scope_open(builder);
+        print_line(builder, "lang_type_info_number           number_types[%u];", parser->number_type_buckets.item_count);
+        print_line(builder, "lang_type_info_array            array_types[%u];", graph->unique_array_type_buckets.item_count);
+        //print_line(builder, "lang_type_info_function         function_types[%u];");
+        print_line(builder, "lang_type_info_compound         compound_types[%u];", graph->unique_compound_type_buckets.item_count);
+        print_line(builder, "lang_type_info_compound_field   compound_fields[%u];", compound_field_count);
+        print_line(builder, "lang_type_info_enumeration      enumeration_types[%u];", parser->enumeration_type_buckets.item_count);
+        print_line(builder, "lang_type_info_enumeration_item enumeration_items[%u];", enumeration_item_count);
+        print_scope_close(builder, false);
+        
+        print_line(builder, " lang_type_table =");
+        
+        print_scope_open(builder);
+        
+        string bool_names[] =
+        {
+            s("false"),
+            s("true"),
+        };
+        
+        // number types
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, parser->number_type_buckets)
+        {
+            auto number_type = &bucket->base[index];
+            print_line(builder, "{ lang_type_info_type_number, lang_type_info_number_type_%.*s, %u, %.*s, %.*s },", fs(number_type->name), 1 << (number_type->bit_count_power_of_two - 3), fs(bool_names[number_type->is_float]), fs(bool_names[number_type->is_signed]));
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // array types
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_array_type_buckets)
+        {
+            auto array_type = &bucket->base[index];
+            print(builder, "{ lang_type_info_type_array, ");
+            print_type_info(&buffer, array_type->item_type);
+            
+            usize item_count = 0;
+            if (array_type->item_count_expression)
+                item_count = get_array_item_count(array_type);
+            
+            print_line(builder, ", %llu, %llu },", item_count, item_count * get_type_byte_count(array_type->item_type).byte_count);
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // compound types
+        u32 compound_field_offset = 0;
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            
+            print_line(builder, "{ lang_type_info_type_compound, { %u, (lang_type_info_compound_field *) &lang_type_table.compound_fields[%u] }, %u, %u },", compound_type->field_count, compound_field_offset, compound_type->byte_count, compound_type->byte_alignment);
+            compound_field_offset += compound_type->field_count;
+        }
+        assert(compound_field_offset == compound_field_count);
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // compound fields
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, graph->unique_compound_type_buckets)
+        {
+            auto compound_type = &bucket->base[index];
+            
+            for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
+            {
+                print(builder, "{ lang_type_info_type_compound_field, ");
+                print_type_info(&buffer, field->type);
+            
+                print_line(builder, ", { %llu, (u8 *) \"%.*s\" }, %u },", field->name.count, fs(field->name), field->field_byte_offset);
+            }
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // enumeration types
+        u32 enumeration_item_offset = 0;
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, parser->enumeration_type_buckets)
+        {
+            auto enumeration_type = &bucket->base[index];
+            print_line(builder, "{ lang_type_info_type_enumeration, ");
+            print_type_info(&buffer, enumeration_type->item_type);
+            print_line(builder, ", { %u, (lang_type_info_enumeration_item *) &lang_type_table.enumeration_items[%u] } },", enumeration_type->item_count, enumeration_item_offset);
+            enumeration_item_offset += enumeration_type->item_count;
+        }
+        assert(enumeration_item_offset = enumeration_item_count);
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        // enumeration items
+        print_scope_open(builder);
+        for_bucket_item(bucket, index, parser->enumeration_type_buckets)
+        {
+            auto enumeration_type = &bucket->base[index];
+            for (auto item = enumeration_type->first_item; item; item = (ast_enumeration_item *) item->node.next)
+            {
+                print_line(builder, "{ lang_type_info_type_enumeration_item, { %llu, (u8 *) \"%.*s\" }, %llu },", item->name.count, fs(item->name), get_enumeration_item_value(item));
+            }
+        }
+        print_scope_close(builder, false);
+        print_line(builder, ",");
+        
+        print_scope_close(builder, false);
+        print_line(builder, ";");
+        
+        print_newline(builder);
+    }
+    
+    // declare global variable table
+    {
+        maybe_print_blank_line(builder);
+            
+        if (!global_variable_count)
+            global_variable_count = 1;
+            
+        print(builder, "const struct { lang_variable_info base[%u]; } lang_global_variables = ", global_variable_count);
+        print_scope_open(builder);
+        print_scope_open(builder);
+            
+        for_bucket_item(bucket, index, parser->variable_buckets)
+        {
+            auto variable = &bucket->base[index];
+            if (!variable->is_global)
+                continue;
+            
+            auto graph_index = find_node(graph, get_base_node(variable)).index;
+            assert(graph_index != null);
+            if (!graph->nodes.base[graph_index].is_required)
+                continue;
+            
+            print(builder, "{ ");
+            print_type_info(&buffer, variable->type);
+            print_line(builder, ", { %llu, (u8 *) \"%.*s\" }, (u8 *) &%.*s },", variable->name.count, fs(variable->name), fs(variable->name));
+        }
+        
+        print_scope_close(builder);
+        print_scope_close(builder, false);
+        print_line(builder, ";");
+        
+        print_newline(builder);
+    }
+    
     // declare all functions
     for_bucket_item(bucket, index, parser->function_buckets)
     {
@@ -2494,9 +2791,9 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         if (function->first_statement && (function->first_statement->node_type == ast_node_type_external_binding))
             continue;
         
-        auto graph_index = find_node(&graph, get_base_node(function)).index;
+        auto graph_index = find_node(graph, get_base_node(function)).index;
         assert(graph_index != null);
-        if (!graph.nodes.base[graph_index].is_required)
+        if (!graph->nodes.base[graph_index].is_required)
             continue;
     
         auto function_type = get_function_type(parser, function);

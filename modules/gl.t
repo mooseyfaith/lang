@@ -37,8 +37,8 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
     
     platform_require(wglMakeCurrent(device_context, gl_context));
     
-    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB".base cast(cstring))    cast(wglChoosePixelFormatARB_signature);
-    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB".base cast(cstring)) cast(wglCreateContextAttribsARB_signature);
+    wglChoosePixelFormatARB    = wglGetProcAddress("wglChoosePixelFormatARB\0".base cast(cstring))    cast(wglChoosePixelFormatARB_signature);
+    wglCreateContextAttribsARB = wglGetProcAddress("wglCreateContextAttribsARB\0".base cast(cstring)) cast(wglCreateContextAttribsARB_signature);
     
     if wglChoosePixelFormatARB and wglCreateContextAttribsARB
     {
@@ -87,11 +87,11 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         platform_require(wglMakeCurrent(device_context, gl_context));
     }
     
-    gl_init_functions();
-    
     gl.win32_context             = gl_context;
     gl.win32_init_window_handle  = window_handle;
     gl.win32_init_device_context = device_context;
+    
+    glDebugMessageCallback = wglGetProcAddress("glDebugMessageCallback\0".base cast(cstring)) cast(glDebugMessageCallback_signature);
     
     if glDebugMessageCallback
     {
@@ -99,6 +99,8 @@ def gl_init func(gl gl_api ref; platform platform_api ref; backwards_compatible 
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS); // message will be generated in function call scope
         glDebugMessageCallback(get_function_reference(gl_debug_message_callback GLDEBUGPROC), null);
     }
+    
+    gl_init_bindings();
 }
 
 def gl_window_init func(platform platform_api ref; gl gl_api ref; window platform_window ref)
@@ -265,4 +267,32 @@ def create_program_end func(gl gl_api ref; program_object u32) (program_object u
     }
     
     return program_object;
+}
+
+def starts_with func(text string; prefix string) (result b8)
+{
+    if text.count < prefix.count
+        { return false; }
+        
+    loop var i; prefix.count
+    {
+        if text[i] is_not prefix[i]
+            { return false; }
+    }
+    
+    return true;
+}
+
+def gl_init_bindings func()
+{
+    loop var i; lang_global_variables.count
+    {
+        var variable = lang_global_variables[i];
+        if starts_with(variable.name, "gl") or starts_with(variable.name, "wgl")
+        {
+            // cast to u8 ref ref, since we know, they are function pointers
+            // HACK: for now C backend generates 0 terminated strings
+            variable.base cast(u8 ref ref) . = wglGetProcAddress(variable.name.base cast(cstring));
+        }
+    }
 }
