@@ -65,22 +65,35 @@ def print_value func(type_and_value lang_type_and_value)
     case lang_type_info_type.array
     {
         var array_type = type_and_value.type.base_type cast(lang_type_info_array ref);
-        if type_and_value.type.name is "string"
+        if type_and_value.type.alias is "string"
         {
-            print("/"");
+            //print("\"");
             print(type_and_value.value cast(string ref) . );
-            print("/"");
+            //print("\"");
         }
         else
         {
-            var value = type_and_value.value cast(u8[] ref) . ;
+            var value u8 ref;
             var item_type_and_value lang_type_and_value;
             item_type_and_value.type = array_type.item_type;
             
-            print("[ ");
-            loop var i; value.count
+            var count usize;
+            if array_type.item_count is 0
             {
-                item_type_and_value.value = type_and_value.value + item_type_and_value.type.byte_count * i;
+                var array = type_and_value.value cast(u8[] ref) . ;
+                count = array.count;
+                value = array.base;
+            }
+            else
+            {
+                count = array_type.item_count;
+                value = type_and_value.value;
+            }
+                
+            print("[ ");
+            loop var i; count
+            {
+                item_type_and_value.value = value + (item_type_and_value.type.byte_count * i);
                 print_value(item_type_and_value);
                 print("; ");
             }
@@ -140,7 +153,34 @@ var x u8 = 12;
 var args = type(lang_type_and_value[]) [ x ];
 print("x = %\n", args);
 
-var arg2 = type(lang_type_and_value[]) [ x ref ];
-print("x ref = %\n", arg2);
+var arg2 = type(lang_type_and_value[]) [ "fred"; x ref ];
+print("% says: x ref = %\n", arg2);
 
-print_expression(x ref);
+var bla = type(s32[]) [ 1; 2; 3; 4; -12; ];
+var arg3 = type(lang_type_and_value[]) [ "fred"; x ref; bla ];
+print("% says: x ref = %, %\n", arg3);
+
+var blu s32[] = bla;
+var arg4 = type(lang_type_and_value[]) [ "fred"; x ref; blu ];
+print("% says: x ref = %, %\n", arg4);
+
+//print_expression((x - 2) * 2);
+
+def foo func(x s32) (result s32)
+{
+    return x;
+}
+
+def is func(left string; right string) (result b8)
+{
+    if left.count is_not right.count
+        return false;
+        
+    loop var i; left.count
+    {
+        if left[i] is_not right[i]
+        return false;
+    }
+    
+    return true;
+}

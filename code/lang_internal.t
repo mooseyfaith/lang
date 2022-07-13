@@ -150,9 +150,11 @@ def lang_variable_info struct
 
 def lang_global_variables = type(lang_variable_info[]) [];
 
+// TODO: all arrays convert to u8[], so we get default byte comparision
+
 def is func(left u8[]; right u8[]) (result b8)
 {
-    if left.count != right.count
+    if left.count is_not right.count
         return false;
         
     loop var i; left.count
