@@ -5,6 +5,8 @@ module platform_win32;
 
 import platform;
 
+def __debugbreak func() extern_binding("kernel32", false);
+
 def GetLastError            func() (result u32)                       calling_convention "__stdcall" extern_binding("kernel32", true);
 def ExitProcess             func(uExitCode u32)                       calling_convention "__stdcall" extern_binding("kernel32", true);
 def GetSystemTimeAsFileTime func(lpSystemTimeAsFileTime FILETIME ref) calling_convention "__stdcall" extern_binding("kernel32", true);

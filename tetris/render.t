@@ -43,8 +43,150 @@ def render_api struct
     default_shader u32;
     default_shader_object_to_clip_uniform s32;
     
-    vertex_array u32;
+    quad_buffer gl_vertex_buffer;
+    brick_mesh gl_mesh;
+}
+
+def gl_mesh struct
+{
+    vertex_buffer gl_vertex_buffer;
+    index_count   u32;
+    index_buffer  u32;
+}
+
+def position_vertex struct
+{
+    position vec3;
+}
+
+def make_brick_mesh func() (result gl_mesh)
+{
+    def vertices = type(vec3[])
+    [
+        [ -1; -1;  1 ];
+        [  1; -1;  1 ];
+        [ -1;  1;  1 ];
+        [  1;  1;  1 ];
+        [ -1; -1; -1 ];
+        [  1; -1; -1 ];
+        [ -1;  1; -1 ];
+        [  1;  1; -1 ];
+    ];
+    
+    def indices = type(u32[]) 
+    [
+        0; 1; 3;
+        0; 3; 2;
+        
+        1; 5; 7;
+        1; 7; 3;
+        
+        2; 3; 7;
+        2; 7; 6;
+        
+        5; 4; 6;
+        5; 6; 7;
+        
+        4; 0; 2;
+        4; 2; 6;
+        
+        1; 0; 4;
+        1; 4; 5;
+    ];
+    
+    var result gl_mesh;
+    result.vertex_buffer = gl_create_vertex_buffer(get_type_info(position_vertex), vertices.count, vertices[0] ref cast(u8 ref));
+    
+    glGenBuffers(1, result.index_buffer ref);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, result.index_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.count * 4, indices.base, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    
+    return result;
+}
+
+def gl_vertex_buffer struct
+{
+    type lang_type_info;
+    vertex_count  u32;
+    vertex_array  u32;
     vertex_buffer u32;
+}
+
+def gl_create_vertex_buffer func(type lang_type_info; vertex_count usize; vertices u8 ref = null) (result gl_vertex_buffer)
+{
+    assert((type.base_type .) is lang_type_info_type.compound);
+    
+    var result gl_vertex_buffer;
+    result.type         = type;
+    result.vertex_count = vertex_count cast(u32);
+    
+    
+    glGenVertexArrays(1, result.vertex_array ref);
+    glGenBuffers(1,      result.vertex_buffer ref);
+    
+    glBindVertexArray(result.vertex_array);
+    glBindBuffer(GL_ARRAY_BUFFER, result.vertex_buffer);
+    
+    def type_map = type(GLenum[])
+    [
+        GL_UNSIGNED_BYTE;
+        GL_UNSIGNED_SHORT;
+        GL_UNSIGNED_INT;
+        GL_INVALID_ENUM; // there is no 64bit number type in gl
+        
+        GL_BYTE;
+        GL_SHORT;
+        GL_INT;
+        GL_INVALID_ENUM; // there is no 64bit number type in gl
+        
+        GL_FLOAT;
+        GL_DOUBLE;
+    ];
+    
+    var compound = type.base_type cast(lang_type_info_compound ref);
+    loop var i; compound.fields.count
+    {
+        var field = compound.fields[i];
+        
+        var gl_type GLenum;
+        var item_count usize = 1;
+        
+        switch field.type.base_type . ;
+        case lang_type_info_type.number
+        {
+            var number = field.type.base_type cast(lang_type_info_number ref);
+            gl_type = type_map[number.number_type];
+        }
+        case lang_type_info_type.array
+        {
+            var array = field.type.base_type cast(lang_type_info_array ref);
+            item_count = array.item_count;
+            
+            assert((array.item_type.base_type.) is lang_type_info_type.number);
+            gl_type = type_map[array.item_type.base_type cast(lang_type_info_number ref).number_type];
+        }
+        else
+        {
+            assert(0);
+        }
+    
+        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, compound.byte_count, field.byte_offset cast(usize) cast(u8 ref));
+        glEnableVertexAttribArray(i);
+    }
+    
+    def is_dynamic = type(GLenum[])
+    [
+        GL_STATIC_DRAW;
+        GL_DYNAMIC_DRAW
+    ];
+    
+    glBufferData(GL_ARRAY_BUFFER, type.byte_count * vertex_count, vertices, is_dynamic[vertices is_not null]);
+    
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    
+    return result;
 }
 
 def init func(renderer render_api ref; platform platform_api ref)
@@ -79,61 +221,9 @@ def init func(renderer render_api ref; platform platform_api ref)
     
     renderer.default_shader_object_to_clip_uniform = glGetUniformLocation(renderer.default_shader, "object_to_clip_projection\0".base cast(GLchar ref));
     
-    glGenVertexArrays(1, renderer.vertex_array ref);
+    renderer.brick_mesh = make_brick_mesh();
     
-    glGenBuffers(1, renderer.vertex_buffer ref);
-    
-    glBindVertexArray(renderer.vertex_array);
-    glBindBuffer(GL_ARRAY_BUFFER, renderer.vertex_buffer);
-    
-    var info = get_type_info(default_vertex).base_type cast(lang_type_info_compound ref);
-    var fields = info.fields;
-    
-    loop var i; info.fields.count
-    {
-        var field = info.fields[i];
-        
-        def type_map = type(GLenum[])
-        [
-            GL_UNSIGNED_BYTE;
-            GL_UNSIGNED_SHORT;
-            GL_UNSIGNED_INT;
-            GL_INVALID_ENUM; // there is no 64bit number type in gl
-            
-            GL_BYTE;
-            GL_SHORT;
-            GL_INT;
-            GL_INVALID_ENUM; // there is no 64bit number type in gl
-            
-            GL_FLOAT;
-            GL_DOUBLE;
-        ];
-        
-        var gl_type GLenum;
-        var item_count usize = 1;
-        
-        switch field.type.base_type . ;
-        case lang_type_info_type.array
-        {
-            var array_type = field.type.base_type cast(lang_type_info_array ref);
-            item_count = array_type.item_count;
-            
-            assert((array_type.item_type.base_type.) is lang_type_info_type.number);
-            gl_type = type_map[array_type.item_type.base_type cast(lang_type_info_number ref).number_type];
-        }
-        else
-        {
-            assert(0);
-        }
-    
-        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, type_byte_count(default_vertex), info.fields[i].byte_offset cast(usize) cast(u8 ref));
-        glEnableVertexAttribArray(i);
-    }
-    
-    glBufferData(GL_ARRAY_BUFFER, type_byte_count(default_vertex) * 6 * renderer.quads.count, null, GL_DYNAMIC_DRAW);
-    
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    renderer.quad_buffer = gl_create_vertex_buffer(get_type_info(default_vertex), 6 * renderer.quads.count);
     
     renderer.camera_to_world = mat4_camera_to_world_look_at(type(vec3) [ 0; 2; 50 ], type(vec3) { 0; 2; 0 }, type(vec3) { 0; 1; 0 });
     renderer.world_to_camera = mat4_inverse_transform_unscaled(renderer.camera_to_world);
@@ -196,7 +286,7 @@ def present func(platform platform_api ref; renderer render_api ref)
     
     // upload
     // TODO: use glMapBuffer
-    glBindBuffer(GL_ARRAY_BUFFER, renderer.vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, renderer.quad_buffer.vertex_buffer);
     glBufferSubData(GL_ARRAY_BUFFER, 0, type_byte_count(default_vertex) * vertex_count, vertices.base);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     
@@ -211,7 +301,7 @@ def present func(platform platform_api ref; renderer render_api ref)
     var world_to_clip = renderer.camera_to_clip * world_to_camera;
     glUniformMatrix4fv(renderer.default_shader_object_to_clip_uniform, 1, GL_FALSE, world_to_clip[0].base cast(GLfloat ref));
     
-    glBindVertexArray(renderer.vertex_array);
+    glBindVertexArray(renderer.quad_buffer.vertex_array);
     glDrawArrays(GL_TRIANGLES, 0, vertex_count);
     
     glBindVertexArray(0);

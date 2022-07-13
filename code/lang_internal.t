@@ -117,7 +117,7 @@ def lang_type_info_enumeration_item struct
     value      u64;
 }
 
-def lang_type_info_any_value struct
+def lang_type_and_value struct
 {
     type  lang_type_info;
     value u8 ref;
@@ -149,3 +149,22 @@ def lang_variable_info struct
 }
 
 def lang_global_variables = type(lang_variable_info[]) [];
+
+def is func(left u8[]; right u8[]) (result b8)
+{
+    if left.count != right.count
+        return false;
+        
+    loop var i; left.count
+    {
+        if left[i] is_not right[i]
+            return false;
+    }
+    
+    return true;
+}
+
+def is_not func(left u8[]; right u8[]) (result b8)
+{
+    return not (left is right);
+}

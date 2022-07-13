@@ -587,6 +587,17 @@ print_expression_declaration
         case ast_node_type_number:
         {
             local_node_type(number, node);
+            if (number->value.is_character)
+            {
+                assert(!number->value.is_float && !number->value.is_signed && !number->value.is_hex);
+                
+                print_comment_begin(buffer);
+                print(builder, "%c", (u8) number->value.u64_value);
+                print_comment_end(buffer);
+                
+                print(builder, "%llu", number->value.u64_value);
+            }
+            else 
             if (number->value.is_float)
             {
                 if (number->value.bit_count_power_of_two == 5)
@@ -1166,11 +1177,11 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
                 
             print_scope_close(builder);
             
-            if (branch->first_false_statement)
+            if (branch->false_scope)
             {
                 print(builder, "else");
                 print_scope_open(builder);
-                print_statements(buffer, branch->first_false_statement);
+                print_statements(buffer, branch->false_scope->first_statement);
                 print_scope_close(builder);
             }
             
@@ -2118,6 +2129,15 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
                             node_index = find_node(graph, get_base_node(binary_operator->function)).index;
                     } break;
                     
+                     case ast_node_type_get_type_info:
+                    {
+                        local_node_type(get_type_info, node);
+                        
+                        auto type = get_type_info->type;
+                        if (type.name_type.node)
+                            node_index = find_node(graph, type.name_type.node).index;
+                    } break;
+                    
                     default:
                     {
                         node_index = find_node(graph, node).index;
@@ -2949,6 +2969,10 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         print_line(builder, "void print(string text) { printf(\"%%.*s\", (s32) text.count, (cstring) text.base); }");
         print_newline(builder);
         print_line(builder, "void print_u64(u64 value) { printf(\"%%llu\", value); }");
+        print_newline(builder);
+        print_line(builder, "void print_s64(s64 value) { printf(\"%%lli\", value); }");
+        print_newline(builder);
+        print_line(builder, "void print_f64(f64 value) { printf(\"%%f\", value); }");
         print_newline(builder);
         print_line(builder, "void print_hex(u64 value) { printf(\"%%llx\", value); }");
     }
