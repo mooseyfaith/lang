@@ -571,6 +571,49 @@ void print_type_info(lang_c_buffer *buffer, complete_type_info type)
     }
 }
 
+void print_c_string(string_builder *builder, string text, bool is_raw)
+{
+    if (!is_raw)
+    {
+        print(builder, "%.*s", fs(text));
+        return;
+    }
+    
+    for (usize i = 0; i < text.count; i++)
+    {
+        switch (text.base[i])
+        {
+            case '\0':
+            {
+                print(builder, "\\0");
+            } break;
+            
+            case '\\':
+            {
+                print(builder, "\\\\");
+            } break;
+            
+            case '\r':
+            {
+                print(builder, "\\r");
+            } break;
+                
+            case '\n':
+            {
+                print(builder, "\\n");
+            } break;
+            
+            default:
+            {
+                if (text.base[i] < ' ')
+                    print(builder, "\\x%x", text.base[i]);
+                else
+                    print(builder, "%c", text.base[i]);
+            }
+        }
+    }
+}
+
 print_expression_declaration
 {
     auto parser = buffer->parser;
@@ -626,10 +669,12 @@ print_expression_declaration
             }
         } break;
         
-        case ast_node_type_string:
+        case ast_node_type_string_literal:
         {
-            local_node_type(string, node);
-            print(builder, "string{ %llu, (u8 *) \"%.*s\" }", get_string_c_count(string->text), fs(string->text));
+            local_node_type(string_literal, node);
+            print(builder, "string{ %llu, (u8 *) \"", get_string_c_count(string_literal->text));
+            print_c_string(builder, string_literal->text, string_literal->is_raw);
+            print(builder, "\" }");
         } break;
         
         case ast_node_type_array_literal:
@@ -1067,6 +1112,17 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
         case ast_node_type_function_type:
         case ast_node_type_compound_type:
         break;
+        
+        case ast_node_type_scope:
+        {
+            local_node_type(scope, node);
+            print_scope_open(builder);
+            
+            if (scope->first_statement)
+                print_statements(buffer, scope->first_statement);
+            
+            print_scope_close(builder);
+        } break;
         
         case ast_node_type_constant:
         {
@@ -2072,10 +2128,21 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
                     case ast_node_type_alias_type:
                     case ast_node_type_number_type:
                     case ast_node_type_function_type:
+                    case ast_node_type_array_type:
                     case ast_node_type_compound_type:
+                    {
+                        continue;
+                    } break;
+                    
                     case ast_node_type_function:
                     {
                         skip_children(&queue, node);
+                        
+                        local_node_type(function, node);
+                        
+                        if (function->type.base_type.node->parent == node)
+                            enqueue(&queue, node, &function->type.base_type.node);
+                        
                         continue;
                     } break;
                     
@@ -2129,7 +2196,7 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
                             node_index = find_node(graph, get_base_node(binary_operator->function)).index;
                     } break;
                     
-                     case ast_node_type_get_type_info:
+                    case ast_node_type_get_type_info:
                     {
                         local_node_type(get_type_info, node);
                         
@@ -2861,6 +2928,9 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
             assert(graph_index != -1);
             if (!graph->nodes.base[graph_index].is_required)
                 continue;
+            
+            // update byte count and alignment
+            get_type_byte_count(to_type(parser, get_base_node(compound_type)));
             
             print_line(builder, "{ lang_type_info_type_compound, { %u, (lang_type_info_compound_field *) &lang_type_table.compound_fields[%u] }, %u, %u },", compound_type->field_count, compound_field_offset, compound_type->byte_count, compound_type->byte_alignment);
             compound_field_offset += compound_type->field_count;

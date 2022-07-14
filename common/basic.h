@@ -297,7 +297,7 @@ u32 get_highest_bit_index(u64 value)
     if (!is_none_zero)
         index = 0;
         
-    return (u32) index;
+    return (u32) index + 1;
 }
 
 void advance(u8_array *array, usize count = 1)

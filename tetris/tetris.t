@@ -22,144 +22,286 @@ def piece_type enum u32
 
 def falling_piece struct
 {
-    bricks vec2s[4];
-    type piece_type;
+    center_times_2 vec2s;
+    bricks        vec2s[4];
+    type          piece_type;
 }
 
 def piece_type_colors = type(rgba32[piece_type.count])
 [
     {};
-    { 255; 0; 0; 255 };
-    { 0; 255; 0; 255 };
-    { 0; 0; 255; 255 };
-    { 255; 255; 0; 255 };
-    { 255; 0; 255; 255 };
-    { 0; 255; 255; 255 };
-    { 255; 255; 255; 255 }
+    { 255; 255;   0; 255 };
+    { 100; 100; 255; 255 };
+    { 255;   0; 255; 255 };
+    { 255; 100;   0; 255 };
+    {   0;   0; 255; 255 };
+    { 255;   0;   0; 255 };
+    {   0; 255;   0; 255 }
 ];
 
 def frame_color = type(rgba32) { 80; 80; 80; 255 };
 
+// or [24][10]piece_type ?
+def board_type type piece_type[10][24];
+
+def game_state enum
+{
+    title;
+    running;
+    clearing_rows;
+    game_over;
+}
+
+def game_type struct
+{
+    board                   board_type;
+    piece                   falling_piece;
+    next_piece              falling_piece;
+    random                  random_pcg;
+    tick_timeout            f32;
+    prevent_falling_timeout f32;
+    state                   game_state;
+    in_fast_fall            b8
+}
+
+def next_piece func(game game_type ref)
+{
+    game.state = game_state.running;
+    game.piece = game.next_piece;
+    game.next_piece = make_random_piece(game.random ref, game.board[0].count, game.board.count);
+    game.in_fast_fall = false;
+    game.tick_timeout = 1.0;
+    game.prevent_falling_timeout = 0.0;
+}
+
 platform_update_time(platform ref); // skip startup time
 
-var random = platform_get_random_from_time(platform ref);
+var game game_type;
+game.random = platform_get_random_from_time(platform ref);
+game.next_piece = make_random_piece(game.random ref, game.board[0].count, game.board.count);
+next_piece(game ref);
 
-var tick_timeout f32 = 1;
-var board piece_type[10][24]; // or [24][10]piece_type ?
-var piece      = make_random_piece(random ref, board[0].count, board.count);
-var next_piece = make_random_piece(random ref, board[0].count, board.count);
-
-var game_over b32 = false;
 var jiggle_time f32;
 
 while platform_handle_messages(platform ref)
 {
-    if game_over
+    var delta_seconds = platform.delta_seconds;
+
+    var previes_state game_state = game.state + 1;
+    while previes_state is_not game.state
     {
-        tick_timeout = tick_timeout + (platform.delta_seconds * board.count * 2);
-    
-        if platform_key_was_pressed(platform, platform_key.enter)
-        {
-            game_over = false;
-            
-            loop var y; board.count
-            {
-                loop var x; board[0].count
-                {
-                    board[y][x] = piece_type.empty;
-                }
-            }
-            
-            piece      = make_random_piece(random ref, board[0].count, board.count);
-            next_piece = make_random_piece(random ref, board[0].count, board.count);
-            tick_timeout = 1;
-            continue;
-        }
-    }
-    else
-    {
-        tick_timeout = tick_timeout - (platform.delta_seconds * 8);
-    
-        var move_x s32 = platform_key_was_pressed(platform, "D"[0]) - platform_key_was_pressed(platform, "A"[0]);
+        previes_state = game.state;
         
-        if move_x is_not 0
+        switch game.state;
+        case game_state.game_over
         {
-            var piece_can_move b32 = true;
-            loop var i; piece.bricks.count
-            {
-                var brick = piece.bricks[i];
-                brick.x = brick.x + move_x;
-                
-                if (brick.x < 0) or (brick.x >= board[0].count)
-                {
-                    piece_can_move = false;
-                    break;
-                }
-                
-                if board[brick.y][brick.x] is_not piece_type.empty
-                {
-                    piece_can_move = false;
-                    break;
-                }
-            }
-            
-            if piece_can_move
-            {
-                loop var i; piece.bricks.count
-                {
-                    piece.bricks[i].x = piece.bricks[i].x + move_x;
-                }
-            }
-        }
+            game.tick_timeout = game.tick_timeout + delta_seconds * game.board.count * 2;
+            delta_seconds = 0;
         
-        while tick_timeout <= 0
-        {
-            tick_timeout = tick_timeout + 1;
-            
-            var piece_did_fall b32 = false;
-            loop var i; piece.bricks.count
+            if platform_key_was_pressed(platform, platform_key.enter)
             {
-                var y = piece.bricks[i].y - 1;
+                game.state = game_state.running;
                 
-                if (y < 0) or (board[y][piece.bricks[i].x] is_not piece_type.empty)
+                loop var y; game.board.count
                 {
-                    piece_did_fall = true;
-                    break;
-                }
-            }
-            
-            if piece_did_fall
-            {
-                loop var i; piece.bricks.count
-                {
-                    var brick vec2s = piece.bricks[i];
-                    board[brick.y][brick.x] = piece.type;
-                }
-                
-                loop var i; piece.bricks.count
-                {
-                    var brick vec2s = piece.bricks[i];
-                    if brick.y >= (board.count - 4)
+                    loop var x; game.board[0].count
                     {
-                        game_over = true;
+                        game.board[y][x] = piece_type.empty;
+                    }
+                }
+                
+            }
+        }
+        case game_state.clearing_rows
+        {
+            def speed = 2;
+            var delta_time = delta_seconds * speed;
+            delta_seconds = 0;
+            
+            game.tick_timeout = game.tick_timeout - delta_time;
+            
+            if game.tick_timeout <= 0
+            {
+                next_piece(game ref);
+                
+                var target_y = 0;
+                loop var y; game.board.count
+                {
+                    var row_is_full = true;
+                    loop var x; game.board[0].count
+                    {
+                        if game.board[y][x] is piece_type.empty
+                            row_is_full = false;
+                        
+                        game.board[target_y][x] = game.board[y][x];
+                    }
+                    
+                    if not row_is_full
+                        target_y = target_y + 1;
+                }
+            }
+        }
+        case game_state.running
+        {
+            def speed = 2;
+            var delta_time = delta_seconds * speed;
+            
+            if platform_key_was_pressed(platform, "W"[0]) 
+            {
+                game.in_fast_fall = true;
+                game.prevent_falling_timeout = 0;
+            }
+            
+            if not game.in_fast_fall and platform_key_is_active(platform, "S"[0])
+                delta_time = delta_time * 8;
+            
+            if game.in_fast_fall
+                delta_time = delta_seconds * game.board.count * 4;
+            
+            game.tick_timeout            = game.tick_timeout            - delta_time;
+            game.prevent_falling_timeout = game.prevent_falling_timeout - delta_time;
+            
+            if not game.in_fast_fall
+            {
+                var move_x s32 = platform_key_was_pressed(platform, "D"[0]) - platform_key_was_pressed(platform, "A"[0]);
+                
+                if move_x is_not 0
+                {
+                    var backup = game.piece;
+                    
+                    move(game.piece ref, move_x, 0);
+                    
+                    if is_colliding(game.piece, game.board)
+                        game.piece = backup;
+                    else
+                        game.prevent_falling_timeout = 1.0;
+                }
+                
+                var rotation s32 = platform_key_was_pressed(platform, "K"[0]) - platform_key_was_pressed(platform, "J"[0]);
+                
+                if rotation is_not 0
+                {
+                    var backup = game.piece;
+                    
+                    if rotation is 1
+                    {
+                        loop var i; game.piece.bricks.count
+                        {
+                            var brick = game.piece.bricks[i] ref;
+                            var old = brick . ;
+                            brick.x = ( (old.y * 2 - game.piece.center_times_2.y) + game.piece.center_times_2.x) / 2;
+                            brick.y = (-(old.x * 2 - game.piece.center_times_2.x) + game.piece.center_times_2.y) / 2;
+                        }
+                    }
+                    else
+                    {
+                        loop var i; game.piece.bricks.count
+                        {
+                            var brick = game.piece.bricks[i] ref;
+                            var old = brick . ;
+                            brick.x = (-(old.y * 2 - game.piece.center_times_2.y) + game.piece.center_times_2.x) / 2;
+                            brick.y = ( (old.x * 2 - game.piece.center_times_2.x) + game.piece.center_times_2.y) / 2;
+                        }
+                    }
+                    
+                    var ok = true;
+                    if is_colliding(game.piece, game.board)
+                    {
+                        // try move up
+                        move(game.piece ref, 0, 1);
+                        
+                        if is_colliding(game.piece, game.board)
+                        {
+                            // move left, canel up
+                            move(game.piece ref, -1, -1);
+                            
+                            if is_colliding(game.piece, game.board)
+                            {
+                                // move right, cancel left
+                                move(game.piece ref, 2, 0);
+                                
+                                // cancel rotation
+                                if is_colliding(game.piece, game.board)
+                                    ok = false;
+                            }
+                        }
+                    }
+                    
+                    if not ok
+                        game.piece = backup;
+                    else
+                         game.prevent_falling_timeout = 1.0;
+                }
+            }
+            
+            while game.tick_timeout <= 0
+            {
+                game.tick_timeout = game.tick_timeout + 1;
+                
+                var piece_did_fall = false;
+                loop var i; game.piece.bricks.count
+                {
+                    var y = game.piece.bricks[i].y - 1;
+                    
+                    if (y < 0) or (game.board[y][game.piece.bricks[i].x] is_not piece_type.empty)
+                    {
+                        piece_did_fall = true;
                         break;
                     }
                 }
-                    
-                if game_over
-                { 
-                    tick_timeout = 0;
-                    break;
-                }
                 
-                piece = next_piece;
-                next_piece = make_random_piece(random ref, board[0].count, board.count);
-            }
-            else
-            {
-                loop var i; piece.bricks.count
+                var prevent_falling = game.prevent_falling_timeout > 0;
+                
+                if piece_did_fall and (not prevent_falling)
                 {
-                    piece.bricks[i].y = piece.bricks[i].y - 1;
+                    loop var i; game.piece.bricks.count
+                    {
+                        var brick vec2s = game.piece.bricks[i];
+                        game.board[brick.y][brick.x] = game.piece.type;
+                    }
+                    
+                    loop var i; game.piece.bricks.count
+                    {
+                        var brick vec2s = game.piece.bricks[i];
+                        if brick.y >= (game.board.count - 4)
+                        {
+                            game.state = game_state.game_over;
+                            break;
+                        }
+                    }
+                        
+                    if game.state is game_state.game_over
+                    { 
+                        game.tick_timeout = 0;
+                        break;
+                    }
+                    
+                    var has_full_row b8;
+                    loop var y; game.board.count
+                    {
+                        has_full_row = true;
+                        loop var x; game.board[0].count
+                        {
+                            if game.board[y][x] is piece_type.empty
+                            {
+                                has_full_row = false;
+                                break;
+                            }
+                        }
+                        
+                        if has_full_row
+                            break;
+                    }
+                    
+                    if has_full_row
+                        game.state = game_state.clearing_rows;
+                    else
+                        next_piece(game ref);
+                }
+                else if not piece_did_fall
+                {
+                    move(game.piece ref, 0, -1);
+                    assert(not is_colliding(game.piece, game.board));
                 }
             }
         }
@@ -170,60 +312,141 @@ while platform_handle_messages(platform ref)
     
     frame_begin(platform ref, renderer ref, jiggle);
     
-    var stone_lines u32;
-    if game_over
-        { stone_lines = tick_timeout cast(u32); }
-    
-    loop var y; board.count
     {
-        loop var x; board[0].count
+        var position = vec3_cut(renderer.camera_to_world[3]);
+        position[2] = 2;
+        push_light(renderer ref, position, type(vec3) [ 250; 250; 250 ]);
+    }
+    
+    var stone_lines u32;
+    
+    switch game.state;
+    case game_state.game_over
+    { 
+        stone_lines = game.tick_timeout cast(u32);
+    }
+    case game_state.running
+    {
+        // render preview first
         {
-            var type piece_type = board[y][x];
+            var preview = game.piece;
+            while not is_colliding(preview, game.board)
+                move(preview ref, 0, -1);
+            
+            move(preview ref, 0, 1);
+            
+            var color = lerp(piece_type_colors[game.piece.type], rgba32_white, 0.5);
+            color[3] = 150;
+            loop var i; preview.bricks.count
+            {
+                var brick = preview.bricks[i];
+                push_brick(renderer ref, brick.x, brick.y, color);
+            }
+        }
+    
+        var color = piece_type_colors[game.piece.type];
+        loop var i; game.piece.bricks.count
+        {
+            var brick = game.piece.bricks[i];
+            push_brick(renderer ref, brick.x, brick.y, color);
+        }
+        
+        push_light(renderer ref, type(vec3) [ game.piece.bricks[0].x; game.piece.bricks[0].y; 2 ], type(vec3) [ color[0] * 50 / 255.0; color[1] * 50 / 255.0; color[2] * 50 / 255.0 ]);
+        
+        // debug center
+        if false
+        {
+            var margin = 0.3;
+            var min = v2(game.piece.center_times_2.x, game.piece.center_times_2.y) * 0.5 + margin;
+            color[0] = 255 - color[0];
+            color[1] = 255 - color[1];
+            color[2] = 255 - color[2];
+            push_quad(renderer ref, box2_size(min, v2(1 - (2 * margin))), color);
+        }
+        
+    }
+    
+    loop var y; game.board.count
+    {
+        var row_is_full = true;
+        loop var x; game.board[0].count
+        {
+            if game.board[y][x] is piece_type.empty
+            {
+                row_is_full = false;
+                break;
+            }
+        }
+    
+        loop var x; game.board[0].count
+        {
+            var type piece_type = game.board[y][x];
             if type is_not piece_type.empty
             { 
                 var color = piece_type_colors[type];
                 if y < stone_lines
-                    { color = frame_color; }
+                    color = frame_color;
+                else if row_is_full
+                    color = lerp(rgba32_white, color, game.tick_timeout);
             
                 push_brick(renderer ref, x, y, color); 
             }
         }
     }
     
-    if not game_over
+    loop var i; game.next_piece.bricks.count
     {
-        loop var i; piece.bricks.count
-        {
-            var brick vec2s = piece.bricks[i];
-            
-            push_brick(renderer ref, brick.x, brick.y, piece_type_colors[piece.type]);
-        }
-    }
-    
-    loop var i; next_piece.bricks.count
-    {
-        var brick vec2s = next_piece.bricks[i];
+        var brick = game.next_piece.bricks[i];
         
-        push_brick(renderer ref, brick.x - 10, brick.y, piece_type_colors[next_piece.type]);
+        push_brick(renderer ref, brick.x - 10, brick.y, piece_type_colors[game.next_piece.type]);
     }
     
-    loop var i; board[0].count + 2
-    {
+    loop var i; game.board[0].count + 2
         push_brick(renderer ref, i - 1, -1, frame_color);
-    }
     
-    loop var i; board.count
+    loop var i; game.board.count
     {
         var color = frame_color;
         
-        if i >= (board.count - 4)
-            { color = frame_color; }
+        if i >= (game.board.count - 4)
+            color = frame_color;
         
         push_brick(renderer ref, -1,             i, color);
-        push_brick(renderer ref, board[0].count, i, color);
+        push_brick(renderer ref, game.board[0].count, i, color);
     }
     
     present(platform ref, renderer ref);
+}
+
+def move func(piece falling_piece ref; dx s32; dy s32)
+{
+    piece.center_times_2.x = piece.center_times_2.x + (dx * 2);
+    piece.center_times_2.y = piece.center_times_2.y + (dy * 2);
+
+    loop var i; piece.bricks.count
+    {
+        var brick = piece.bricks[i] ref;
+        brick.x = brick.x + dx;
+        brick.y = brick.y + dy;
+    }
+}
+
+def is_colliding func(piece falling_piece; board board_type) (result b8)
+{
+    loop var i; piece.bricks.count
+    {
+        var brick = piece.bricks[i];
+        if (brick.x < 0) or (brick.x >= board[0].count)
+            return true;
+        
+        if brick.y < 0
+            return true;
+        
+        if board[brick.y][brick.x] is_not piece_type.empty
+            return true;
+    }
+    
+    return false;
 }
 
 def make_piece func(type piece_type; board_width s32; board_height s32) (result falling_piece)
@@ -243,6 +466,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x + 1;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[2];
+        piece.center_times_2.x = (piece.center_times_2.x * 2) + 1;
+        piece.center_times_2.y = (piece.center_times_2.y * 2) + 1;
     }
     case piece_type.i
     {
@@ -255,6 +482,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 3;
         piece.bricks[3].x = x;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[2];
+        piece.center_times_2.x = (piece.center_times_2.x * 2) + 1;
+        piece.center_times_2.y = (piece.center_times_2.y * 2) + 1;
     }
     case piece_type.t
     {
@@ -267,6 +498,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x + 1;
         piece.bricks[3].y = board_height - 3;
+        
+        piece.center_times_2 = piece.bricks[1];
+        piece.center_times_2.x = (piece.center_times_2.x * 2);
+        piece.center_times_2.y = (piece.center_times_2.y * 2);
     }
     case piece_type.l
     {
@@ -279,6 +514,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x + 1;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[1];
+        piece.center_times_2.x = (piece.center_times_2.x * 2);
+        piece.center_times_2.y = (piece.center_times_2.y * 2);
     }
     case piece_type.j
     {
@@ -291,6 +530,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x - 1;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[1];
+        piece.center_times_2.x = (piece.center_times_2.x * 2);
+        piece.center_times_2.y = (piece.center_times_2.y * 2);
     }
     case piece_type.z
     {
@@ -303,6 +546,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x + 1;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[1];
+        piece.center_times_2.x = (piece.center_times_2.x * 2);
+        piece.center_times_2.y = (piece.center_times_2.y * 2);
     }
     case piece_type.s
     {
@@ -315,6 +562,10 @@ def make_piece func(type piece_type; board_width s32; board_height s32) (result 
         piece.bricks[2].y = board_height - 4;
         piece.bricks[3].x = x - 1;
         piece.bricks[3].y = board_height - 4;
+        
+        piece.center_times_2 = piece.bricks[1];
+        piece.center_times_2.x = (piece.center_times_2.x * 2);
+        piece.center_times_2.y = (piece.center_times_2.y * 2);
     }
     else
     {
@@ -332,11 +583,9 @@ def make_random_piece func(random random_pcg ref; board_width s32; board_height 
 
 def push_brick func(renderer render_api ref; x f32; y f32; color rgba32; location code_location = get_call_location())
 {
-    var margin = 0.1;
-    var size   = 1.0 - margin;
-    
-    var min = v2(x, y) - v2(4.5, 9.5) + margin;
-    push_quad(renderer, box2_size(min, v2(size)), color, location);
+    var margin = 0.05;
+    var min = v2(x, y) + margin;
+    push_quad(renderer, box2_size(min, v2(1 - (2 * margin))), color, location);
 }
 
 // short constructors
@@ -363,4 +612,13 @@ def box2_size func(min vec2; size vec2) (result box2)
 {
     var box box2 = { min; min + size };
     return box;
+}
+
+def lerp func(from rgba32; to rgba32; factor f32) (result rgba32)
+{
+    var one_minus_factor = 1 - factor;
+    loop var i; from.count
+        from[i] = ((from[i] * one_minus_factor) + (to[i] * factor)) cast(u8);
+        
+    return from;
 }

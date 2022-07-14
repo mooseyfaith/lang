@@ -11,6 +11,7 @@
 
 #endif
 
+#include "platform.h"
 #include "utf8_string.h"
 #include "hash_string.h"
 #include "hash_table.h"
@@ -35,7 +36,7 @@
     macro(constant, __VA_ARGS__) \
     macro(assignment, __VA_ARGS__) \
     macro(number, __VA_ARGS__) \
-    macro(string, __VA_ARGS__) \
+    macro(string_literal, __VA_ARGS__) \
     macro(name_reference, __VA_ARGS__) \
     macro(branch, __VA_ARGS__) \
     macro(loop, __VA_ARGS__) \
@@ -529,6 +530,7 @@ struct ast_get_type_info
     complete_type_info type;
 };
 
+
 struct ast_type_byte_count
 {
     ast_base_node      node;
@@ -573,10 +575,11 @@ struct ast_assignment
     ast_node *right;
 };
 
-struct ast_string
+struct ast_string_literal
 {
     ast_base_node node;
     string text;
+    bool is_raw; // does not contain escape sequences
 };
 
 struct ast_branch
@@ -1404,7 +1407,7 @@ bool parse_number(parsed_number *result, lang_parser *parser, bool parsed_minus)
         
         assert(!is_hex || !is_float);
         parsed_value.is_hex = is_hex;
-        parsed_value.bit_count_power_of_two = get_highest_bit_index(bit_count);
+        parsed_value.bit_count_power_of_two = get_highest_bit_index(bit_count) - 1;
         
         *result = parsed_value;
         return true;
@@ -1495,10 +1498,10 @@ ast_node * parse_string_or_character_literal(lang_parser *parser)
         }
         else
         {
-            new_local_node(string);
-            string->text = text;
+            new_local_node(string_literal);
+            string_literal->text = text;
         
-            return get_base_node(string);
+            return get_base_node(string_literal);
         }
     }
     else
@@ -1995,6 +1998,27 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 
                 expression = get_base_node(get_function_reference);
             }
+            else if (name == s("import_text_file"))
+            {
+                lang_require_consume_return_value("(", {}, "after 'import_text_file'");
+                
+                new_local_node(string_literal);
+                string_literal->is_raw = true;
+                
+                string file_path;
+                lang_require_return_value(parse_quoted_string(&file_path, parser), {}, parser->iterator, "expected file path string as only argument of import_text_file");
+                
+                char cpath[512];
+                lang_require_return_value(file_path.count < carray_count(cpath), {}, file_path, "file path is too long");
+                memcpy(cpath, file_path.base, file_path.count);
+                cpath[file_path.count] = 0;
+                
+                lang_require_return_value(platform_allocate_and_read_entire_file(&string_literal->text, cpath), {}, file_path, "couldn't load file '%.*s'", fs(file_path));
+                
+                lang_require_consume_return_value(")", {}, "after import_text_file file name");
+                
+                expression = get_base_node(string_literal);
+            }
             else
             {
                 new_local_leaf_node(name_reference, name);
@@ -2475,11 +2499,17 @@ parse_single_statement_declaration
     }
 
     {
+        auto scope_start = parser->iterator;
         auto scoped_statements = lang_require_call(parse_scoped_statements(ok, parser));
         if (*ok)
         {
-            new_local_node(scope);
+            new_local_node(scope, scope_start);
             scope->first_statement = scoped_statements;
+            
+            // link children to parent, since we create parent later
+            for (auto it = scope->first_statement; it; it = it->next)
+                it->parent = get_base_node(scope);
+                
             return get_base_node(scope);
         }
     }
@@ -3132,7 +3162,7 @@ bool next(ast_queue_entry *out_entry, ast_queue *queue)
         case ast_node_type_base_node:
         case ast_node_type_number_type:
         case ast_node_type_number:
-        case ast_node_type_string:
+        case ast_node_type_string_literal:
         case ast_node_type_name_reference:
         case ast_node_type_external_binding:
         case ast_node_type_get_call_location:
@@ -3572,6 +3602,14 @@ parsed_number evaluate(ast_node *expression)
     switch (expression->node_type)
     {
         cases_complete;
+        
+        case ast_node_type_name_reference:
+        {
+            local_node_type(name_reference, expression);
+            
+            local_node_type(constant, name_reference->reference);
+            return evaluate(constant->expression);
+        } break;
         
         case ast_node_type_field_dereference:
         {
@@ -4040,7 +4078,9 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
             if (array_type->item_count_expression)
             {
                 auto count_and_alignment = get_type_byte_count(array_type->item_type);
-                
+                if (count_and_alignment.byte_count == -1)
+                    return count_and_alignment;
+                    
                 count_and_alignment.byte_count *= evaluate(array_type->item_count_expression).u64_value;
                 return count_and_alignment;
             }
@@ -4063,6 +4103,9 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
                 for (auto field = compound_type->first_field; field; field = (ast_variable *) field->node.next)
                 {
                     auto count_and_alignment = get_type_byte_count(field->type);
+                    if (count_and_alignment.byte_count == -1)
+                        return count_and_alignment;
+                        
                     auto mask = count_and_alignment.byte_alignment - 1;
                     byte_count = (byte_count + mask) & ~mask;
                     field->field_byte_offset = byte_count;
@@ -4084,7 +4127,7 @@ byte_count_and_alignment get_type_byte_count(complete_type_info type)
         } break;
     }
 
-    return {};
+    return { (u32) -1 };
 }
 
 get_expression_type_declaration
@@ -4329,7 +4372,7 @@ get_expression_type_declaration
             return get_type(parser, (lang_base_type) base_type);
         } break;
         
-        case ast_node_type_string:
+        case ast_node_type_string_literal:
         {
             return get_type(parser, lang_base_type_string);
         } break;
@@ -4348,7 +4391,11 @@ get_expression_type_declaration
             
             if (!type_byte_count->byte_count.bit_count_power_of_two)
             {
-                type_byte_count->byte_count.u64_value = get_type_byte_count(type_byte_count->type).byte_count;
+                auto byte_count = get_type_byte_count(type_byte_count->type).byte_count;
+                if (byte_count == -1)
+                    return {};
+                    
+                type_byte_count->byte_count.u64_value = byte_count;
                 type_byte_count->byte_count.bit_count_power_of_two = get_bit_count_power_of_two(type_byte_count->byte_count.u64_value);
             }
             
@@ -5411,9 +5458,9 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     new_local_node(compound_literal_field);
                     compound_literal_field->name = s("module");
                 
-                    new_local_node(string);
-                    string->text = location.file->module->name;
-                    compound_literal_field->expression = get_base_node(string);
+                    new_local_node(string_literal);
+                    string_literal->text = location.file->module->name;
+                    compound_literal_field->expression = get_base_node(string_literal);
                     
                     append_tail_next(&tail_next, get_base_node(compound_literal_field));
                 }
@@ -5422,9 +5469,9 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     new_local_node(compound_literal_field);
                     compound_literal_field->name = s("file");
                 
-                    new_local_node(string);
-                    string->text = location.file->path;
-                    compound_literal_field->expression = get_base_node(string);
+                    new_local_node(string_literal);
+                    string_literal->text = location.file->path;
+                    compound_literal_field->expression = get_base_node(string_literal);
                     
                     append_tail_next(&tail_next, get_base_node(compound_literal_field));
                 }
@@ -5437,7 +5484,7 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     new_local_node(compound_literal_field);
                     compound_literal_field->name = s("function");
                 
-                    auto string_literal = new_leaf_node(string, string{});
+                    new_local_leaf_node(string_literal, {});
                     if (function)
                         string_literal->text = function->name;
                     else
@@ -5507,14 +5554,14 @@ bool try_add_default_argument(lang_parser *parser, ast_function_call *function_c
                     call_argument = call_argument->next;
                 }
                 
-                auto text_node = new_leaf_node(string, parser->node_locations.base[default_value->index].text);
-                text_node->text = parser->node_locations.base[call_argument->index].text;
-                text_node->node.parent = get_base_node(function_call);
+                new_local_leaf_node(string_literal, parser->node_locations.base[default_value->index].text);
+                string_literal->text = parser->node_locations.base[call_argument->index].text;
+                string_literal->node.parent = get_base_node(function_call);
 
                 // add new argument with default value
-                text_node->node.next = argument;
-                **argument_tail_next = get_base_node(text_node);
-                *argument_tail_next = &text_node->node.next;
+                string_literal->node.next = argument;
+                **argument_tail_next = get_base_node(string_literal);
+                *argument_tail_next = &string_literal->node.next;
                 // argument stays the same
 
                 input_variable = (ast_variable *) input_variable->node.next;

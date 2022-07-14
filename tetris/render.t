@@ -3,21 +3,57 @@ import math;
 import gl;
 import platform;
 
-//def vertex_shader_source   = import_text_file("default.vert.glsl");
-//def fragment_shader_source = import_text_file("default.frag.glsl");
+def vertex_shader_source   = import_text_file("tetris/shaders/default.vert.glsl");
+def fragment_shader_source = import_text_file("tetris/shaders/default.frag.glsl");
 
 def default_vertex struct
 {
     position vec3;
+    normal   vec3;
     color    rgba32;
 }
 
+def camera_buffer struct
+{
+    world_to_clip_projection mat4 ;
+    camera_world_position    vec4;
+};
+
+def max_transform_count = 256;
+
+def transform_buffer struct
+{
+    object_to_world_transforms mat4[max_transform_count];
+}
+
+def max_light_count = 8;
+
+def lighting_buffer struct
+{
+    parameters vec4[max_light_count];
+    colors     vec4[max_light_count];
+};
+
 def rgba32 type u8[4];
+def rgba32_white = type(rgba32) [ 255; 255; 255; 255 ];
 
 def render_quad struct
 {
     box   box2;
     color rgba32;
+}
+
+def render_light struct
+{
+    position vec3;
+    color    vec3;
+}
+
+def uniform_buffer_binding enum s32
+{
+    camera;
+    transform;
+    lighting;
 }
 
 def mat_projection type mat4;
@@ -30,6 +66,9 @@ def render_api struct
     quads render_quad[1024];
     quad_count u32;
     
+    lights render_light[8];
+    light_count u32;
+    
     window_size              vec2s;
     window_width_over_height f32;
     
@@ -41,7 +80,10 @@ def render_api struct
     world_to_camera mat_transform;
     
     default_shader u32;
-    default_shader_object_to_clip_uniform s32;
+    
+    camera_buffer    gl_uniform_buffer;
+    transform_buffer gl_uniform_buffer;
+    lighting_buffer  gl_uniform_buffer;
     
     quad_buffer gl_vertex_buffer;
     brick_mesh gl_mesh;
@@ -105,6 +147,32 @@ def make_brick_mesh func() (result gl_mesh)
     return result;
 }
 
+def gl_uniform_buffer struct
+{
+    type lang_type_info;
+    handle u32;
+}
+
+def gl_create_uniform_buffer func(type lang_type_info; value u8 ref = null) (result gl_uniform_buffer)
+{
+    var result gl_uniform_buffer;
+    result.type = type;
+    
+    glGenBuffers(1, result.handle ref);
+    glBindBuffer(GL_UNIFORM_BUFFER, result.handle);
+    
+    def is_dynamic = type(GLenum[])
+    [
+        GL_STATIC_DRAW;
+        GL_DYNAMIC_DRAW
+    ];
+    
+    glBufferData(GL_UNIFORM_BUFFER, type.byte_count, value, is_dynamic[value is_not null]);
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    
+    return result;
+}
+
 def gl_vertex_buffer struct
 {
     type lang_type_info;
@@ -151,12 +219,15 @@ def gl_create_vertex_buffer func(type lang_type_info; vertex_count usize; vertic
         
         var gl_type GLenum;
         var item_count usize = 1;
+        var do_normalize = false;
+        
+        var number_type lang_type_info_number_type;
         
         switch field.type.base_type . ;
         case lang_type_info_type.number
         {
             var number = field.type.base_type cast(lang_type_info_number ref);
-            gl_type = type_map[number.number_type];
+            number_type = number.number_type;
         }
         case lang_type_info_type.array
         {
@@ -164,14 +235,17 @@ def gl_create_vertex_buffer func(type lang_type_info; vertex_count usize; vertic
             item_count = array.item_count;
             
             assert((array.item_type.base_type.) is lang_type_info_type.number);
-            gl_type = type_map[array.item_type.base_type cast(lang_type_info_number ref).number_type];
+            number_type = array.item_type.base_type cast(lang_type_info_number ref).number_type;
         }
         else
         {
             assert(0);
         }
+        
+        gl_type = type_map[number_type];
+        do_normalize = number_type < lang_type_info_number_type.f32;
     
-        glVertexAttribPointer(i, item_count, gl_type, GL_FALSE, compound.byte_count, field.byte_offset cast(usize) cast(u8 ref));
+        glVertexAttribPointer(i, item_count, gl_type, do_normalize, compound.byte_count, field.byte_offset cast(usize) cast(u8 ref));
         glEnableVertexAttribArray(i);
     }
     
@@ -196,17 +270,10 @@ def init func(renderer render_api ref; platform platform_api ref)
     platform_window_init(platform, renderer.window ref, "tetris\0", 1280, 720);
     gl_window_init(platform, renderer.gl ref, renderer.window ref);
     
-    var buffer u8 [4096];
-    var source = platform_read_entire_file(buffer, platform, "tetris/shaders/default.vert.glsl\0");
-    require(source.base);
-    
-    var vertex_shader = create_shader_object(renderer.gl ref, false, source, "vertex_shader");
+    var vertex_shader = create_shader_object(renderer.gl ref, false, vertex_shader_source, "vertex_shader");
     require(vertex_shader);
     
-    source = platform_read_entire_file(buffer, platform, "tetris/shaders/default.frag.glsl\0");
-    require(source.base);
-    
-    var fragment_shader = create_shader_object(renderer.gl ref, true, source, "fragment_shader");
+    var fragment_shader = create_shader_object(renderer.gl ref, true, fragment_shader_source, "fragment_shader");
     require(fragment_shader);
         
     renderer.default_shader = create_program_begin(renderer.gl ref);
@@ -215,17 +282,29 @@ def init func(renderer render_api ref; platform platform_api ref)
     create_program_add_shader(renderer.gl ref, renderer.default_shader, fragment_shader);
     
     create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 0, "vertex_position");
-    create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 1, "vertex_color");
+    create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 1, "vertex_normal");
+    create_program_bind_attribute(renderer.gl ref, renderer.default_shader, 2, "vertex_color");
     
     create_program_end(renderer.gl ref, renderer.default_shader);
     
-    renderer.default_shader_object_to_clip_uniform = glGetUniformLocation(renderer.default_shader, "object_to_clip_projection\0".base cast(GLchar ref));
+    renderer.camera_buffer    = gl_create_uniform_buffer(get_type_info(camera_buffer));
+    renderer.transform_buffer = gl_create_uniform_buffer(get_type_info(transform_buffer));
+    renderer.lighting_buffer  = gl_create_uniform_buffer(get_type_info(lighting_buffer));
+    
+    var index = glGetUniformBlockIndex(renderer.default_shader, as_cstring("camera_buffer\0") cast(GLchar ref));
+    glUniformBlockBinding(renderer.default_shader, index, uniform_buffer_binding.camera);
+    
+    index = glGetUniformBlockIndex(renderer.default_shader, as_cstring("transform_buffer\0") cast(GLchar ref));
+    glUniformBlockBinding(renderer.default_shader, index, uniform_buffer_binding.transform);
+    
+    index = glGetUniformBlockIndex(renderer.default_shader, as_cstring("lighting_buffer\0") cast(GLchar ref));
+    glUniformBlockBinding(renderer.default_shader, index, uniform_buffer_binding.lighting);
     
     renderer.brick_mesh = make_brick_mesh();
     
     renderer.quad_buffer = gl_create_vertex_buffer(get_type_info(default_vertex), 6 * renderer.quads.count);
     
-    renderer.camera_to_world = mat4_camera_to_world_look_at(type(vec3) [ 0; 2; 50 ], type(vec3) { 0; 2; 0 }, type(vec3) { 0; 1; 0 });
+    renderer.camera_to_world = mat4_camera_to_world_look_at(type(vec3) [ 4.5; 12; 50 ], type(vec3) [ 4.5; 12; 0 ], type(vec3) [ 0; 1; 0 ]);
     renderer.world_to_camera = mat4_inverse_transform_unscaled(renderer.camera_to_world);
 }
 
@@ -262,15 +341,20 @@ def present func(platform platform_api ref; renderer render_api ref)
         
         // 1st triangle
         
+        var normal vec3 = [ 0; 0; 1 ];
+        
         quad_vertices[0].color = quad.color;
+        quad_vertices[0].normal = normal;
         quad_vertices[0].position[0] = min[0];
         quad_vertices[0].position[1] = min[1];
         
         quad_vertices[1].color = quad.color;
+        quad_vertices[1].normal = normal;
         quad_vertices[1].position[0] = max[0];
         quad_vertices[1].position[1] = min[1];
         
         quad_vertices[2].color = quad.color;
+        quad_vertices[2].normal = normal;
         quad_vertices[2].position[0] = max[0];
         quad_vertices[2].position[1] = max[1];
         
@@ -280,26 +364,53 @@ def present func(platform platform_api ref; renderer render_api ref)
         quad_vertices[4] = quad_vertices[2];
         
         quad_vertices[5].color = quad.color;
+        quad_vertices[5].normal = normal;
         quad_vertices[5].position[0] = min[0];
         quad_vertices[5].position[1] = max[1];
     }
     
     // upload
-    // TODO: use glMapBuffer
+    
     glBindBuffer(GL_ARRAY_BUFFER, renderer.quad_buffer.vertex_buffer);
     glBufferSubData(GL_ARRAY_BUFFER, 0, type_byte_count(default_vertex) * vertex_count, vertices.base);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     
-    glDisable(GL_CULL_FACE);
+    var jiggle = mat4_transform(quat_axis_angle(type(vec3) { 0; 1; 0 }, renderer.jiggle));
+    var world_to_camera = mat4_inverse_transform_unscaled(jiggle * renderer.camera_to_world );
+    
+    var camera camera_buffer;
+    camera.camera_world_position    = renderer.camera_to_world[3];
+    camera.world_to_clip_projection = renderer.camera_to_clip * world_to_camera;
+    glBindBuffer(GL_UNIFORM_BUFFER, renderer.camera_buffer.handle);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, renderer.camera_buffer.type.byte_count, camera ref); 
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    
+    var transforms transform_buffer;
+    transforms.object_to_world_transforms[0] = mat4_identity;
+    glBindBuffer(GL_UNIFORM_BUFFER, renderer.transform_buffer.handle);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, renderer.transform_buffer.type.byte_count, transforms ref); 
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    
+    var lighting lighting_buffer;
+    loop var i; renderer.light_count
+    {
+        lighting.parameters[i] = vec4_expand(renderer.lights[i].position);
+        lighting.colors[i]     = vec4_expand(renderer.lights[i].color);
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, renderer.lighting_buffer.handle);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, renderer.lighting_buffer.type.byte_count, lighting ref); 
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    
+    // render
+    
+    //glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);
     
     glUseProgram(renderer.default_shader);
     
-    var jiggle = mat4_transform(quat_axis_angle(type(vec3) { 0; 1; 0 }, renderer.jiggle));
-    var world_to_camera = mat4_inverse_transform_unscaled(jiggle * renderer.camera_to_world );
-    
-    var world_to_clip = renderer.camera_to_clip * world_to_camera;
-    glUniformMatrix4fv(renderer.default_shader_object_to_clip_uniform, 1, GL_FALSE, world_to_clip[0].base cast(GLfloat ref));
+    glBindBufferBase(GL_UNIFORM_BUFFER, uniform_buffer_binding.camera,    renderer.camera_buffer.handle);
+    glBindBufferBase(GL_UNIFORM_BUFFER, uniform_buffer_binding.transform, renderer.transform_buffer.handle);
+    glBindBufferBase(GL_UNIFORM_BUFFER, uniform_buffer_binding.lighting,  renderer.lighting_buffer.handle);
     
     glBindVertexArray(renderer.quad_buffer.vertex_array);
     glDrawArrays(GL_TRIANGLES, 0, vertex_count);
@@ -309,7 +420,8 @@ def present func(platform platform_api ref; renderer render_api ref)
     
     gl_window_present(platform, renderer.gl ref, renderer.window ref);
     
-    renderer.quad_count = 0;
+    renderer.quad_count  = 0;
+    renderer.light_count = 0;
 }
 
 def push_quad func(renderer render_api ref; box box2; color rgba32; location code_location = get_call_location())
@@ -318,4 +430,12 @@ def push_quad func(renderer render_api ref; box box2; color rgba32; location cod
     renderer.quads[renderer.quad_count].box   = box;
     renderer.quads[renderer.quad_count].color = color;
     renderer.quad_count = renderer.quad_count + 1;
+}
+
+def push_light func(renderer render_api ref; position vec3; color vec3; location code_location = get_call_location())
+{
+    assert(renderer.light_count < renderer.lights.count, location);
+    renderer.lights[renderer.light_count].position = position;
+    renderer.lights[renderer.light_count].color    = color;
+    renderer.light_count = renderer.light_count + 1;
 }
