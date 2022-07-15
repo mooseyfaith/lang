@@ -2649,7 +2649,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         
         print_newline(builder);
         //print_line(builder, "void assert_array_bounds(bool condition) { if (!condition) { printf(\"array index out of bound\"); __debugbreak(); exit(0); } }");
-        print_line(builder, "usize assert_array_bounds(usize index, usize count) { if (index >= count) { printf(\"array index out of bound\"); __debugbreak(); exit(0); } return index; }");
+        print_line(builder, "usize assert_array_bounds(usize index, usize count) { if (index >= count) { printf(\"array bounds check failed: array index %llu out of bound, should be < %llu.\", index, count); __debugbreak(); exit(0); } return index; }");
     }
     
     auto root = get_base_node(parser->file_list.first);
