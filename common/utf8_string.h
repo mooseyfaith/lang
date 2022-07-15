@@ -390,7 +390,7 @@ void print_scope_open(string_builder *builder, bool with_newline = true, cstring
 
 void maybe_print_newline(string_builder *builder)
 {
-    if (!builder->previous_was_newline)
+    if (!builder->previous_was_scope_open && !builder->previous_was_newline)
         print_newline(builder);
 }
 

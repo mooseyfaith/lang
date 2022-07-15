@@ -90,7 +90,7 @@ bool print_next(ast_node **out_node, ast_queue *queue)
     return true;
 }
 
-#define print_expression_declaration void print_expression(lang_c_buffer *buffer, ast_node *node)
+#define print_expression_declaration void print_expression(lang_c_buffer *buffer, ast_node *node, ast_node_table *expression_to_local_map, bool is_inside_array_literal)
 print_expression_declaration;
 
 #define print_statements_declaration void print_statements(lang_c_buffer *buffer, ast_node *first_statement)
@@ -129,7 +129,7 @@ void print_type(lang_c_buffer *buffer, complete_type_info type, string variable_
                 
                 print_comment_begin(buffer);
                 print(builder, "type_of(");
-                print_expression(buffer, expression_reference_type->expression);
+                print_expression(buffer, expression_reference_type->expression, null, false);
                 print(builder, ")");
                 print_comment_end(buffer);
                 
@@ -205,7 +205,7 @@ void print_type(lang_c_buffer *buffer, ast_node *base_type, string variable_name
     print_type(buffer, type, variable_name);
 }
 
-void print_array_literal(lang_c_buffer *buffer, ast_array_literal *array_literal)
+void print_array_literal(lang_c_buffer *buffer, ast_array_literal *array_literal, ast_node_table *expression_to_local_map)
 {
     auto builder = &buffer->builder;
     
@@ -217,11 +217,11 @@ void print_array_literal(lang_c_buffer *buffer, ast_array_literal *array_literal
     
     if (array_literal->first_expression)
     {
-        print_expression(buffer, array_literal->first_expression);
+        print_expression(buffer, array_literal->first_expression, expression_to_local_map, true);
         for (auto expression = array_literal->first_expression->next; expression; expression = expression->next)
         {
             print_line(builder, ",");
-            print_expression(buffer,  expression);
+            print_expression(buffer,  expression, expression_to_local_map, true);
         }
         
         pending_newline(builder);
@@ -231,7 +231,7 @@ void print_array_literal(lang_c_buffer *buffer, ast_array_literal *array_literal
     print_scope_close(builder, false);
 }
 
-void print_compound_literal(lang_c_buffer *buffer, ast_compound_literal *compound_literal)
+void print_compound_literal(lang_c_buffer *buffer, ast_compound_literal *compound_literal, ast_node_table *expression_to_local_map, bool is_inside_array_literal)
 {
     auto builder = &buffer->builder;
     
@@ -241,12 +241,12 @@ void print_compound_literal(lang_c_buffer *buffer, ast_compound_literal *compoun
     {
         // print(builder, "%.*s: ", fs(compound_literal->first_field->name)); C could do this
         print(builder, " ");
-        print_expression(buffer, compound_literal->first_field->expression);
+        print_expression(buffer, compound_literal->first_field->expression, expression_to_local_map, is_inside_array_literal);
         for (auto field = (ast_compound_literal_field *) compound_literal->first_field->node.next; field; field = (ast_compound_literal_field *) field->node.next)
         {
             print(builder, ", ");
             // print(builder, "%.*s: ", fs(field->name)); C could do this
-            print_expression(buffer, field->expression);
+            print_expression(buffer, field->expression, expression_to_local_map, is_inside_array_literal);
         }
         
         //print_newline(builder);
@@ -255,36 +255,6 @@ void print_compound_literal(lang_c_buffer *buffer, ast_compound_literal *compoun
 
     print_scope_close(builder, false);
 }
-
-#if 0
-bool try_print_literal_assignment(lang_c_buffer *buffer, ast_node *expression)
-{
-    if (!is_node_type(expression, compound_literal) && !is_node_type(expression, array_literal))
-        return false;
-        
-    auto parser = buffer->parser;
-    auto builder = &buffer->builder;
-    
-    print(builder, " = ");
-    
-    print_scope_open(builder);
-    
-    if (is_node_type(expression, compound_literal))
-    {
-        local_node_type(compound_literal, expression);
-        print_compound_literal(buffer, compound_literal);
-    }
-    else
-    {
-        local_node_type(array_literal, expression)
-        print_array_literal(buffer, array_literal);
-    }
-    
-   
-    
-    return true;
-}
-#endif
 
 void print_declaration(lang_c_buffer *buffer, ast_variable *variable)
 {
@@ -619,6 +589,17 @@ print_expression_declaration
     auto parser = buffer->parser;
     auto builder = &buffer->builder;
     
+    if (expression_to_local_map)
+    {
+        auto value = try_get_value(expression_to_local_map, node);
+        if (value.ok)
+        {
+            auto index = *(u32 *) value.value;
+            print(builder, "__local_%u", index);
+            return;
+        }
+    }
+    
     switch (node->node_type)
     {
         cases_complete_message("unhandled expression type %.*s", fnode_type_name(node));
@@ -680,14 +661,15 @@ print_expression_declaration
         case ast_node_type_array_literal:
         {
             local_node_type(array_literal, node);
-            print_array_literal(buffer, array_literal);
-            //print(builder, "_array_literal_%x", node->index);
+            
+            //if (is_inside_array_literal)
+            print_array_literal(buffer, array_literal, expression_to_local_map);
         } break;
         
         case ast_node_type_compound_literal:
         {
             local_node_type(compound_literal, node);
-            print_compound_literal(buffer, compound_literal);
+            print_compound_literal(buffer, compound_literal, expression_to_local_map, is_inside_array_literal);
         } break;
         
         case ast_node_type_name_reference:
@@ -708,7 +690,7 @@ print_expression_declaration
         {
             local_node_type(function_call, node);
 
-            print_expression(buffer, function_call->expression);
+            print_expression(buffer, function_call->expression, expression_to_local_map, is_inside_array_literal);
             print(builder, "(");
             
             bool is_not_first = false;
@@ -717,7 +699,7 @@ print_expression_declaration
                 if (is_not_first)
                     print(builder, ", ");
                     
-                print_expression(buffer, argument);
+                print_expression(buffer, argument, expression_to_local_map, is_inside_array_literal);
                 is_not_first = true;
             }
             print(builder, ")");
@@ -728,7 +710,7 @@ print_expression_declaration
             local_node_type(dereference, node);
             
             print(builder, "*");
-            print_expression(buffer, dereference->expression);
+            print_expression(buffer, dereference->expression, expression_to_local_map, is_inside_array_literal);
         } break;
         
         case ast_node_type_field_dereference:
@@ -747,7 +729,7 @@ print_expression_declaration
                         
                         print_comment_begin(buffer);
                         
-                        print_expression(buffer, field_dereference->expression);
+                        print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                         print(builder, "_%.*s", fs(field_dereference->name));
                         
                         print_comment_end(buffer);
@@ -756,7 +738,7 @@ print_expression_declaration
                     }
                     else
                     {
-                        print_expression(buffer, field_dereference->expression);
+                        print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                         print(builder, "_%.*s", fs(field_dereference->name));
                     }
                     
@@ -775,39 +757,42 @@ print_expression_declaration
                         if (array_type->item_count_expression)
                         {
                             print_comment_begin(buffer);
-                            
-                            print_expression(buffer, field_dereference->expression);
+                            print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                             print(builder, ".count");
                             
                             print_comment_end(buffer);
                             
-                            print_expression(buffer, array_type->item_count_expression);
+                            print_expression(buffer, array_type->item_count_expression, expression_to_local_map, is_inside_array_literal);
                         }
                         else
                         {
-                            print_expression(buffer, field_dereference->expression);
+                            print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                             print(builder, ".count");
                         }
                     }
                     else if (field_dereference->name == s("base"))
                     {
+                    #if 0
                         if (is_node_type(field_dereference->expression, array_literal)) //array_type->count_expression)
                         {
                             local_node_type(array_literal, field_dereference->expression);
                             
                             print_comment_begin(buffer);
                             
-                            print_expression(buffer, field_dereference->expression);
+                            auto local_index = *local_variable_index; // don't increment comment indices
+                            print_expression(buffer, field_dereference->expression, local_index);
                             print(builder, ".base");
                             
                             print_comment_end(buffer);
                             
+                            print_
                             print(builder, "_array_literal_base_%x", array_literal->node.index);
                             //print_expression(buffer, array_type->item_count_expression);
                         }
                         else
+                    #endif
                         {
-                            print_expression(buffer, field_dereference->expression);
+                            print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                             print(builder, ".base");
                         }
                     }
@@ -823,13 +808,13 @@ print_expression_declaration
             
             if (type.indirection_count == 1)
             {
-                print_expression(buffer, field_dereference->expression);
+                print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                 print(builder, "->");
                 print(builder, "%.*s", fs(field_dereference->name));
             }
             else if (type.indirection_count == 0)
             {
-                print_expression(buffer, field_dereference->expression);
+                print_expression(buffer, field_dereference->expression, expression_to_local_map, is_inside_array_literal);
                 print(builder, ".");
                 print(builder, "%.*s", fs(field_dereference->name));
             }
@@ -855,7 +840,33 @@ print_expression_declaration
             auto base_type = get_expression_type(parser, array_index->array_expression).base_type.node;
             local_node_type(array_type, base_type);
             
-            print_expression(buffer, array_index->array_expression);
+            print_expression(buffer, array_index->array_expression, expression_to_local_map, is_inside_array_literal);
+            
+            // consant bounds check are done in resolve
+            if (!array_type->item_count_expression || !array_index->index.is_constant)
+            {
+                print(builder, ".base[assert_array_bounds(");
+                print_expression(buffer, array_index->index_expression, expression_to_local_map, is_inside_array_literal);
+                
+                if (array_type->item_count_expression)
+                {
+                    print(builder, ", %llu)]", get_array_item_count(array_type));
+                }
+                else
+                {
+                    print(builder, ", (");
+                    print_expression(buffer, array_index->array_expression, expression_to_local_map, is_inside_array_literal);
+                    print(builder, ").count)]");
+                }
+            }
+            else
+            {
+                print(builder, ".base[");
+                print_expression(buffer, array_index->index_expression, expression_to_local_map, is_inside_array_literal);
+                print(builder, "]");
+            }
+        
+    #if 0
             
         #if 1
             print(builder, ".base[");
@@ -864,6 +875,7 @@ print_expression_declaration
         #else
             print(builder, ".base[_array_index%x]", array_index->node.index);
         #endif
+    #endif
         } break;
         
         case ast_node_type_unary_operator:
@@ -877,7 +889,7 @@ print_expression_declaration
                     print(builder, "((");
                     print_type(buffer, unary_operator->type);
                     print(builder, ") ");
-                    print_expression(buffer, unary_operator->expression);
+                    print_expression(buffer, unary_operator->expression, expression_to_local_map, is_inside_array_literal);
                     print(builder, ")");
                 } break;
                 
@@ -886,7 +898,7 @@ print_expression_declaration
                     if (unary_operator->function)
                     {
                         print(builder, "%.*s(", fs(ast_unary_operator_names[unary_operator->operator_type]));
-                        print_expression(buffer, unary_operator->expression);
+                        print_expression(buffer, unary_operator->expression, expression_to_local_map, is_inside_array_literal);
                         print(builder, ")");
                     }
                     else
@@ -906,7 +918,7 @@ print_expression_declaration
                         }
                 
                         print(builder, "%.*s", fs(c_symbols[unary_operator->operator_type]));
-                        print_expression(buffer, unary_operator->expression);
+                        print_expression(buffer, unary_operator->expression, expression_to_local_map, is_inside_array_literal);
                     }
                 }
             }
@@ -959,9 +971,9 @@ print_expression_declaration
             if (binary_operator->function)
             {
                 print(builder, "%.*s(", fs(ast_binary_operator_names[binary_operator->operator_type]));
-                print_expression(buffer, binary_operator->left);
+                print_expression(buffer, binary_operator->left, expression_to_local_map, is_inside_array_literal);
                 print(builder, ", ");
-                print_expression(buffer, binary_operator->left->next);
+                print_expression(buffer, binary_operator->left->next, expression_to_local_map, is_inside_array_literal);
                 print(builder, ")");
             }
             else
@@ -997,35 +1009,31 @@ print_expression_declaration
                 assert(binary_operator->operator_type < carray_count(c_symbols));
                 
                 print(builder, "(");
-                print_expression(buffer, binary_operator->left);
+                print_expression(buffer, binary_operator->left, expression_to_local_map, is_inside_array_literal);
                 print(builder, " %.*s ", fs(c_symbols[binary_operator->operator_type]));
-                print_expression(buffer, binary_operator->left->next);
+                print_expression(buffer, binary_operator->left->next, expression_to_local_map, is_inside_array_literal);
                 print(builder, ")");
             }
         } break;
     }
 }
 
-void print_constant_declaration(lang_c_buffer *buffer, ast_constant *constant)
+void print_constant_declaration(lang_c_buffer *buffer, ast_constant *constant, ast_node_table *expression_to_local_map)
 {
     auto type = get_expression_type(buffer->parser, constant->expression);
     
     auto builder = &buffer->builder;
     
-    maybe_print_blank_line(builder);
     print(builder, "const ");
     print_type(buffer, type, constant->name);
     
-    //if (!try_print_literal_assignment(buffer, constant->expression))
-    {
-        print(builder, " = ");
-        print_expression(buffer, constant->expression);
-    }
+    print(builder, " = ");
+    print_expression(buffer, constant->expression, expression_to_local_map, true);
     
     print_line(builder, ";");
 }
 
-void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable)
+void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable, ast_node_table *expression_to_local_map)
 {
     auto builder = &buffer->builder;
     
@@ -1033,11 +1041,8 @@ void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable)
     
     if (variable->default_expression)
     {
-        //if (!try_print_literal_assignment(buffer, variable->default_expression))
-        {
-            print(builder, " = ");
-            print_expression(buffer, variable->default_expression);
-        }
+        print(builder, " = ");
+        print_expression(buffer, variable->default_expression, expression_to_local_map, true);
     }
     else
     {
@@ -1052,56 +1057,14 @@ void print_variable_statement(lang_c_buffer *buffer, ast_variable *variable)
     print(builder, ";");
 }
 
-void print_statement(lang_c_buffer *buffer, ast_node *node)
+struct single_static_assignments
 {
-    auto builder = &buffer->builder;
-    
-    // add array bounds checks
-    if (0)
-    {
-        local_buffer(queue, ast_queue);
-        
-        switch (node->node_type)
-        {
-        }
-        
-        enqueue_one(&queue, &node);
-        
-        ast_node *array_index_node;
-        while (next(&array_index_node, &queue))
-        {
-            if (!is_node_type(array_index_node, array_index))
-                continue;
-            
-            local_node_type(array_index, array_index_node);
-            
-            print(builder, "usize _array_index%x = ", array_index->node.index);
-            print_expression(buffer, array_index->index_expression);
-            print_line(builder, ";");
-            
-            print(builder, "assert(_array_index%x < (", array_index->node.index);
-            
-            auto type = get_expression_type(buffer->parser, array_index->array_expression);
-            local_node_type(array_type, type.base_type.node);
-            
-            if (array_type->item_count_expression)
-            {
-                print_comment_begin(buffer);
-                print(builder, "(");
-                print_expression(buffer, array_index->array_expression);
-                print(builder, ").count");
-                print_comment_end(buffer);
-                print_expression(buffer, array_type->item_count_expression);
-                print_line(builder, "));");
-            }
-            else
-            {
-                print_expression(buffer, array_index->array_expression);
-                print(builder, ").count));");
-            }
-        }
-    }
-    
+    u32 index, count;
+};
+
+void print_statement(lang_c_buffer *buffer, ast_node *node, single_static_assignments *local_assignments, bool allow_globals)
+{
+    bool add_local_array_literals = true;
     switch (node->node_type)
     {
         // skip global declarations
@@ -1111,8 +1074,186 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
         case ast_node_type_number_type:
         case ast_node_type_function_type:
         case ast_node_type_compound_type:
-        break;
+        return;
         
+        case ast_node_type_variable:
+        {
+            local_node_type(variable, node);
+            if (!allow_globals && variable->is_global)
+                return;
+            
+            add_local_array_literals = false;
+        } break;
+        
+        case ast_node_type_constant:
+        {
+            if (!allow_globals && is_node_type(node->parent, file))
+                return;
+        
+            add_local_array_literals = false;
+        } break;
+    }
+
+    auto builder = &buffer->builder;
+    
+    auto local_variable_index = local_assignments->index;
+    local_assignments->index = local_assignments->count;
+    defer { local_assignments->index = local_variable_index; };
+    
+    ast_node_table table = make_node_table(1024, sizeof(u32)); defer { free_table(&table); };
+    
+    {
+        local_buffer(nodes, ast_node_buffer);
+    
+        local_buffer(queue, ast_queue);
+        enqueue_one(&queue, &node);
+        
+        ast_node *it;
+        while (next(&it, &queue))
+        {
+            assert(local_assignments->index <= local_assignments->count);
+        
+            switch (it->node_type)
+            {
+                // don't go into sub scopes
+                case ast_node_type_scope:
+                case ast_node_type_branch_switch_case:
+                {
+                    skip_children(&queue, it);
+                } break;
+                
+                case ast_node_type_branch:
+                {
+                    local_node_type(branch, it);
+                    skip_children(&queue, it);
+                    
+                    enqueue(&queue, it, &branch->condition);
+                } break;
+                
+                case ast_node_type_loop_with_counter:
+                {
+                    local_node_type(loop_with_counter, it);
+                    skip_children(&queue, it);
+                    
+                    enqueue(&queue, it, &loop_with_counter->end_condition);
+                    enqueue(&queue, it, &loop_with_counter->counter_statement);
+                } break;
+            
+                case ast_node_type_loop:
+                {
+                    local_node_type(loop, it);
+                    skip_children(&queue, it);
+                    
+                    enqueue(&queue, it, &loop->condition);
+                } break;
+            
+                case ast_node_type_branch_switch:
+                {
+                    local_node_type(branch_switch, it);
+                    skip_children(&queue, it);
+                    
+                    enqueue(&queue, it, &branch_switch->condition);
+                } break;
+            
+                case ast_node_type_array_index:
+                {
+                    local_node_type(array_index, it);
+                    
+                    auto type = get_expression_type(buffer->parser, array_index->array_expression);
+                    local_node_type(array_type, type.base_type.node);
+                    
+                    // consant bounds check are done in resolve
+                    if (array_type->item_count_expression && array_index->index.is_constant)
+                        break;
+                    
+                    resize_buffer(&nodes, nodes.count + 1);
+                    nodes.base[nodes.count - 1] = it;
+                } break;
+                
+                case ast_node_type_array_literal:
+                {
+                    if (!add_local_array_literals)
+                        break;
+                    
+                    resize_buffer(&nodes, nodes.count + 1);
+                    nodes.base[nodes.count - 1] = it;
+                } break;
+            }
+        }
+        
+        local_assignments->count += nodes.count;
+        
+        for (u32 i = 0; i < nodes.count; i++)
+        {
+            auto it = nodes.base[nodes.count - 1 - i];
+        
+            auto index = local_assignments->count - i - 1;
+            maybe_print_newline(builder);
+            
+            switch (it->node_type)
+            {
+                case ast_node_type_array_literal:
+                {
+                    local_node_type(array_literal, it);
+                    local_node_type(array_type, array_literal->type.base_type.node);
+                    
+                    print_type(buffer, array_literal->type);
+                    print(builder, " __local_%u = ", index);
+                    
+                    local_assignments->index = index;
+                    print_array_literal(buffer, array_literal, &table);
+                    print_line(builder, ";");
+                    
+                    *(u32 *) insert(&table, it) = index;
+                } break;
+            
+                case ast_node_type_array_index:
+                {
+                    local_node_type(array_index, it);
+                    
+                #if 0
+                    print(builder, "usize __local_%u = ", index);
+                    print_expression(buffer, array_index->index_expression, &table, true);
+                    print(builder, "; ");
+                    
+                    print(builder, "assert_array_bounds(__local_%u < ", index);
+                    
+                    auto type = get_expression_type(buffer->parser, array_index->array_expression);
+                    local_node_type(array_type, type.base_type.node);
+                    
+                    local_assignments->index = index;
+                    
+                    if (array_type->item_count_expression)
+                    {
+                        print_comment_begin(buffer);
+                        print(builder, "(");
+                        print_expression(buffer, array_index->array_expression, &table, true);
+                        print(builder, ").count");
+                        print_comment_end(buffer);
+                        
+                        print_expression(buffer, array_type->item_count_expression, &table, true);
+                    }
+                    else
+                    {
+                        print(builder, "(");
+                        print_expression(buffer, array_index->array_expression, &table, true);
+                        print(builder, ").count");
+                    }
+                    
+                    print_line(builder, ");"); //string { x, (u8 *) \"array index %llu out of bound, should be less then %llu\" }, {}, {})");
+                    
+                    // insert after we assigned
+                    *(u32 *) insert(&table, array_index->index_expression) = index;
+                #endif
+                } break;
+            }
+        }
+        
+        local_assignments->index = local_assignments->count - nodes.count;
+    }
+
+    switch (node->node_type)
+    {
         case ast_node_type_scope:
         {
             local_node_type(scope, node);
@@ -1126,20 +1267,15 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
         
         case ast_node_type_constant:
         {
-            if (is_node_type(node->parent, file))
-                break;
-            
             local_node_type(constant, node);
-            print_constant_declaration(buffer, constant);
+            print_constant_declaration(buffer, constant, &table);
         } break;
 
         case ast_node_type_variable:
         {
             local_node_type(variable, node);
-            if (variable->is_global)
-                return;
             
-            print_variable_statement(buffer, variable);
+            print_variable_statement(buffer, variable, &table);
             print_newline(builder);
         } break;
         
@@ -1208,9 +1344,9 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             else
         #endif
             {
-                print_expression(buffer, assignment->left);
+                print_expression(buffer, assignment->left, &table, false);
                 print(builder, " = ");
-                print_expression(buffer, assignment->right);
+                print_expression(buffer, assignment->right, &table, false);
             }
             
             print_line(builder, ";");
@@ -1223,7 +1359,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             maybe_print_blank_line(builder);
             
             print(builder, "if (");
-            print_expression(buffer, branch->condition);
+            print_expression(buffer, branch->condition, &table, false);
             print(builder, ")");
             
             print_scope_open(builder);
@@ -1251,7 +1387,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             maybe_print_blank_line(builder);
             
             print(builder, "while (");
-            print_expression(buffer, loop->condition);
+            print_expression(buffer, loop->condition, &table, false);
             print(builder, ")");
             
             print_scope_open(builder);
@@ -1272,24 +1408,24 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             
             print(builder, "for (");
             
-            if (is_node_type(loop_with_counter->first_counter_statement, variable))
+            if (is_node_type(loop_with_counter->counter_statement, variable))
             {
-                local_node_type(variable, loop_with_counter->first_counter_statement);
-                print_variable_statement(buffer, variable);
+                local_node_type(variable, loop_with_counter->counter_statement);
+                print_variable_statement(buffer, variable, &table);
             }
             else
             {
-                print_expression(buffer, loop_with_counter->first_counter_statement);
+                print_expression(buffer, loop_with_counter->counter_statement, &table, false);
                 print(builder, ";");
             }
             
             //print_statement(buffer, loop_with_counter->first_counter_statement);
             
-            string counter_name = get_name(loop_with_counter->first_counter_statement);
+            string counter_name = get_name(loop_with_counter->counter_statement);
             assert(counter_name.count);
             
             print(builder, " %.*s < ", fs(counter_name));
-            print_expression(buffer, loop_with_counter->end_condition);
+            print_expression(buffer, loop_with_counter->end_condition, &table, false);
             print(builder, "; %.*s++)", fs(counter_name));
             
             print_scope_open(builder);
@@ -1309,7 +1445,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             maybe_print_blank_line(builder);
             
             print(builder, "switch (");
-            print_expression(buffer, branch_switch->expression);
+            print_expression(buffer, branch_switch->condition, &table, false);
             print(builder, ")");
             
             print_scope_open(builder);
@@ -1317,7 +1453,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             for (auto branch_case = branch_switch->first_case; branch_case; branch_case = (ast_branch_switch_case *) branch_case->node.next)
             {
                 print(builder, "case ");
-                print_expression(buffer, branch_case->expression);
+                print_expression(buffer, branch_case->expression, &table, false);
                 print(builder, ":");
                 
                 print_scope_open(builder);
@@ -1366,7 +1502,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
             
             for (auto expression = function_return->first_expression; expression; expression = expression->next)
             {
-                print_expression(buffer, expression);
+                print_expression(buffer, expression, &table, false);
                 
                 if (expression->next)
                     print(builder, ", ");
@@ -1381,7 +1517,7 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
         // try expressions
         default:
         {
-            print_expression(buffer, node);
+            print_expression(buffer, node, &table, false);
             print_line(builder, ";");
         } break;
     }
@@ -1390,6 +1526,8 @@ void print_statement(lang_c_buffer *buffer, ast_node *node)
 print_statements_declaration
 {
     auto builder = &buffer->builder;
+
+    single_static_assignments local_assignments = {};
 
     local_buffer(queue, ast_queue);
     
@@ -1418,7 +1556,7 @@ print_statements_declaration
             }
         }
         
-        print_statement(buffer, node);
+        print_statement(buffer, node, &local_assignments, false);
     }
 }
 
@@ -2174,6 +2312,20 @@ void sort_declaration_dependencies(lang_c_buffer *buffer)
                             node_index = find_node(graph, type.name_type.node).index;
                     } break;
                     
+                    case ast_node_type_array_literal:
+                    {
+                        local_node_type(array_literal, node);
+                        if (array_literal->type.name_type.node)
+                            node_index = find_node(graph, array_literal->type.name_type.node).index;
+                    } break;
+                    
+                    case ast_node_type_compound_literal:
+                    {
+                        local_node_type(compound_literal, node);
+                        if (compound_literal->type.name_type.node)
+                            node_index = find_node(graph, compound_literal->type.name_type.node).index;
+                    } break;
+                    
                     case ast_node_type_get_function_reference:
                     {
                         local_node_type(get_function_reference, node);
@@ -2328,8 +2480,6 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
         {
             local_node_type(compound_type, name_type);
             
-            maybe_print_blank_line(builder);
-            
             print_line(builder, "typedef struct");
             print_scope_open(builder);
         
@@ -2349,28 +2499,20 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
                 print_type(buffer, type);
                 print_line(builder, ";");
             }
-            
-            print_newline(builder);
         } break;
         
         case ast_node_type_array_type:
         {
             local_node_type(array_type, name_type);
             
-            maybe_print_blank_line(builder);
             print_line(builder, "typedef struct");
             print_scope_open(builder);
             
             if (array_type->item_count_expression)
             {
-                //print_line(builder, "static const usize count = ");
-                //print_expression(buffer, array_type->item_count_expression);
-                //print_line(builder, ";");
-            
+                auto item_count = get_array_item_count(array_type);
                 print_type(buffer, array_type->item_type, s("base["));
-                print_expression(buffer, array_type->item_count_expression);
-                
-                print_line(builder, "];");
+                print_line(builder, "%llu];", item_count);
             }
             else
             {
@@ -2389,15 +2531,12 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
                 print_type(buffer, type);
                 print_line(builder, ";");
             }
-        
-            print_newline(builder);
         } break;
         
         case ast_node_type_enumeration_type:
         {
             local_node_type(enumeration_type, name_type);
             
-            maybe_print_blank_line(builder);
             print(builder, "typedef ");
             print_type(buffer, enumeration_type->item_type, name);
             print_line(builder, ";");
@@ -2416,7 +2555,7 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
                 assert(item->expression);
                 
                 print_comment_begin(buffer);
-                print_expression(buffer, item->expression);
+                print_expression(buffer, item->expression, null, false);
                 print_comment_end(buffer);
                 print_line(builder, " %llu;", get_enumeration_item_value(item));
                 
@@ -2442,8 +2581,6 @@ void print_type_declaration(lang_c_buffer *buffer, complete_type_info type, stri
                 print_line(builder, ";");
             #endif
             }
-            
-            print_newline(builder);
         } break;
     }
 }
@@ -2462,15 +2599,11 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
     auto builder = &buffer.builder;
 
     print_line(builder, "// generated with lang_c compiler");
-    print_newline(builder);
-    print_line(builder, "#include <stdio.h>");
     
-#if 0
-    print_line(builder, "#include <windows.h>");    
+    // HACK:
     print_newline(builder);
-    print_line(builder, "#pragma comment(lib, \"user32\")");
-    print_line(builder, "#pragma comment(lib, \"gdi32\")");
-#endif
+    print_line(builder, "#include <stdio.h>"); // for printf
+    print_line(builder, "#include <stdlib.h>"); // for exit
     
     string name_buffer = { carray_count(_lang_c_base_type_name_buffer), _lang_c_base_type_name_buffer };
     
@@ -2513,6 +2646,10 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         
         print_newline(builder);
         print_line(builder, "#define %.*snull 0", fs(buffer.settings.prefix));
+        
+        print_newline(builder);
+        //print_line(builder, "void assert_array_bounds(bool condition) { if (!condition) { printf(\"array index out of bound\"); __debugbreak(); exit(0); } }");
+        print_line(builder, "usize assert_array_bounds(usize index, usize count) { if (index >= count) { printf(\"array index out of bound\"); __debugbreak(); exit(0); } return index; }");
     }
     
     auto root = get_base_node(parser->file_list.first);
@@ -2608,6 +2745,7 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
         string_builder print_builder = {};
         defer { free_buffer(&print_builder.memory); };
         
+        u32 previous_type = -1;
         for (u32 i = 0; i < sorted_dependencies.count; i++)
         {
             auto node_index = sorted_dependencies.base[i]; //sorted_dependencies.count - 1 - i];
@@ -2653,6 +2791,11 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     continue;
             }
             
+            if (previous_type != node->node_type)
+                print_newline(builder);
+            
+            previous_type = node->node_type;
+            
             switch (node->node_type)
             {
                 cases_complete_message("%.*s", fs(ast_node_type_names[node->node_type]));
@@ -2666,12 +2809,11 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                 break;
                 
                 case ast_node_type_variable:
+                case ast_node_type_constant:
                 {
-                    local_node_type(variable, node);
-                    assert(variable->is_global);
-                    
-                    print_variable_statement(&buffer, variable);
-                    print_newline(builder);
+                    single_static_assignments local_assingments = {};
+                    print_statement(&buffer, node, &local_assingments, true);
+                    assert(local_assingments.count == 0);
                 } break;
             
                 case ast_node_type_array_type:
@@ -2680,6 +2822,8 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     type.base_type.node = node;
                     type.name_type      = type.base_type;
                     print_type_declaration(&buffer, type);
+                    
+                    previous_type = -1; // force newline
                 } break;
                 
                 case ast_node_type_alias_type:
@@ -2696,6 +2840,9 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     {
                         print_type_declaration(&buffer, alias_type->type, alias_type->name);
                     }
+                    
+                    if (is_node_type(alias_type->type.base_type.node, array_type) || is_node_type(alias_type->type.base_type.node, compound_type) || is_node_type(alias_type->type.base_type.node, enumeration_type))
+                        previous_type = -1; // force newline
                 } break;
                 
                 case ast_node_type_function:
@@ -2718,96 +2865,6 @@ lang_c_buffer compile(lang_parser *parser, lang_c_compile_settings settings = {}
                     
                     print_line(builder, ";");
                 } break;                
-                
-            #if 0
-                case ast_node_type_array_literal:
-                {
-                    maybe_print_blank_line(builder);
-                    
-                    local_node_type(array_literal, node);
-                    
-                    local_node_type(array_type, array_literal->type.name_type.node);
-                    
-                    maybe_print_blank_line(builder);
-                    print_type(&buffer, array_type->item_type);
-                    print(builder, " _array_literal_%x_base[%llu] =", node->index, array_literal->item_count);
-                    
-                    print_scope_open(builder);
-    
-                    for (auto it = array_literal->first_expression; it; it = it->next)
-                    {
-                        print_expression(&buffer, it);
-                        print_line(builder, ",");
-                    }
-        
-                    print_scope_close(builder, false);
-                    print_line(builder, ";");
-                    
-                    auto type_without_count = *array_type;
-                    type_without_count.item_count_expression = null;
-                    print_type(&buffer, get_base_node(&type_without_count));
-                    print_line(builder, " _array_literal_%x = { %llu, _array_literal_%x_base };", node->index, array_literal->item_count, node->index);
-                    print_newline(builder);
-                } break;
-            #endif
-                
-                case ast_node_type_compound_literal:
-                {
-                    maybe_print_blank_line(builder);
-                    
-                    local_node_type(compound_literal, node);
-                    
-                    local_node_type(compound_type, compound_literal->type.base_type.node);
-                    
-                    maybe_print_blank_line(builder);
-                    print_type(&buffer, compound_literal->type);
-                    print_line(builder, " _compound_literal_%x =", node->index);
-                    
-                    print_scope_open(builder);
-    
-                    // TODO: make sure order is correct
-                    for (auto field = compound_literal->first_field; field; field = (ast_compound_literal_field *) field->node.next)
-                    {
-                        print_expression(&buffer, field->expression);
-                        
-                        if (field->node.next)
-                            print_line(builder, ",");
-                    }
-        
-                    print_scope_close(builder, false);
-                    print_line(builder, ";");
-                    
-                    print_newline(builder);
-                } break;
-                
-                case ast_node_type_constant:
-                {
-                    local_node_type(constant, node);
-                    
-                    auto type = get_expression_type(parser, constant->expression);
-                    
-                    // "forward declare" arrays
-                    if (false && is_node_type(type.base_type.node, array_type))
-                    {
-                        maybe_print_blank_line(builder);
-                        
-                    #if defined NORMAL_CONST_ARRAY
-                        //print(builder, "extern \"C\" const ");
-                        print(builder, "const ");
-                        print_type(&buffer, type, constant->name);
-                        print_line(builder, ";");
-                    #else
-                        print(builder, "extern \"C\" const ");
-                        local_node_type(array_type, type.base_type.node);
-                        print_type(&buffer, array_type->item_type);
-                        print(builder, " %.*s[];", fs(constant->name));
-                    #endif
-                    }
-                    else
-                    {
-                        print_constant_declaration(&buffer, constant);
-                    }
-                } break;
             }
         }
     }

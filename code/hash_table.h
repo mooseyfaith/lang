@@ -2,6 +2,33 @@
 
 #include <basic.h>
 
+struct hash_table_slot_iterator
+{
+    usize table_count_minus_one;
+    usize slot;
+    usize probe_step;
+};
+
+hash_table_slot_iterator get_slot_begin(usize table_count, usize hash_value)
+{
+    assert(((table_count - 1) & table_count) == 0, "table count must be a power of 2");
+    auto slot = hash_value & (table_count - 1);
+    return { table_count - 1, slot, 1 };
+}
+
+bool get_slot_next(usize *slot, hash_table_slot_iterator *iterator)
+{
+    if (iterator->probe_step > iterator->table_count_minus_one)
+        return false;
+        
+    *slot = iterator->slot;
+    iterator->slot = (iterator->slot + iterator->probe_step) & (iterator->table_count_minus_one);
+    iterator->probe_step++;
+    
+    return true;
+}
+
+#if 0
 struct hash_table_pointers_result
 {
     u32 slot;
@@ -110,3 +137,4 @@ hash_table_pointers_result get_or_add(hash_table_pointers *table, u8 *key)
     
     return result;
 }
+#endif
