@@ -621,8 +621,7 @@ print_expression_declaration
                 
                 print(builder, "%llu", number->value.u64_value);
             }
-            else 
-            if (number->value.is_float)
+            else if (number->value.is_float)
             {
                 if (number->value.bit_count_power_of_two == 5)
                     print(builder, "%ff", number->value.f64_value);
@@ -640,6 +639,9 @@ print_expression_declaration
                 }
                 else
                     print(builder, "%lli", number->value.s64_value);
+                    
+                if (number->value.bit_count_power_of_two == 6)
+                    print(builder, "ll");
             }
             else
             {
@@ -647,6 +649,9 @@ print_expression_declaration
                     print(builder, "0x%llx", number->value.u64_value);
                 else
                     print(builder, "%llu", number->value.u64_value);
+                    
+                if (number->value.bit_count_power_of_two == 6)
+                    print(builder, "ull");
             }
         } break;
         
@@ -906,6 +911,7 @@ print_expression_declaration
                         string c_symbols[] =
                         {
                             s("!"),
+                            s("~"),
                             s("-"),
                             s("&"),
                         };
@@ -992,12 +998,11 @@ print_expression_declaration
                     s(">"),
                     s(">="),
                     
-                    s("~"),
                     s("|"),
                     s("&"),
                     s("^"),
-                    s(">>"),
                     s("<<"),
+                    s(">>"),
                     
                     s("+"),
                     s("-"),

@@ -352,10 +352,84 @@ def platform_write_entire_file func(platform platform_api ref; path string; data
     return true;
 }
 
-
 // for convenience
 def as_cstring func(text string; location = get_call_location()) (result cstring)
 {
     assert(text[text.count - 1] is 0, "text needs to be 0-terminated", location);
     return text.base cast(cstring);
+}
+
+def memory_arena struct
+{
+    used_count   usize;
+    commit_count usize;
+    total_count  usize;
+    base         u8 ref;
+}
+
+def init func(arena memory_arena ref; total_count = 2 cast(usize) bit_shift_left 30; commit_count = 20 cast(usize) bit_shift_left 20; location = get_call_location())
+{
+    assert(arena.commit_count <= arena.total_count, location);
+    
+    arena.commit_count = commit_count;
+    arena.total_count = total_count;
+    arena.base = VirtualAlloc(null, total_count, MEM_RESERVE, PAGE_NOACCESS);
+    platform_require(arena.base, location);
+    platform_require(VirtualAlloc(arena.base, arena.commit_count, MEM_COMMIT, PAGE_READWRITE), location);
+}
+
+def clear func(arena memory_arena ref)
+{
+    arena.used_count = 0;
+}
+
+def free func(arena memory_arena ref; location = get_call_location())
+{
+    platform_require(VirtualFree(arena.base, 0, MEM_RELEASE), location);
+}
+
+def allocate func(arena memory_arena ref; type lang_type_info; location = get_call_location()) (result u8 ref)
+{
+    return allocate(arena, type.byte_count, type.byte_alignment, location);
+}
+
+def allocate_array func(arena memory_arena ref; type lang_type_info; count usize; location = get_call_location()) (result u8 ref)
+{
+    return allocate(arena, type.byte_count * count, type.byte_alignment, location);
+}
+
+def allocate func(arena memory_arena ref; byte_count usize; byte_alignment u32; location = get_call_location()) (result u8 ref)
+{
+    assert(((byte_alignment - 1) bit_and byte_alignment) is 0, location);
+    
+    if not byte_count
+        return null;
+    
+    var base = ((arena.base cast(usize) + byte_alignment - 1) bit_and bit_not (byte_alignment cast(usize))) cast(u8 ref);
+    var padding = (base - arena.base) cast(usize);
+
+    arena.used_count = arena.used_count + padding + byte_count;
+
+    if arena.used_count > arena.commit_count
+    {
+        platform_require(arena.used_count <= arena.total_count, location);
+        
+        var commit_count = arena.commit_count bit_shift_left 1;
+        if commit_count > arena.total_count
+            commit_count = arena.total_count;
+            
+        platform_require(VirtualAlloc(arena.base + arena.commit_count, commit_count - arena.commit_count, MEM_COMMIT, PAGE_READWRITE), location);
+        arena.commit_count = commit_count;
+    }
+    
+    return base;
+}
+
+def free func(arena memory_arena ref; base u8 ref; location = get_call_location())
+{
+    if not base
+        return;
+    
+    arena.used_count = (base - arena.base) cast(usize);
+    assert(arena.used_count <= arena.commit_count);
 }

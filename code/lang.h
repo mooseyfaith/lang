@@ -58,6 +58,7 @@
     
 #define ast_unary_operator_list(macro, ...) \
     macro(not, __VA_ARGS__) \
+    macro(bit_not, __VA_ARGS__) \
     macro(negate, __VA_ARGS__) \
     macro(take_reference, __VA_ARGS__) \
     macro(cast, __VA_ARGS__) \
@@ -74,7 +75,6 @@
     macro(is_greater, __VA_ARGS__) \
     macro(is_greater_equal, __VA_ARGS__) \
     \
-    macro(bit_not, __VA_ARGS__) \
     macro(bit_or, __VA_ARGS__) \
     macro(bit_and, __VA_ARGS__) \
     macro(bit_xor, __VA_ARGS__) \
@@ -1816,9 +1816,19 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
     {
         {
             auto backup = *parser;
-            
             auto keyword = consume_name(parser);
-            if (keyword == s("not"))
+            
+            u32 type = -1;
+            for (u32 i = 0; i <= ast_unary_operator_type_bit_not; i++)
+            {
+                if (keyword == ast_unary_operator_names[i])
+                {
+                    type = i;
+                    break;
+                }
+            }
+                
+            if (type != -1)
             {
                 if (pending_minus)
                 {
@@ -1832,15 +1842,16 @@ ast_node * parse_base_expression(lang_parser *parser, complete_type_info type)
                 }
             
                 new_local_node(unary_operator);
-                unary_operator->operator_type = ast_unary_operator_type_not;
+                unary_operator->operator_type = (ast_unary_operator_type) type;
                 
                 parent = get_base_node(unary_operator);
                 *parent_expression = parent;
                 parent_expression = &unary_operator->expression;
-                continue;
             }
-            
-            *parser = backup;
+            else
+            {
+                *parser = backup;
+            }
         }
         
         if (try_consume(parser, s("-")))
@@ -2249,7 +2260,6 @@ parse_expression_declaration
                 s("is_greater"),
                 s("is_greater_equal"),
                 
-                s("bit_not"),
                 s("bit_or"),
                 s("bit_and"),
                 s("bit_xor"),
@@ -4018,7 +4028,7 @@ maybe_add_cast_declaration
     
     ast_node *new_expression = null;
     ast_node *new_parent = null;
-    if (is_node_type(expression, number))
+    if (!type.name_type.indirection_count && is_node_type(expression, number))
     {
         local_node_type(number, expression);
         local_node_type(number_type, type.base_type.node);
@@ -4051,7 +4061,7 @@ maybe_add_cast_declaration
         number->value.bit_count_power_of_two = number_type->bit_count_power_of_two;
         return true;
     }
-    else if (is_node_type(type.base_type.node, array_type))
+    else if (!type.name_type.indirection_count && is_node_type(type.base_type.node, array_type))
     {
         auto expression_type = get_expression_type(parser, expression);
         local_node_type(array_type, expression_type.base_type.node);
@@ -4085,6 +4095,19 @@ maybe_add_cast_declaration
             
             new_parent = get_base_node(field_dereference);
         }
+    }
+    else if (!type.name_type.indirection_count && (type.name_type.node == get_type(parser, lang_base_type_b8).name_type.node))
+    {
+        new_local_named_node(is_not, binary_operator, parser->node_locations.base[expression->index].text);
+        is_not->node.parent = parent;
+        is_not->node.next   = expression->next;
+        is_not->operator_type = ast_binary_operator_type_is_not;
+        // order is important, expression->next needs to remain
+        is_not->left = get_base_node(new_number_u64(parser, parser->node_locations.base[expression->index].text, 0));
+        is_not->left->next = expression;
+        
+        new_parent     = get_base_node(is_not);
+        new_expression = get_base_node(is_not);
     }
     else if (!type.name_type.indirection_count && (type.name_type.node == get_type(parser, lang_base_type_lang_type_and_value).name_type.node))
     {
@@ -5299,11 +5322,19 @@ ast_function * find_matching_function(lang_parser *parser, ast_function_overload
         auto function = function_reference->function;
         local_node_type(function_type, function->type.base_type.node);
         
-        // no arguments
-        if (!function_type->input.base_type.node && !first_call_argument)
+        // no input arguments
+        if (!function_type->input.base_type.node)
         {
-            matching_function = function;
-            break;
+            // no call arguments
+            if (!first_call_argument)
+            {
+                matching_function = function;
+                break;
+            }
+            else
+            {
+                continue;
+            }
         }
         
         auto function_input    = get_node_type(compound_type, function_type->input.base_type.node);
@@ -6514,9 +6545,16 @@ void resolve(lang_parser *parser)
                     auto function = function_reference->function;
                     local_node_type(function_type, function->type.base_type.node);
                     
-                    auto function_input = get_node_type(compound_type, function_type->input.base_type.node);
                     // print whole token
                     print_line(error_messages, "%.*s func%.*s", fs(function->name), fs(parser->node_locations.base[function_type->node.index].text));
+                    
+                    if (!function_type->input.base_type.node)
+                    {
+                        print_line(error_messages, "too many arguments");
+                        continue;
+                    }
+                    
+                    auto function_input = get_node_type(compound_type, function_type->input.base_type.node);
                     
                     auto call_argument  = function_call->first_argument;
                     auto input_argument = function_input->first_field;

@@ -11,6 +11,8 @@ def GetLastError            func() (result u32)                       calling_co
 def ExitProcess             func(uExitCode u32)                       calling_convention "__stdcall" extern_binding("kernel32", true);
 def GetSystemTimeAsFileTime func(lpSystemTimeAsFileTime FILETIME ref) calling_convention "__stdcall" extern_binding("kernel32", true);
 
+def VirtualAlloc func(lpAddress u8 ref; dwSize usize; flAllocationType u32; flProtect u32) (result u8 ref)  calling_convention "__stdcall" extern_binding("kernel32", true);
+def VirtualFree func(lpAddress u8 ref; dwSize usize; dwFreeType u32) (result u32) calling_convention "__stdcall" extern_binding("kernel32", true);
 def GetFileAttributesExA func(lpFileName cstring; fInfoLevelId s32; lpFileInformation u8 ref) (result s32) calling_convention "__stdcall" extern_binding("kernel32", true);
 def CreateFileA func(lpFileName cstring; dwDesiredAccess u32; dwShareMode u32; lpSecurityAttributes u8 ref; dwCreationDisposition u32; dwFlagsAndAttributes u32; hTemplateFile HANDLE) (result HANDLE) calling_convention "__stdcall" extern_binding("kernel32", true);
 def ReadFile func(hFile HANDLE; lpBuffer u8 ref; nNumberOfBytesToRead u32; lpNumberOfBytesRead u32 ref; lpOverlapped u8 ref) (result s32) calling_convention "__stdcall" extern_binding("kernel32", true);
@@ -154,6 +156,19 @@ def COLOR_BACKGROUND = 1 cast(s32);
 def CW_USEDEFAULT = 0x80000000 cast(s32);
 
 def WS_OVERLAPPEDWINDOW = 0x00CF0000 cast(u32);
+
+def MEM_COMMIT  = 0x00001000 cast(u32);
+def MEM_RESERVE = 0x00002000 cast(u32);
+
+def MEM_DECOMMIT = 0x00004000 cast(u32);
+def MEM_RELEASE  = 0x00008000 cast(u32);
+
+
+def PAGE_NOACCESS          = 0x01 cast(u32);
+def PAGE_EXECUTE           = 0x10 cast(u32);
+def PAGE_EXECUTE_READ      = 0x20 cast(u32);
+def PAGE_READWRITE         = 0x04 cast(u32);
+def PAGE_EXECUTE_READWRITE = 0x40 cast(u32);
 
 def SW_HIDE             = 0 cast(u32);
 def SW_SHOWNORMAL       = 1 cast(u32);

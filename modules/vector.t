@@ -94,6 +94,29 @@ def scale func(a vec2; b vec2) (result vec2)
     return result;
 }
 
+def dot func(a vec2; b vec2) (result f32)
+{
+    var result = a[0] * b[0];
+    loop var i = 1; a.count
+    {
+        result = (a[i] * b[i]) + result;
+    }
+    
+    return result;
+}
+
+def squared_length func(vector vec2) (result f32)
+{
+    var result = dot(vector, vector);
+    return result;
+}
+
+def length func(vector vec2) (result f32)
+{
+    var result = sqrt(squared_length(vector));
+    return result;
+}
+
 // vec3
 
 def add func(a vec3; b f32) (result vec3)
